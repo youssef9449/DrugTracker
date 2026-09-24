@@ -4,7 +4,7 @@ import { getTodayDateString, isDoseConsumedOnDate } from '../utils/dateCalculati
 import { stopAllSounds } from '../utils/sound';
 import { loadJson, saveJson } from '../utils/storage';
 import { DEFAULT_SNOOZE_MINUTES, MS_PER_MINUTE } from '../utils/time';
-import { scheduleSnoozedDoseReminder } from '../utils/notifications/doseReminderNotifications';
+import { scheduleSnoozedDoseReminder, cancelSnoozedDoseReminder } from '../utils/notifications/doseReminderNotifications';
 import {
   bumpDoseReminderSnoozeGeneration,
   isCurrentDoseReminderSnoozeGeneration,

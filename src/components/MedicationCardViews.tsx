@@ -3,13 +3,14 @@ import type { Medication, ConsumptionLog } from '../types';
 import { calculateMedicationStatus } from '../utils/medicationStatus';
 import { getHistoricalRestoreDisplayAmount } from '../utils/medActions';
 import { pluralizeArabic } from '../lib/arabicPlural';
-import { getTodayDateString, DAYS_PER_MONTH } from '../utils/time';
+import { getTodayDateString } from '../utils/dateCalculations';
+import { DAYS_PER_MONTH } from '../utils/time';
 import { formatDepletionDate } from '../utils/medicationPresentation';
 import { getCardDoseToggleTarget } from '../utils/doseSchedule';
 import { Pill, Plus, Calendar, AlertCircle, CheckCircle2, CheckCircle, RotateCcw, ShoppingCart, Clock, ListChecks } from 'lucide-react';
 import { MedicationMenu, MedicationOverflowMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
-import { StripsBadge, PackageSizeBadge, AutoDeductPausedNote, AutoDeductStatusBadge, MedicationNotificationStatusBadge } from './medicationCardParts';
+import { StripsBadge, PackageSizeBadge, AutoDeductPausedNote } from './medicationCardParts';
 
 type StatusInfo = ReturnType<typeof calculateMedicationStatus>;
 type Depletion = ReturnType<typeof import('../utils/dateCalculations').getDepletionDate>;
@@ -53,7 +54,7 @@ function shortDepletionLabel(depletion: { dateStr: string; daysLeft: number }, i
 }
 
 export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => {
-  const { medication, isAutoActive, statusInfo, depletion, isSolid, hasStrips, currentPills, stripsDesc, nonSolidPackageDesc, tag, percentLeft, getProgressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onNavigateToShopping, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
+  const { medication, isAutoActive, statusInfo, depletion, isSolid, hasStrips, currentPills, stripsDesc, tag, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onNavigateToShopping, onOpenHistory, onRegisterBackHandler } = props;
   const isOut = statusInfo.status === 'out_of_stock';
   const isCrit = statusInfo.status === 'critical';
   return (
@@ -108,7 +109,7 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
             <span className="font-medium px-1.5 py-0.2 rounded text-[10px] shrink-0 bg-blue-50 text-blue-800 border border-blue-200">
               كورس {medication.durationDays} يوم
             </span>
-          ) : medication.isChronic !== false ? (
+          ) : medication.isChronic === true ? (
             <span className="font-medium px-1.5 py-0.2 rounded text-[10px] shrink-0 bg-slate-100 text-slate-600 border border-slate-200">
               مزمن
             </span>
@@ -208,7 +209,7 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
 };
 
 export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props) => {
-  const { medication, isAutoActive, statusInfo, depletion, isSolid, hasStrips, currentPills, stripsDesc, nonSolidPackageDesc, tag, percentLeft, getProgressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onNavigateToShopping, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
+  const { medication, isAutoActive, statusInfo, depletion, isSolid, hasStrips, currentPills, stripsDesc, tag, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onOpenHistory, onRegisterBackHandler } = props;
   const safeDays = statusInfo.daysLeft;
   const monthlyUsage = medication.dailyDose * DAYS_PER_MONTH;
   return (
@@ -314,7 +315,7 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
           <span className="text-[11px]">مخزونك يكفي حتى:</span>
         </div>
         <span className="font-bold text-[11px] text-emerald-900 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
-          {depletion.formattedArabic} ({safeDays} يوم أمان)
+          {formatDepletionDate(depletion.dateStr, depletion.daysLeft, currentPills)} ({safeDays} يوم أمان)
         </span>
       </div>
       {/* Scheduled Reminder Badge (extracted — see ReminderBadge.tsx) */}
@@ -331,13 +332,14 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
 };
 
 export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) => {
-  const { medication, isAutoActive, statusInfo, depletion, isSolid, hasStrips, currentPills, stripsDesc, nonSolidPackageDesc, tag, percentLeft, getProgressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onNavigateToShopping, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
+  const { medication, isAutoActive, statusInfo, depletion, currentPills, tag, percentLeft, getProgressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
   const isOut = statusInfo.status === 'out_of_stock';
   const isCrit = statusInfo.status === 'critical';
   const isWarn = statusInfo.status === 'warning';
+  const isTemporaryCourse = medication.isChronic === false;
   const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
   const todayStr = getTodayDateString();
-  const manualRestoreAmount = getHistoricalRestoreDisplayAmount(medication.id, doseToggle.doseId, logs, todayStr);
+  const manualRestoreAmount = getHistoricalRestoreDisplayAmount(logs, medication.id, doseToggle.doseId, todayStr);
   const takeAmount = doseToggle.amount;
   return (
     <div
@@ -371,7 +373,7 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
           <span className="text-[8px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-blue-50 text-blue-800 border border-blue-200">
             كورس {medication.durationDays} يوم
           </span>
-        ) : medication.isChronic !== false ? (
+        ) : medication.isChronic === true ? (
           <span className="text-[8px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-slate-100 text-slate-600 border border-slate-200">
             مزمن
           </span>
@@ -496,7 +498,7 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
             <Clock className="w-2 h-2 text-teal-600" />
             <span>{medication.dailyDose}/ي</span>
           </div>
-          <div className="flex min-w-0 max-w-full items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 text-slate-600" title={`النفاذ: ${depletion.formattedArabic}`}>
+          <div className="flex min-w-0 max-w-full items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 text-slate-600" title={`النفاذ: ${formatDepletionDate(depletion.dateStr, depletion.daysLeft, currentPills)}`}>
             <Calendar className="w-2 h-2 text-slate-400 shrink-0" />
             <span className="truncate">{shortDepletionLabel(depletion, isOut)}</span>
           </div>
@@ -521,13 +523,14 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
 };
 
 export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) => {
-  const { medication, isAutoActive, statusInfo, depletion, isSolid, hasStrips, currentPills, stripsDesc, nonSolidPackageDesc, tag, percentLeft, getProgressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onNavigateToShopping, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
+  const { medication, isAutoActive, statusInfo, depletion, currentPills, stripsDesc, nonSolidPackageDesc, tag, percentLeft, getProgressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
   const isOut = statusInfo.status === 'out_of_stock';
   const isCrit = statusInfo.status === 'critical';
   const isWarn = statusInfo.status === 'warning';
+  const isTemporaryCourse = medication.isChronic === false;
   const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
   const todayStr = getTodayDateString();
-  const manualRestoreAmount = getHistoricalRestoreDisplayAmount(medication.id, doseToggle.doseId, logs, todayStr);
+  const manualRestoreAmount = getHistoricalRestoreDisplayAmount(logs, medication.id, doseToggle.doseId, todayStr);
   const takeAmount = doseToggle.amount;
   return (
     <div
@@ -567,7 +570,7 @@ export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) =
           <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-blue-50 text-blue-800 border border-blue-200">
             كورس {medication.durationDays} يوم
           </span>
-        ) : medication.isChronic !== false ? (
+        ) : medication.isChronic === true ? (
           <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-slate-100 text-slate-600 border border-slate-200">
             مزمن
           </span>

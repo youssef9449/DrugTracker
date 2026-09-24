@@ -1,6 +1,7 @@
 import { Bell } from 'lucide-react';
 import type { Medication } from '../types';
 import { formatTimeArabic } from '../utils/medicationPresentation';
+import { getDoseScheduleForUI } from '../utils/doseSchedule';
 
 /**
  * The "daily reminder" row shared by the three MedicationCard render
@@ -24,7 +25,8 @@ export function ReminderBadge({
   containerClass,
   textClass,
 }: ReminderBadgeProps) {
-  if (!medication.reminderEnabled || !medication.reminderTime) return null;
+  const firstDose = getDoseScheduleForUI(medication)[0];
+  if (!medication.reminderEnabled || !firstDose) return null;
 
   return (
     <div
@@ -32,7 +34,7 @@ export function ReminderBadge({
     >
       <Bell className="w-3.5 h-3.5 shrink-0" />
       <span className={`font-bold text-[11px] ${textClass}`}>
-        تنبيه يومي: {formatTimeArabic(medication.reminderTime)}
+        تنبيه يومي: {formatTimeArabic(firstDose.time)}
       </span>
     </div>
   );

@@ -1,4 +1,5 @@
 import { __setAutoStockGateTestHooks } from './autoStockTestHooks';
+import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import { makeMedication as baseMed, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';

@@ -84,6 +84,8 @@ public class OccurrenceSnapshotPersistFailureTest {
             assertTrue(raw != null
                     && AutoDeductionContract.STATUS_FIRED.equals(
                             new JSONObject(raw).optString("status")));
+        } catch (Exception e) {
+            throw new AssertionError(e);
         }
     }
 
@@ -111,6 +113,8 @@ public class OccurrenceSnapshotPersistFailureTest {
                     "schedule metadata must not mask a ledger persistence failure",
                     snap.ok);
             assertEquals("rejected_persist_failed", snap.error);
+        } catch (Exception e) {
+            throw new AssertionError(e);
         }
     }
 
@@ -134,6 +138,8 @@ public class OccurrenceSnapshotPersistFailureTest {
                     "cancellation must not mask a ledger persistence failure",
                     snap.ok);
             assertEquals("rejected_persist_failed", snap.error);
+        } catch (Exception e) {
+            throw new AssertionError(e);
         }
     }
 
@@ -151,6 +157,8 @@ public class OccurrenceSnapshotPersistFailureTest {
                             Phase2TestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
             assertFalse(snap.ok);
             assertEquals("rejected_persist_failed", snap.error);
+        } catch (Exception e) {
+            throw new AssertionError(e);
         }
 
         // Once persistence works again, the row terminalizes to REJECTED and

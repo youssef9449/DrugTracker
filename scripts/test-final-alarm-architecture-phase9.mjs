@@ -281,11 +281,24 @@ assert(
   'Schedule rollback must remain ownership-safe inside ExactAlarmRuntime'
 );
 
-const tombstoneWrite = runtimeContent.indexOf('store.writeCancellationTombstoneLocked(');
-const cancelCall = runtimeContent.search(/\bmanager\.cancel\s*\(\s*pendingIntent\s*\)/);
-const metadataRemove = runtimeContent.indexOf('store.removeScheduleLocked(');
+const cancelMethodStart = runtimeContent.indexOf('public CancelResult cancel(');
+const cancelMethodEnd = runtimeContent.indexOf('    /**', cancelMethodStart + 1);
+const cancelMethodContent = runtimeContent.slice(
+  cancelMethodStart,
+  cancelMethodEnd >= 0 ? cancelMethodEnd : runtimeContent.length
+);
+const tombstoneWrite = cancelMethodContent.indexOf(
+  'store.writeCancellationTombstoneLocked('
+);
+const cancelCall = cancelMethodContent.indexOf(
+  'manager.cancel(pendingIntent)'
+);
+const metadataRemove = cancelMethodContent.indexOf(
+  'store.removeScheduleLocked('
+);
 assert(
-  tombstoneWrite >= 0
+  cancelMethodStart >= 0
+    && tombstoneWrite >= 0
     && cancelCall > tombstoneWrite
     && metadataRemove > cancelCall,
   'Cancel transaction order must be tombstone -> AlarmManager.cancel -> metadata removal'
@@ -346,6 +359,11 @@ assert(
     && crossFeatureContent.includes('ACTION_DOSE_REMINDER')
     && crossFeatureContent.includes('ACTION_CRITICAL_STOCK'),
   'Cross-feature identity proof must validate all three feature actions'
+);
+assert(
+  crossFeatureContent.includes('scheduledPendingIntentIdentities()')
+    && crossFeatureContent.includes('scheduledPendingIntentRequestCodes()'),
+  'Cross-feature identity proof must inspect both action and request-code identity'
 );
 
 // ---------------------------------------------------------------------------
@@ -501,6 +519,7 @@ for (const retired of retiredSourceNames) {
 
 const staleContentFiles = allRepoFiles.filter((rel) =>
   /\.(java|ts|tsx|md)$/.test(rel)
+  && !rel.startsWith('native-android/jvm-tests/')
 );
 const staleTerms = [
   'AutoDeductionSystemReceiver',

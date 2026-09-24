@@ -38,9 +38,9 @@ const mocks = vi.hoisted(() => ({
   verify: vi.fn(),
 }));
 
-vi.mock('@/utils/notifications', async () => {
-  const actual = await vi.importActual<typeof import('@/utils/notifications')>(
-    '@/utils/notifications'
+vi.mock('../utils/notificationTestFacade', async () => {
+  const actual = await vi.importActual<typeof import('../utils/notificationTestFacade')>(
+    '../utils/notificationTestFacade'
   );
   return {
     ...actual,
@@ -50,7 +50,7 @@ vi.mock('@/utils/notifications', async () => {
   };
 });
 
-import { scheduleCriticalAlarm, cancelCriticalAlarm, verifyCriticalAlarmPending } from '@/utils/notifications';
+import { scheduleCriticalAlarm, cancelCriticalAlarm, verifyCriticalAlarmPending } from '../utils/notificationTestFacade';
 
 const scheduleMock = vi.mocked(scheduleCriticalAlarm);
 const cancelMock = vi.mocked(cancelCriticalAlarm);

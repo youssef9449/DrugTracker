@@ -1,12 +1,7 @@
 import { useState, useMemo, useEffect, type FC } from 'react';
-import {
-  MessageCircle,
-  ExternalLink,
-  X,
-} from 'lucide-react';
+import { MessageCircle } from 'lucide-react';
 import type { Medication, PharmacySettings } from '../types';
 import { calculateMedicationStatus } from '../utils/medicationStatus';
-import { describeOrderInBoxes } from '../utils/medicationPackaging';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import {
   cleanPhoneNumber,
@@ -17,8 +12,6 @@ import {
   buildWhatsAppUrl,
 } from '../utils/whatsapp';
 import { getMedSizes } from '../utils/medicationPackaging';
-import { Checkbox } from './ui/Checkbox';
-import { SegmentedButton } from './ui/SegmentedButton';
 import { PharmacyShoppingSendModal } from './PharmacyShoppingSendModal';
 import { PharmacyShoppingMedicationRow } from './PharmacyShoppingMedicationRow';
 function shoppingDurationDays(
@@ -101,10 +94,6 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
   const [medicationPeriods, setMedicationPeriods] = useState<Record<string, MedicationPeriod>>({});
   const [quantityModes, setQuantityModes] = useState<Record<string, QuantityMode>>({});
   const [customOrderQuantities, setCustomOrderQuantities] = useState<CustomOrderQuantities>({});
-  useEffect(() => {
-    if (!isSendModalOpen || !onRegisterBackHandler) return;
-    return onRegisterBackHandler('shopping-send-order', () => setIsSendModalOpen(false), 100);
-  }, [isSendModalOpen, onRegisterBackHandler]);
   const pharmacies = settings.pharmacies || [];
   const selectedPharmacy = pharmacies.find((pharmacy) => pharmacy.id === settings.selectedPharmacyId)
     || pharmacies[0];
@@ -304,7 +293,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       };
     });
   };
-  const handleToggleOrderUnit = (med: Medication, unit: OrderUnit, suggestedPills: number) => {
+  const handleToggleOrderUnit = (med: Medication, unit: OrderUnit, _suggestedPills: number) => {
     const selected = getSelectedUnits(med);
     if (getQuantityMode(med) !== 'custom') {
       // "حسب الفترة" keeps the existing single-unit display selection.
@@ -364,8 +353,8 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     }
     return pluralizeArabic(count, 'شريط');
   }
-  function getOrderBreakdown(med: Medication, suggestedPills: number) {
-    if (getQuantityMode(med) !== 'custom') return undefined;
+  function getOrderBreakdown(med: Medication, suggestedPills: number): { unit: OrderUnit; quantity: number }[] {
+    if (getQuantityMode(med) !== 'custom') return [];
     return getSelectedUnits(med)
       .map((unit) => ({
         unit,
@@ -399,6 +388,10 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       });
   }, [displayList, selectedMedIds, medicationPeriods, quantityModes, customOrderQuantities, orderUnits, settings.defaultDurationDays]);
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+  useEffect(() => {
+    if (!isSendModalOpen || !onRegisterBackHandler) return;
+    return onRegisterBackHandler('shopping-send-order', () => setIsSendModalOpen(false), 100);
+  }, [isSendModalOpen, onRegisterBackHandler]);
   const orderItemsForMessage = useMemo((): OrderItem[] => {
     if (activeOrderItems.length > 0) return activeOrderItems;
     return medications.map((med) => {

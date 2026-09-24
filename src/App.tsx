@@ -22,6 +22,8 @@ import { OrderItem } from './utils/whatsapp';
 import type { ExactAlarmPermission } from './utils/exactAlarm';
 import type { MedicationSortField, MedicationSortDirection } from './utils/medicationSorting';
 import { TOAST_DURATION_MS } from './utils/time';
+import { TOAST_MESSAGES } from './constants/uiStrings';
+import { playSuccessChime } from './utils/sound';
 
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useAppRuntime } from './hooks/useAppRuntime';
@@ -219,7 +221,6 @@ export default function App() {
     handleSaveMedication,
     handleDeleteMedication,
     handleTakeDoseFromAlarm,
-    handleTakeDoseFromAlarmById,
     handleSnoozeFromAlarm,
     handleConsumeDose,
     handleCardRestoreDose,

@@ -24,6 +24,8 @@ import androidx.core.app.NotificationManagerCompat;
 public final class NotificationRuntime {
     public static final String ACTION_NOTIFICATION_POSTED =
             "app.drugtracker.notificationruntime.NOTIFICATION_POSTED";
+    public static final String ACTION_ACTION_PERFORMED =
+            "app.drugtracker.notificationruntime.ACTION_PERFORMED";
     public static final String EXTRA_NAMESPACE = "notificationNamespace";
     public static final String EXTRA_IDENTITY = "notificationIdentity";
     public static final String EXTRA_ACTION_ID = "notificationActionId";

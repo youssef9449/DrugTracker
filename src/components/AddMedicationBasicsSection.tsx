@@ -149,18 +149,18 @@ export const AddMedicationBasicsSection: FC<Props> = ({
             حساب الرصيد بدلالة العلب والأشرطة الموجودة في الصيدلية المنزلية:
           </p>
           <div className="grid grid-cols-3 gap-2">
-            {[
+            {([
               ['علب كاملة', helperBoxes, setHelperBoxes],
               ['أشرطة إضافية', helperStrips, setHelperStrips],
               ['حبات منفردة', helperLoose, setHelperLoose],
-            ].map(([label, value, setter]) => (
+            ] as Array<[string, string, (value: string) => void]>).map(([label, value, setter]) => (
               <div key={label as string}>
                 <label className="block text-[10px] text-slate-600 mb-0.5">{label}</label>
                 <input
                   type="number"
                   min="0"
-                  value={value as string}
-                  onChange={(e) => (setter as (value: string) => void)(e.target.value)}
+                  value={value}
+                  onChange={(e) => setter(e.target.value)}
                   className="w-full px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-mono text-center focus:ring-1 focus:ring-teal-500"
                 />
               </div>

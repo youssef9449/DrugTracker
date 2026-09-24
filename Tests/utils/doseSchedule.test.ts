@@ -280,7 +280,7 @@ describe('doseSchedule helpers', () => {
     expect(result.schedule?.map((d) => d.id)).toEqual(['a', 'b', 'c']);
     expect(result.dailyDose).toBe(4);
     expect(result.dosesPerDay).toBe(3);
-    expect(result.reminderTime).toBe('08:00');
+    expect(result.schedule?.[0]?.time).toBe('08:00');
   });
 
   it('sortDoseSchedule is deterministic', () => {

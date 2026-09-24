@@ -5,6 +5,7 @@ import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableSta
 import static app.drugtracker.autodeduction.Phase2TestSupport.evtKey;
 import static app.drugtracker.autodeduction.Phase2TestSupport.eventPrefs;
 import static app.drugtracker.autodeduction.Phase2TestSupport.newScheduler;
+import static app.drugtracker.autodeduction.Phase2TestSupport.newSchedulerAt;
 import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
 import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
 import static org.junit.Assert.assertEquals;

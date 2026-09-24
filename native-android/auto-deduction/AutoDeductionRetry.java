@@ -22,7 +22,7 @@ boolean scheduleFireRetry(
             long scheduledAtEpochMs,
             double amount,
             String timeHhmm,
-            String treatmentEndDate,
+            String requestedTreatmentEndDate,
             long recurrenceGeneration,
             String operationVersion,
             int nextRetryCount
@@ -38,7 +38,7 @@ boolean scheduleFireRetry(
         final String key = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
         final String prefKey = key;
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             if (scheduler.isOccurrenceCancelledKey(key)) {
                 return false;
             }
@@ -54,7 +54,11 @@ boolean scheduleFireRetry(
                     nextRetryCount);
             String treatmentEndDate = current != null
                     ? current.treatmentEndDate
-                    : (existingEvidence == null ? "" : existingEvidence.treatmentEndDate);
+                    : (requestedTreatmentEndDate == null ? "" : requestedTreatmentEndDate);
+            if (current == null && (treatmentEndDate == null || treatmentEndDate.isEmpty())
+                    && existingEvidence != null) {
+                treatmentEndDate = existingEvidence.treatmentEndDate;
+            }
             if (current != null) {
                 long activeGen =
                         scheduler.getRecurrenceGenerationLocked(medicationId, doseId);
@@ -130,6 +134,7 @@ boolean recordIndependentFireRetryEvidenceLocked(
                             scheduledAtEpochMs,
                             amount,
                             timeHhmm,
+                            treatmentEndDate,
                             recurrenceGeneration,
                             operationVersion,
                             count,
@@ -165,7 +170,7 @@ void clearIndependentFireRetryEvidenceAfterStock(
         if (medicationId == null || doseId == null || calendarDate == null) return;
         String key = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             clearIndependentFireRetryEvidenceLocked(key);
         }
     }
@@ -183,7 +188,7 @@ public FireResult recoverFireFromIndependentEvidence(
 
         final String key = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             AutoDeductionPersistenceModels.RetryEvidenceRecord evidence =
                     evidenceStore.get(medicationId, doseId, calendarDate);
             if (evidence == null) {
@@ -193,29 +198,39 @@ public FireResult recoverFireFromIndependentEvidence(
                 return new FireResult(FireResult.Status.FAILED, false);
             }
 
-            // Independent retry evidence may survive longer than the one-shot
-            // delivery. It is not an authorization token by itself: before any
-            // FIRED record or Native stock mutation is allowed, prove that the
-            // evidence still belongs to the currently authorized schedule.
-            // A missing/replaced schedule means the old retry must never resurrect
-            // an occurrence after disable/edit/replacement.
-            if (scheduler.isOccurrenceCancelledKey(key)) {
-                clearIndependentFireRetryEvidenceLocked(key);
-                return FireResult.cancelled();
-            }
+            // Independent retry evidence is durable proof that the fire delivery
+            // reached the Auto fire boundary. A later cancellation or replacement
+            // may invalidate recurrence continuation, but it must not erase the
+            // already-authorized occurrence or prevent its Native stock recovery.
+            final boolean occurrenceCancelled =
+                    scheduler.isOccurrenceCancelledKey(key);
             AutoDeductionPersistenceModels.ScheduleRecord current =
                     scheduler.schedulingAdapter().getScheduleRecord(key);
             long activeGeneration = scheduler.getRecurrenceGenerationLocked(
                     medicationId, doseId);
+            final boolean ownsCurrentSchedule =
+                    !occurrenceCancelled
+                            && current != null
+                            && evidence.recurrenceGeneration == activeGeneration
+                            && evidence.operationVersion != null
+                            && evidence.operationVersion.equals(current.operationVersion)
+                            && evidence.timeHhmm.equals(current.timeHhmm)
+                            && Double.compare(evidence.amount, current.amount) == 0
+                            && evidence.treatmentEndDate.equals(current.treatmentEndDate);
+
+            // A current schedule that replaced the evidence, or a recurrence
+            // generation that was disabled/revoked, invalidates the retry before
+            // any FIRED row or stock mutation can be created. A missing schedule
+            // with the same active generation is different: it can represent the
+            // one-shot alarm having already been consumed, so its durable evidence
+            // remains recoverable.
+            if (current != null && !ownsCurrentSchedule) {
+                clearIndependentFireRetryEvidenceLocked(key);
+                return FireResult.cancelled();
+            }
             if (current == null
-                    || evidence.recurrenceGeneration != activeGeneration
-                    || !evidence.operationVersion.equals(current.operationVersion)
-                    || !evidence.timeHhmm.equals(current.timeHhmm)
-                    || Double.compare(evidence.amount, current.amount) != 0
-                    || !evidence.treatmentEndDate.equals(current.treatmentEndDate)) {
-                // This evidence no longer owns the current schedule. Retire the
-                // obsolete retry source before returning so later recovery passes
-                // cannot keep rediscovering the same stale obligation.
+                    && activeGeneration > 0L
+                    && evidence.recurrenceGeneration != activeGeneration) {
                 clearIndependentFireRetryEvidenceLocked(key);
                 return FireResult.cancelled();
             }
@@ -248,22 +263,27 @@ public FireResult recoverFireFromIndependentEvidence(
                 return result;
             }
 
-            // The ownership check above proved this is the current schedule.
-            // Reuse its definition rather than letting stale evidence override the
-            // live configuration while rebuilding the successor obligation.
-            String obligationTime = current.timeHhmm;
-            String obligationEndDate = current.treatmentEndDate;
-            String obligationVersion = current.operationVersion;
+            // Only the current schedule owner may continue the recurrence chain.
+            // Historical evidence from a removed/replaced/cancelled source still
+            // receives its one-time Native stock recovery, but it cannot create D+1.
+            String obligationTime = current == null ? "" : current.timeHhmm;
+            String obligationEndDate = current == null
+                    ? evidence.treatmentEndDate
+                    : current.treatmentEndDate;
+            String obligationVersion = current == null
+                    ? evidence.operationVersion
+                    : current.operationVersion;
 
-            if (!scheduler.persistSuccessorObligation(
-                    medicationId,
-                    doseId,
-                    calendarDate,
-                    obligationTime,
-                    evidence.amount,
-                    obligationEndDate,
-                    obligationVersion,
-                    evidence.recurrenceGeneration)) {
+            if (ownsCurrentSchedule
+                    && !scheduler.persistSuccessorObligation(
+                            medicationId,
+                            doseId,
+                            calendarDate,
+                            obligationTime,
+                            evidence.amount,
+                            obligationEndDate,
+                            obligationVersion,
+                            evidence.recurrenceGeneration)) {
                 return new FireResult(FireResult.Status.FAILED, false);
             }
 
@@ -288,9 +308,18 @@ public FireResult recoverFireFromIndependentEvidence(
                 return new FireResult(FireResult.Status.FAILED, false);
             }
 
-            if (!scheduler.markSuccessorObligationStockApplied(
-                    medicationId, doseId, calendarDate)) {
+            if (ownsCurrentSchedule
+                    && !scheduler.markSuccessorObligationStockApplied(
+                            medicationId, doseId, calendarDate)) {
                 return new FireResult(FireResult.Status.FAILED, false);
+            }
+
+            if (!ownsCurrentSchedule) {
+                // The occurrence was historically authorized, but recurrence
+                // ownership is gone. Stock recovery is complete; stop here without
+                // resurrecting a successor from obsolete configuration.
+                clearIndependentFireRetryEvidenceLocked(key);
+                return result;
             }
 
             ScheduleResult successor =

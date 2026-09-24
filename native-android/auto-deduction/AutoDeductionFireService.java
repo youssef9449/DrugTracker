@@ -29,8 +29,8 @@ public FireResult fireOccurrenceIfNotCancelled(
             return new FireResult(FireResult.Status.FAILED, false);
         }
         final String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
-        synchronized (scheduler.scheduleLock()) {
-            // Re-entrant: isOccurrenceCancelledKey also synchronizes on scheduler.scheduleLock().
+        synchronized (AutoDeductionScheduler.class) {
+            // Re-entrant: isOccurrenceCancelledKey also synchronizes on AutoDeductionScheduler.class.
             if (scheduler.isOccurrenceCancelledKey(key)) {
                 Log.i("AutoDeductionScheduler", "fire linearization: CANCELLED wins for " + key);
                 return FireResult.cancelled();
@@ -130,11 +130,8 @@ public FireResult fireOccurrenceIfNotCancelled(
                 // record: keep retry evidence so the exact occurrence can be
                 // reconstructed even if schedule metadata disappears.
                 String timeHhmm = schedule.timeHhmm;
-                String operationVersion = deliveryOperationVersion != null
-                        ? deliveryOperationVersion : schedule.operationVersion;
-                long gen = deliveryRecurrenceGeneration > 0L
-                        ? deliveryRecurrenceGeneration
-                        : scheduler.getRecurrenceGenerationLocked(medicationId, doseId);
+                String operationVersion = deliveryOperationVersion;
+                long gen = deliveryRecurrenceGeneration;
                 scheduler.recordIndependentFireRetryEvidenceLocked(
                         medicationId, doseId, calendarDate, scheduledAtEpochMs,
                         amount, timeHhmm, schedule.treatmentEndDate,
@@ -190,7 +187,7 @@ public FireResult recoverMissedOccurrence(
 
         final String key = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             if (scheduler.isOccurrenceCancelledKey(key)) {
                 Log.i("AutoDeductionScheduler", "recoverMissed: CANCELLED occurrence " + key);
                 return FireResult.cancelled();
@@ -274,7 +271,7 @@ public FireResult recoverMissedOccurrence(
             String fallbackTimeHhmm) {
         final String key = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             if (!scheduler.isRecurrenceGenerationAuthorizedLocked(
                     medicationId, doseId, generation)) {
                 return FireResult.cancelled();

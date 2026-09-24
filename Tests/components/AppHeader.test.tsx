@@ -15,6 +15,8 @@ interface AppHeaderTestProps {
   notificationsEnabled: boolean;
   onToggleNotifications: () => void;
   criticalStockAlertsEnabled: boolean;
+  globalAutoDeductEnabled: boolean;
+  onToggleGlobalAutoDeduct: () => void;
   onToggleCriticalStockAlerts: () => void;
   isPhoneFrame: boolean;
   onTogglePhoneFrame: () => void;
@@ -34,6 +36,8 @@ function renderHeader(overrides: Partial<AppHeaderTestProps> = {}) {
     notificationsEnabled: false,
     onToggleNotifications: vi.fn(),
     criticalStockAlertsEnabled: true,
+    globalAutoDeductEnabled: true,
+    onToggleGlobalAutoDeduct: vi.fn(),
     onToggleCriticalStockAlerts: vi.fn(),
     isPhoneFrame: true,
     onTogglePhoneFrame: vi.fn(),

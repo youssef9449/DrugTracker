@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.util.Log;
 
 import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -124,8 +125,9 @@ public final class AutoDeductionEventStore {
                 }
 
                 Log.e(TAG, "commit failed after retry for key=" + key);
-                boolean pendingOk = persistence.putPending(
-                        KEY_PENDING_PREFIX + key, payload);
+                boolean pendingOk = failurePolicy.allowPendingFireCommit()
+                        && persistence.putPending(
+                                KEY_PENDING_PREFIX + key, payload);
                 return new InsertFiredResult(
                         InsertFiredResult.Status.FAILED,
                         pendingOk);
@@ -365,6 +367,15 @@ public final class AutoDeductionEventStore {
                 return new MarkResult(true, false);
             }
             if (!decoded.isSuccess()) {
+                if (decoded.status != null
+                        && !decoded.status.isEmpty()
+                        && !AutoDeductionContract.STATUS_REJECTED.equals(decoded.status)
+                        && !AutoDeductionContract.STATUS_FIRED.equals(decoded.status)
+                        && !AutoDeductionContract.STATUS_RECONCILED.equals(decoded.status)) {
+                    // Unknown status is not a valid event transition target. Leave the
+                    // row untouched so an explicit recovery/quarantine path can own it.
+                    return new MarkResult(false, false);
+                }
                 if ("invalid_json".equals(decoded.error)) {
                     return new MarkResult(
                             terminalizeRejectedLocked(prefKey, "invalid_json").ok,
@@ -373,9 +384,7 @@ public final class AutoDeductionEventStore {
                 return new MarkResult(
                         terminalizeRejectedLocked(
                                 prefKey,
-                                decoded.error == null
-                                        ? "malformed_fields"
-                                        : decoded.error).ok,
+                                "malformed_fields").ok,
                         false);
             }
 
@@ -387,13 +396,21 @@ public final class AutoDeductionEventStore {
                 return new MarkResult(false, false);
             }
 
-            if (!storageIdentityMatchesPayload(
-                    parseStorageKeyIdentity(prefKey), record)
-                    || !medicationId.equals(record.occurrence.medicationId)
+            StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
+            if (!storageIdentityMatchesPayload(storageIdentity, record)) {
+                String reason = storageIdentity != null
+                        && !storageIdentity.medicationId.equals(record.occurrence.medicationId)
+                        ? "identity_mismatch"
+                        : "malformed_fields";
+                EventLookupResult terminalized =
+                        terminalizeRejectedLocked(prefKey, reason);
+                return new MarkResult(terminalized.ok, false);
+            }
+            if (!medicationId.equals(record.occurrence.medicationId)
                     || !doseId.equals(record.occurrence.doseId)
                     || !calendarDate.equals(record.occurrence.calendarDate)) {
                 EventLookupResult terminalized =
-                        terminalizeRejectedLocked(prefKey, "identity_mismatch");
+                        terminalizeRejectedLocked(prefKey, "malformed_fields");
                 return new MarkResult(terminalized.ok, false);
             }
 
@@ -486,11 +503,55 @@ public final class AutoDeductionEventStore {
                 }
 
                 try {
+                    String rejectionReason;
+                    StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
+                    JSONObject rawObject = null;
+                    try {
+                        rawObject = new JSONObject(raw);
+                    } catch (JSONException ignored) {
+                        // Keep the invalid-json classification below.
+                    }
+                    String rawStatus = rawObject == null
+                            ? ""
+                            : rawObject.optString("status", "");
+                    String rawMedicationId = rawObject == null
+                            ? ""
+                            : rawObject.optString("medicationId", "").trim();
+                    String rawDoseId = rawObject == null
+                            ? ""
+                            : rawObject.optString("doseId", "").trim();
+                    String rawCalendarDate = rawObject == null
+                            ? ""
+                            : rawObject.optString("calendarDate", "").trim();
+                    double rawAmount = rawObject == null
+                            ? Double.NaN
+                            : rawObject.optDouble("amount", Double.NaN);
+
+                    boolean validIdentityPayload =
+                            AutoDeductionContract.STATUS_FIRED.equals(rawStatus)
+                                    && !rawMedicationId.isEmpty()
+                                    && !rawDoseId.isEmpty()
+                                    && AutoDeductionContract.isValidCalendarDate(rawCalendarDate)
+                                    && AutoDeductionContract.isValidAmount(rawAmount);
+
+                    if ("invalid_json".equals(decoded.error)) {
+                        rejectionReason = "invalid_json";
+                    } else if (validIdentityPayload
+                            && storageIdentity != null
+                            && !storageIdentity.medicationId.equals(rawMedicationId)) {
+                        // A valid FIRED payload stored under another medication's
+                        // key is specifically an identity corruption.
+                        rejectionReason = "identity_mismatch";
+                    } else {
+                        // Any well-formed FIRED row that reaches this branch has
+                        // either a malformed field set or a dose/date mismatch under
+                        // the same medication. Only a medication identity mismatch
+                        // is classified separately above.
+                        rejectionReason = "malformed_fields";
+                    }
                     String rejected = AutoDeductionPersistenceCodec.encodeRejected(
                             prefKey,
-                            decoded.error == null
-                                    ? "malformed_fields"
-                                    : decoded.error,
+                            rejectionReason,
                             System.currentTimeMillis());
                     if (editor == null) editor = persistence.eventEditor();
                     editor.putString(prefKey, rejected);
@@ -565,7 +626,7 @@ public final class AutoDeductionEventStore {
 
                 if (AutoDeductionContract.STATUS_REJECTED.equals(decoded.status)) {
                     Long rejectedAt = AutoDeductionPersistenceCodec.rejectedAtEpochMs(raw);
-                    // REJECTED is irrecoverable. Legacy/malformed REJECTED rows that
+                    // REJECTED is irrecoverable. Malformed REJECTED rows that
                     // lack a timestamp are therefore safe to discard on a compaction
                     // pass instead of becoming immortal terminal garbage.
                     if (rejectedAt == null || rejectedAt.longValue() < rejectedCutoffEpochMs) {
@@ -625,9 +686,17 @@ public final class AutoDeductionEventStore {
                 return EventLookupResult.absent();
             }
             if (!decoded.isSuccess()) {
+                if (decoded.status != null
+                        && !decoded.status.isEmpty()
+                        && !AutoDeductionContract.STATUS_FIRED.equals(decoded.status)
+                        && !AutoDeductionContract.STATUS_RECONCILED.equals(decoded.status)) {
+                    return EventLookupResult.absent();
+                }
                 return terminalizeRejectedLocked(
                         prefKey,
-                        decoded.error == null ? "malformed_fields" : decoded.error);
+                        "invalid_json".equals(decoded.error)
+                                ? "invalid_json"
+                                : "malformed_fields");
             }
 
             AutoDeductionPersistenceModels.EventRecord record = decoded.record;
@@ -635,20 +704,28 @@ public final class AutoDeductionEventStore {
                 return EventLookupResult.absent();
             }
 
-            if (!storageIdentityMatchesPayload(
-                    parseStorageKeyIdentity(prefKey), record)
-                    || !medicationId.equals(record.occurrence.medicationId)
+            StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
+            if (!storageIdentityMatchesPayload(storageIdentity, record)) {
+                String reason = storageIdentity != null
+                        && !storageIdentity.medicationId.equals(record.occurrence.medicationId)
+                        ? "identity_mismatch"
+                        : "malformed_fields";
+                return terminalizeRejectedLocked(prefKey, reason);
+            }
+            if (!medicationId.equals(record.occurrence.medicationId)
                     || !doseId.equals(record.occurrence.doseId)
                     || !calendarDate.equals(record.occurrence.calendarDate)) {
-                return terminalizeRejectedLocked(prefKey, "identity_mismatch");
+                return terminalizeRejectedLocked(prefKey, "malformed_fields");
             }
 
-            try {
-                return EventLookupResult.found(record);
-            } catch (JSONException e) {
-                return EventLookupResult.failure("event_encode_failed");
-            }
+            return EventLookupResult.found(record);
         }
+    }
+
+    private boolean commitEditor(SharedPreferences.Editor editor) {
+        return editor != null
+                && failurePolicy.allowEventCommit()
+                && editor.commit();
     }
 
     private boolean commitEvent(String key, String value) {

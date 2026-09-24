@@ -11,6 +11,7 @@ import static app.drugtracker.autodeduction.Phase2TestSupport.newScheduler;
 import static app.drugtracker.autodeduction.Phase2TestSupport.pendingPrefs;
 import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
 import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
+import static app.drugtracker.autodeduction.Phase2TestSupport.seedAutoStock;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -110,6 +111,7 @@ public class FireVsCancelTest {
     @Test
     public void fireFirst_createsFired_laterCancelDoesNotEraseFired() throws Exception {
         String date = futureCalendarDate(3);
+        seedAutoStock("med", 10.0);
         AutoDeductionScheduler s = newScheduler();
         assertTrue(s.scheduleOccurrence(
                 "med", "dose", date, "13:00", 2.0, futureEpochMs(date, "13:00")).ok);
@@ -143,6 +145,7 @@ public class FireVsCancelTest {
     @Test
     public void duplicateFire_alreadyExists_allowsRecurrenceGate() throws Exception {
         String date = futureCalendarDate(5);
+        seedAutoStock("med", 10.0);
         AutoDeductionScheduler s = newScheduler();
         assertTrue(s.scheduleOccurrence(
                 "med", "dose", date, "14:00", 1.0, futureEpochMs(date, "14:00")).ok);
@@ -165,6 +168,7 @@ public class FireVsCancelTest {
     public void fireCreated_thenScheduleNextIfAbsent_createsSuccessorWhenActive()
             throws Exception {
         String d = futureCalendarDate(10);
+        seedAutoStock("med", 10.0);
         AutoDeductionScheduler s = newScheduler();
         assertTrue(s.scheduleOccurrence(
                 "med", "dose", d, "09:00", 1.0, futureEpochMs(d, "09:00")).ok);
@@ -178,7 +182,7 @@ public class FireVsCancelTest {
 
         // Only after a recurrence-allowing fire result would the receiver invoke this API.
         AutoDeductionScheduler.ScheduleResult next =
-                s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "08:00", 1.0,
+                s.scheduleNextOccurrenceIfAbsent("med", "dose", d, "09:00", 1.0,
                         Long.parseLong(vg[1]));
         assertTrue("successor schedule: " + next.error, next.ok);
         String d1 = AutoDeductionScheduler.nextCalendarDate(d);

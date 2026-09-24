@@ -43,7 +43,7 @@ export function applyDurableStockDelta(
  * schedule.
  * - Multi-dose (doseSchedule with >1 slot): explicit doseId required.
  * - Single-slot schedule: omitted doseId resolves to that slot's id.
- * - No doseSchedule: reject (no Legacy single-dose fallback — ).
+ * - No doseSchedule: reject.
  */
 export function resolveRestoreDoseId(
   med: Medication,
@@ -120,7 +120,7 @@ export function findActiveDeductionForOccurrence(
   doseId: string,
   calendarDate: string
 ): ConsumptionLog | null {
-  // doseId is required (no legacy/missing/empty/whitespace/sentinel).
+  // doseId is required.
   // Trim before matching so '   ' rejects and ' d1 ' normalizes to 'd1'.
   const normalizedDoseId =
     doseId == null ? '' : String(doseId).trim();
@@ -148,7 +148,7 @@ export function findActiveDeductionForOccurrence(
         ? String(l.doseId).trim()
         : null;
     // require explicit non-empty doseId on the log — no
-    // legacy/missing/empty/whitespace/sentinel matching.
+    // No fallback matching is permitted.
     if (logDoseRaw !== normalizedDoseId) continue;
     const parsed = Date.parse(l.timestamp ?? '');
     const epoch = Number.isFinite(parsed) ? parsed : -Infinity;
@@ -405,7 +405,7 @@ export function restoreDose(
  * - No `dailyDose` fallback when there is no doseSchedule (reject).
  * Identity:
  * - Multi-dose → explicit doseId required (or single-slot auto-resolve).
- * - No doseSchedule → reject `missing_dose_id` (no Legacy single-dose path).
+ * - No doseSchedule → reject `missing_dose_id`.
  * Metadata preserved: doseConsumptionHistory,
  * doseSkippedHistory, lastConsumedDate, dose_taken log.
  * elapsed-day settlement is NOT changed.
@@ -426,7 +426,7 @@ export function consumeDose(
   const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
   const multi = schedule.length > 0;
   const amountOverride = options?.amountOverride;
-  // No doseSchedule: reject (no Legacy single-dose fallback — ).
+  // No doseSchedule: reject ().
   if (!multi) {
     if (doseId != null && doseId !== '') {
       return {

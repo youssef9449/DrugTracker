@@ -227,8 +227,59 @@ export async function cancelScheduledWebNotification(
   return persisted && existed;
 }
 
+function isChromiumNotificationSettingsSupported(): boolean {
+  if (typeof navigator === 'undefined') return false;
+
+  const userAgentData = (
+    navigator as Navigator & {
+      userAgentData?: {
+        brands?: ReadonlyArray<{ brand: string; version: string }>;
+      };
+    }
+  ).userAgentData;
+
+  if (userAgentData?.brands?.length) {
+    const brands = userAgentData.brands.map(({ brand }) => brand);
+    const isKnownAlternateChromium =
+      brands.some((brand) =>
+        /Microsoft Edge|Opera|Brave|Vivaldi|Samsung Browser/i.test(brand)
+      );
+    return (
+      brands.some((brand) => /Chromium|Google Chrome/i.test(brand)) &&
+      !isKnownAlternateChromium &&
+      !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    );
+  }
+
+  // There is no standard API that probes browser-internal settings URLs.
+  // Keep the fallback narrowly scoped to known Chromium signatures and
+  // never send Firefox/Safari/unknown browsers to a chrome:// URL.
+  const ua = navigator.userAgent;
+  return (
+    !/Android|iPhone|iPad|iPod/i.test(ua) &&
+    /Chrome|Chromium/i.test(ua) &&
+    !/Firefox|FxiOS|Safari\//i.test(ua) &&
+    !/Edg\//i.test(ua) &&
+    !/OPR\//i.test(ua) &&
+    !/Brave\//i.test(ua) &&
+    !/Vivaldi\//i.test(ua) &&
+    !/SamsungBrowser\//i.test(ua)
+  );
+}
+
+function getBrowserHint(): string {
+  if (typeof navigator === 'undefined') return 'متصفحك';
+  const ua = navigator.userAgent;
+  if (/Firefox/i.test(ua)) return 'Firefox';
+  if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) return 'Safari';
+  return 'متصفحك';
+}
+
 export function openBrowserNotificationSettings(): void {
-  if (typeof window !== 'undefined') {
+  if (typeof window === 'undefined') return;
+  if (
+    isChromiumNotificationSettingsSupported()
+  ) {
     try {
       const win = window.open(
         'chrome://settings/content/notifications',
@@ -236,17 +287,11 @@ export function openBrowserNotificationSettings(): void {
       );
       if (win) return;
     } catch {
-      // Fall through to the browser-specific instructions below.
+      // Fall through to generic browser instructions.
     }
   }
 
-  const browserHint = (() => {
-    if (typeof navigator === 'undefined') return 'متصفحك';
-    const ua = navigator.userAgent;
-    if (/Firefox/i.test(ua)) return 'Firefox';
-    if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) return 'Safari';
-    return 'متصفحك';
-  })();
+  const browserHint = getBrowserHint();
 
   window.alert(
     `لتفعيل الإشعارات على ${browserHint}:\\n\\n` +

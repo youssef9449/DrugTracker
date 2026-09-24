@@ -79,7 +79,7 @@ describe('getMedSizes (#73)', () => {
 import {
   formatScheduledDoseBreakdown,
 } from '@/utils/medicationPackaging';
-import { describeStockInStrips, normalizeDisplayQuantity, formatUnitQuantity } from '@/types';
+import { describeStockInStrips, normalizeDisplayQuantity, formatUnitQuantity } from '@/utils/medicationPackaging';
 
 describe('normalizeDisplayQuantity', () => {
   it('Case A: collapses true IEEE-754 noise near integers', () => {

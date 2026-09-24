@@ -18,15 +18,127 @@
  *   App.tsx so they can toast the user on quota exhaustion).
  */
 import { STORAGE_ERRORS } from '../constants/uiStrings';
+import type { ConsumptionLog, Medication } from '../types';
+export type StorageReadResult =
+  | { ok: true; value: string | null }
+  | { ok: false; value: null };
+
+/** Read raw localStorage safely while preserving the missing-key distinction. */
+export function readStorageItem(key: string): StorageReadResult {
+  try {
+    return { ok: true, value: localStorage.getItem(key) };
+  } catch {
+    return { ok: false, value: null };
+  }
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || typeof value === 'string';
+}
+
+function isDoseRecord(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const dose = value as Record<string, unknown>;
+  return (
+    isNonEmptyString(dose.id) &&
+    isFiniteNumber(dose.amount) &&
+    dose.amount > 0 &&
+    typeof dose.time === 'string' &&
+    /^\\d{2}:\\d{2}$/.test(dose.time) &&
+    Number(dose.time.slice(0, 2)) < 24 &&
+    Number(dose.time.slice(3, 5)) < 60 &&
+    isOptionalString(dose.description)
+  );
+}
+
+function isHistoryMap(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.values(value as Record<string, unknown>).every(
+    (dates) => Array.isArray(dates) && dates.every((date) => typeof date === 'string')
+  );
+}
+
+export function isValidMedicationRecord(value: unknown): value is Medication {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const medication = value as Record<string, unknown>;
+  if (
+    !isNonEmptyString(medication.id) ||
+    !isNonEmptyString(medication.name) ||
+    !isFiniteNumber(medication.currentPills) ||
+    !isFiniteNumber(medication.dailyDose) ||
+    medication.dailyDose <= 0 ||
+    typeof medication.unit !== 'string' ||
+    !isFiniteNumber(medication.warningThresholdDays) ||
+    !isNonEmptyString(medication.colorTag) ||
+    !isNonEmptyString(medication.createdAt) ||
+    !isOptionalString(medication.category) ||
+    !isOptionalString(medication.notes) ||
+    !isOptionalString(medication.treatmentStartDate) ||
+    !isOptionalString(medication.lastConsumedDate)
+  ) return false;
+  if (
+    medication.autoDeductEnabled !== undefined &&
+    typeof medication.autoDeductEnabled !== 'boolean'
+  ) return false;
+  if (medication.isChronic !== undefined && typeof medication.isChronic !== 'boolean') return false;
+  for (const key of ['durationDays', 'packageSize', 'stripsPerBox', 'pillsPerStrip', 'targetOrderQuantity', 'dosesPerDay']) {
+    const current = medication[key];
+    if (current !== undefined && (!isFiniteNumber(current) || current <= 0)) return false;
+  }
+  if (medication.reminderEnabled !== undefined && typeof medication.reminderEnabled !== 'boolean') return false;
+  if (medication.reminderTime !== undefined && (
+    typeof medication.reminderTime !== 'string' || !/^\\d{2}:\\d{2}$/.test(medication.reminderTime)
+  )) return false;
+  if (medication.criticalStockAlertsEnabled !== undefined && typeof medication.criticalStockAlertsEnabled !== 'boolean') return false;
+  if (medication.dosesPerDay !== undefined && !Number.isInteger(medication.dosesPerDay)) return false;
+  if (medication.doseSchedule !== undefined && (
+    !Array.isArray(medication.doseSchedule) || !medication.doseSchedule.every(isDoseRecord)
+  )) return false;
+  if (!isHistoryMap(medication.doseConsumptionHistory) || !isHistoryMap(medication.doseSkippedHistory)) return false;
+  return true;
+}
+
+const CONSUMPTION_LOG_TYPES = new Set<ConsumptionLog['type']>([
+  'exact_auto', 'refill', 'refill_undo', 'manual_adjust', 'skipped_day', 'dose_taken',
+]);
+
+export function isValidConsumptionLogRecord(value: unknown): value is ConsumptionLog {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const log = value as Record<string, unknown>;
+  return (
+    isNonEmptyString(log.id) &&
+    isNonEmptyString(log.medicationId) &&
+    typeof log.medicationName === 'string' &&
+    typeof log.type === 'string' && CONSUMPTION_LOG_TYPES.has(log.type as ConsumptionLog['type']) &&
+    isFiniteNumber(log.amount) &&
+    typeof log.date === 'string' &&
+    /^\\d{4}-\\d{2}-\\d{2}$/.test(log.date) &&
+    isNonEmptyString(log.timestamp) &&
+    typeof log.description === 'string' &&
+    isOptionalString(log.reversedAt) &&
+    isOptionalString(log.relatedLogId) &&
+    isOptionalString(log.doseId)
+  );
+}
+
 /**
  * Read and JSON.parse a localStorage value. Returns `fallback` if the key
  * is absent or parsing fails. Never throws.
  */
 export function loadJson<T>(key: string, fallback: T): T {
+  const result = readStorageItem(key);
+  if (!result.ok || result.value == null) return fallback;
   try {
-    const raw = localStorage.getItem(key);
-    if (raw == null) return fallback;
-    return JSON.parse(raw) as T;
+    return JSON.parse(result.value) as T;
   } catch {
     return fallback;
   }
@@ -36,12 +148,8 @@ export function loadJson<T>(key: string, fallback: T): T {
  * absent or reading fails. Never throws.
  */
 export function loadString(key: string, fallback: string): string {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw == null ? fallback : raw;
-  } catch {
-    return fallback;
-  }
+  const result = readStorageItem(key);
+  return !result.ok || result.value == null ? fallback : result.value;
 }
 /**
  * JSON.stringify + write to localStorage. Silently swallows errors (use

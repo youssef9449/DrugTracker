@@ -1,16 +1,19 @@
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setExactAutoEnvelopeStorageTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
+import type { ManualStockEnvelope } from '../../src/utils/stockEnvelopeRecovery';
+import type { ExactAutoEnvelope } from '../../src/utils/runAutoDeductionReconciliation';
+
 
 import { makeScheduledMedication as med, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
 import { runGatedManualConsume, runGatedManualRestore, runGatedAddMedication, runGatedRefill, runGatedUndoRefill, runGatedAutoDeductToggle, runGatedGlobalAutoDeductToggle, runGatedDeleteMedication } from '../../src/utils/manualStockMutation';
-import { loadExactAutoStockEnvelope, durableMatchesEnvelopeSnapshot } from '../../src/utils/stockEnvelopeRecovery';
+import { loadExactAutoStockEnvelope, durableMatchesEnvelopeSnapshot as matchesDurableEnvelope } from '../../src/utils/stockEnvelopeRecovery';
 import { allocateMutationSeq, persistLastAppliedMutationSeq, loadLastAppliedMutationSeq } from '../../src/utils/stockMutationOrdering';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 
 
 import { isDoseConsumedOnDate } from '../../src/utils/dateCalculations';
 import { exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
-import * as preSettleModule from '../../src/utils/reconcileExactBeforeManualMutation';
 
 const autoSchedulingMocks = vi.hoisted(() => ({
   invalidateAutoDeductionRecurrence: vi.fn(),
@@ -34,18 +37,25 @@ beforeEach(() => {
     generation: 1,
   });
   autoSchedulingMocks.scheduleAutoDeduction.mockResolvedValue({ ok: true });
-  autoSchedulingMocks.recoverAutoDeductionOccurrence.mockResolvedValue({ ok: true });
+  autoSchedulingMocks.recoverAutoDeductionOccurrenceForCompensation.mockResolvedValue({ ok: true });
 });
 // findPending used indirectly via runGatedManualConsume
-import { restoreDose } from '../../src/utils/medActions';
+
+type TestManualStockEnvelope = Omit<ManualStockEnvelope, 'globalAutoDeductEnabled'> & {
+  globalAutoDeductEnabled?: boolean;
+};
 
 const TODAY = '2026-09-16';
+
+function durableMatchesEnvelopeSnapshot(envelope: { medications: import('../../src/types').Medication[]; logs: import('../../src/types').ConsumptionLog[]; globalAutoDeductEnabled?: boolean }, durable: AutoStockDurableState): boolean {
+  return matchesDurableEnvelope({ ...envelope, globalAutoDeductEnabled: envelope.globalAutoDeductEnabled ?? false }, durable);
+}
 
 
 
 describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   let durable: AutoStockDurableState;
-  let manualEnvelope: ManualStockEnvelope | null;
+  let manualEnvelope: TestManualStockEnvelope | null;
   let failLogs: boolean;
   let failClear: boolean;
   let failBump: boolean;
@@ -57,7 +67,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(`${TODAY}T15:00:00`));
-    durable = { medications: [med()], logs: [] };
+    durable = { medications: [med()], logs: [], globalAutoDeductEnabled: false };
     manualEnvelope = null;
     failLogs = false;
     failClear = false;
@@ -84,7 +94,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
     });
 
     __setManualEnvelopeTestHooks({
-    load: () => manualEnvelope,
+    load: () => manualEnvelope as ManualStockEnvelope | null,
       save: (env) => {
         if (env == null && failClear) {
           return 'envelope clear failed';
@@ -98,6 +108,7 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
       load: () => ({
         medications: durable.medications.map((m) => ({ ...m })),
         logs: durable.logs.map((l) => ({ ...l })),
+        globalAutoDeductEnabled: durable.globalAutoDeductEnabled,
       }),
       commit: (state) => {
         durable.medications = state.medications.map((m) => ({ ...m }));

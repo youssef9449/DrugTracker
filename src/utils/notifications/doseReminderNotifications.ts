@@ -38,6 +38,7 @@ export async function sendTestAlertNotification(): Promise<void> {
     title: 'إشعار تجريبي: متابع الأدوية',
     body: 'الإشعارات والتنبيهات تعمل بشكل سليم على جهازك!',
     channelId: getDoseReminderChannelId(),
+    channelName: getDoseReminderChannelId(),
     smallIcon: 'ic_launcher',
     channelImportance: appInForeground ? 2 : 4,
   });

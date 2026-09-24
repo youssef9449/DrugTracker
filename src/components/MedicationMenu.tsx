@@ -348,12 +348,13 @@ export function MedicationMenu({
   onToggleMedicationReminder,
   onToggleMedicationCriticalStockAlerts,
   onOpenHistory,
+  onRegisterBackHandler,
   size = 'sm',
   showTypeIcon = false,
   showOverflow = false,
 }: MedicationMenuProps) {
   // Medication-level Auto only (Global bulk-sets all meds; this menu edits one).
-  const isMedicationAutoDeductEnabled = medication.autoDeductEnabled !== false;
+  const isMedicationAutoDeductEnabled = medication.autoDeductEnabled === true;
   const autoTogglePressed = isMedicationAutoDeductEnabled;
   const autoToggleAriaLabel = isAutoActive
     ? 'إيقاف الخصم التلقائي'
@@ -419,7 +420,7 @@ export function MedicationMenu({
 
       {onToggleMedicationCriticalStockAlerts && (
         <MedicationNotificationStatusBadge
-          enabled={medication.criticalStockAlertsEnabled !== false}
+          enabled={medication.criticalStockAlertsEnabled === true}
           onToggle={() => onToggleMedicationCriticalStockAlerts(medication.id)}
           type="critical"
           size={size === 'xs' ? 'xs' : 'sm'}

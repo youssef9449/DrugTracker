@@ -16,7 +16,7 @@ describe('manifest.json — SVG icon purpose (#26)', () => {
   it('the SVG icon declares purpose "any" only (not "any maskable")', () => {
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8'));
     const svgIcon = manifest.icons.find(
-      (i: { src: string }) => i.src === '/assets/icons/icon.svg'
+      (i: { src: string }) => i.src === './assets/icons/icon.svg'
     );
     expect(svgIcon).toBeDefined();
     expect(svgIcon.purpose).toBe('any');
@@ -28,7 +28,6 @@ describe('manifest.json — SVG icon purpose (#26)', () => {
     const maskableIcons = manifest.icons.filter(
       (i: { purpose: string }) => i.purpose === 'maskable'
     );
-    // There should be exactly 2 maskable icons (192 + 512 PNGs).
     expect(maskableIcons.length).toBe(2);
     expect(maskableIcons.every((i: { src: string }) => i.src.includes('maskable'))).toBe(true);
   });
@@ -36,7 +35,7 @@ describe('manifest.json — SVG icon purpose (#26)', () => {
   it('includes a 180x180 icon for iOS apple-touch-icon (#119)', () => {
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8'));
     const icon180 = manifest.icons.find(
-      (i: { src: string }) => i.src === '/assets/icons/icon-180.png'
+      (i: { src: string }) => i.src === './assets/icons/icon-180.png'
     );
     expect(icon180).toBeDefined();
     expect(icon180.sizes).toBe('180x180');
@@ -48,8 +47,31 @@ describe('manifest.json — SVG icon purpose (#26)', () => {
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8'));
     expect(manifest.shortcuts).toHaveLength(3);
     const urls = manifest.shortcuts.map((s: { url: string }) => s.url);
-    expect(urls).toContain('/?tab=stock');
-    expect(urls).toContain('/?tab=logs');
-    expect(urls).toContain('/?tab=shopping');
+    expect(urls).toContain('./?tab=stock');
+    expect(urls).toContain('./?tab=logs');
+    expect(urls).toContain('./?tab=shopping');
+  });
+});
+
+describe('manifest.json — canonical relative deployment paths (#356)', () => {
+  it('keeps the manifest and shortcut/icon URLs relative to the deployed app', () => {
+    const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8'));
+    expect(manifest.start_url).toBe('./');
+    expect(manifest.scope).toBe('./');
+    expect(manifest.icons.every((icon: { src: string }) => icon.src.startsWith('./'))).toBe(true);
+    expect(
+      manifest.shortcuts.every((shortcut: { url: string }) => shortcut.url.startsWith('./'))
+    ).toBe(true);
+  });
+});
+
+describe('PWA URL resolution — root and sub-path deployments (#356)', () => {
+  it('resolves relative service-worker and manifest URLs inside either deployment root', () => {
+    const root = new URL('https://example.test/');
+    const subPath = new URL('https://example.test/drug-tracker/');
+    expect(new URL('./sw.js', root).pathname).toBe('/sw.js');
+    expect(new URL('./sw.js', subPath).pathname).toBe('/drug-tracker/sw.js');
+    expect(new URL('./manifest.json', root).pathname).toBe('/manifest.json');
+    expect(new URL('./manifest.json', subPath).pathname).toBe('/drug-tracker/manifest.json');
   });
 });

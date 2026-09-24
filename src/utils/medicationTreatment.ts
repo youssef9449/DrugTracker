@@ -1,7 +1,6 @@
 import type { Medication } from '../types';
 import { addCalendarDays, parseCalendarDate } from './dateCalculations';
 
-const CALENDAR_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function normalizeCalendarDate(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -9,13 +8,11 @@ function normalizeCalendarDate(value: unknown): string | null {
 }
 
 /**
- * Legacy records without an explicit treatment flag are chronic by default.
- * A bounded course must explicitly set isChronic=false.
- *
+ * A medication is chronic only when its current treatment mode explicitly says so.
  * Temporary treatment boundaries require an explicit durable treatmentStartDate.
  */
 export function isMedicationChronic(medication: Medication): boolean {
-  return medication.isChronic !== false;
+  return medication.isChronic === true;
 }
 
 export function getMedicationTreatmentStartDate(

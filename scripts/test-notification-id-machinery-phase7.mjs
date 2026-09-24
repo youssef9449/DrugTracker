@@ -133,17 +133,8 @@ const nativeBridge = read('src/native.ts');
 assert(!nativeBridge.includes('clearLegacyScheduledAlarmNotifications'),
   'native startup must not run obsolete numeric alarm migration cleanup');
 
-const facade = read('src/utils/notifications.ts');
-for (const token of [
-  'iosCriticalAlarmId',
-  'doseReminderAlarmIdForDose',
-  'snoozeDoseReminderId',
-  'clearLegacyScheduledAlarmNotifications',
-  'notificationIds',
-]) {
-  assert(!facade.includes(token),
-    'notification facade must not expose obsolete numeric identity machinery: ' + token);
-}
+assert(!exists('src/utils/notifications.ts'),
+  'obsolete notification compatibility facade must remain deleted');
 
 for (const rel of javaFiles('native-android/auto-deduction')) {
   const content = read(rel);
@@ -174,7 +165,7 @@ assert(!exactAlarmRuntime.includes('NotificationRuntime'),
   'Exact Alarm Runtime must not depend on Notification Runtime');
 
 const notificationJava = read('native-android/notification-runtime/NotificationRuntime.java');
-assert(notificationJava.includes('notificationTag(namespace, identity)'),
+assert(notificationJava.includes('tagFor(namespace, identity)'),
   'Android Notification Runtime must use namespace + identity as logical notification authority');
 
 const autoNative = read('src/utils/autoDeductionNativePlugin.ts');

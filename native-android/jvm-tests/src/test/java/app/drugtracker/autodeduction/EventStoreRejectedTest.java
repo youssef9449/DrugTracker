@@ -137,6 +137,8 @@ public class EventStoreRejectedTest {
             assertEquals("rejected_persist_failed", result.error);
             assertEquals("not-valid-json{{{"
                     , eventPrefs().getString(evtKey(key), null));
+        } catch (Exception e) {
+            throw new AssertionError(e);
         }
     }
 
@@ -185,6 +187,8 @@ public class EventStoreRejectedTest {
             String raw = eventPrefs().getString(evtKey(key), null);
             assertNotNull(raw);
             assertEquals("not-valid-json{{{", raw);
+        } catch (Exception e) {
+            throw new AssertionError(e);
         }
 
         // With the normal persistence policy, terminalization succeeds.
@@ -249,6 +253,8 @@ public class EventStoreRejectedTest {
             JSONObject stillFired = new JSONObject(raw);
             assertEquals(AutoDeductionContract.STATUS_FIRED,
                     stillFired.optString("status"));
+        } catch (Exception e) {
+            throw new AssertionError(e);
         }
     }
 
@@ -263,6 +269,7 @@ public class EventStoreRejectedTest {
         payload.put("scheduledAtEpochMs", 1_000L);
         payload.put("amount", 2.0);
         payload.put("status", AutoDeductionContract.STATUS_FIRED);
+        payload.put("createdAtEpochMs", 1_000L);
 
         pendingPrefs().edit().putString("pend:" + key, payload.toString()).commit();
 
@@ -275,6 +282,8 @@ public class EventStoreRejectedTest {
             assertEquals("pending_promotion_failed", result.error);
             assertFalse(eventPrefs().contains(evtKey(key)));
             assertNotNull(pendingPrefs().getString("pend:" + key, null));
+        } catch (Exception e) {
+            throw new AssertionError(e);
         }
     }
 
@@ -289,6 +298,7 @@ public class EventStoreRejectedTest {
         payload.put("scheduledAtEpochMs", 1_000L);
         payload.put("amount", 2.0);
         payload.put("status", AutoDeductionContract.STATUS_FIRED);
+        payload.put("createdAtEpochMs", 1_000L);
 
         pendingPrefs().edit().putString("pend:" + key, payload.toString()).commit();
 
@@ -300,6 +310,8 @@ public class EventStoreRejectedTest {
             assertEquals("pending_promotion_failed", result.error);
             assertFalse(eventPrefs().contains(evtKey(key)));
             assertNotNull(pendingPrefs().getString("pend:" + key, null));
+        } catch (Exception e) {
+            throw new AssertionError(e);
         }
     }
 

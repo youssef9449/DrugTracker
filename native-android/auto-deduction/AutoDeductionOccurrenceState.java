@@ -27,9 +27,8 @@ final class AutoDeductionOccurrenceState {
 
     boolean compactTerminalState() {
         String cutoff = terminalOccurrenceCutoffDate();
-        if (cutoff == null) return false;
 
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             Set<String> protectedKeys = new HashSet<String>();
             Map<String, String> schedules =
                     scheduler.getAllScheduleMetadata();
@@ -123,7 +122,7 @@ final class AutoDeductionOccurrenceState {
         final String key = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
 
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             AutoDeductionEventStore.EventLookupResult firedLookup =
                     scheduler.eventStore().getFiredUnreconciledEvent(
                             medicationId, doseId, calendarDate);

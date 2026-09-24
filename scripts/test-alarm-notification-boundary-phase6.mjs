@@ -18,6 +18,10 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+function exists(rel) {
+  return fs.existsSync(path.join(root, rel));
+}
+
 function read(rel) {
   return fs.readFileSync(path.join(root, rel), 'utf8');
 }
@@ -193,14 +197,14 @@ assert(
   'AutoDeductionReceiver must not depend on NotificationRuntime'
 );
 assert(
-  autoReceiver.includes('exactAutoDeductionFired'),
+  autoReceiver.includes('ACTION_AUTO_DEDUCTION_FIRED')
+    && autoReceiver.includes('sendBroadcast'),
   'AutoDeductionReceiver must continue emitting the Auto FIRED event to its business bridge'
 );
 
-const notificationIds = read('src/utils/notifications/notificationIds.ts');
 assert(
-  !/auto|autodeduction|exactauto/i.test(notificationIds),
-  'Notification identity registry must contain no Auto Deduction category or identity'
+  !exists('src/utils/notifications/notificationIds.ts'),
+  'Obsolete notification numeric-ID registry must remain removed'
 );
 
 const autoNativeBridge = read('src/utils/autoDeductionNativePlugin.ts');

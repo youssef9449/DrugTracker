@@ -20,7 +20,7 @@ export interface MedicationHandlersDeps {
   setSelectDoseMode: Dispatch<SetStateAction<'take' | 'restore' | 'manage'>>;
   setEditingMedication: Dispatch<SetStateAction<Medication | null>>;
   showToast: (message: string) => void;
-  dismissAlarm: () => void;
+  dismissAlarm: () => boolean;
   snoozeAlarm: (minutes?: number) => void;
 }
 

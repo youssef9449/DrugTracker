@@ -77,9 +77,7 @@ public CancelResult cancelOccurrence(
                 || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
             return CancelResult.fail("invalid_args");
         }
-        String key = AutoDeductionContract.occurrenceKey(
-                medicationId, doseId, calendarDate);
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             AutoDeductionSchedulingAdapter.CancelResult result =
                     scheduler.schedulingAdapter().cancelOccurrence(
                             medicationId,
@@ -95,7 +93,7 @@ public CancelResult cancelOccurrence(
 
 boolean hasCancellationTombstone(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             return scheduler.hasCancellationTombstoneStored(occurrenceKey);
         }
     }
@@ -116,7 +114,7 @@ public boolean isOccurrenceCancelled(
 
 boolean isOccurrenceCancelledKey(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             return scheduler.isEffectivelyCancelledStored(occurrenceKey);
         }
     }

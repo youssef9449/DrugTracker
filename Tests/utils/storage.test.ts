@@ -1,5 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { loadJson, loadString, saveJson, saveString, persist } from '@/utils/storage';
+import {
+  isValidConsumptionLogRecord,
+  isValidMedicationRecord,
+  loadJson,
+  loadString,
+  readStorageItem,
+  saveJson,
+  saveString,
+  persist,
+} from '@/utils/storage';
 
 beforeEach(() => {
   localStorage.clear();
@@ -159,5 +168,69 @@ describe('persist (error-surfacing writer)', () => {
         Object.defineProperty(globalThis, 'localStorage', originalDescriptor);
       }
     }
+  });
+});
+
+
+describe('safe storage boundary', () => {
+  it('reports a storage-read failure without throwing', () => {
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    try {
+      expect(readStorageItem('k')).toEqual({ ok: false, value: null });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe('hydration record validation', () => {
+  const medication = {
+    id: 'med-1',
+    name: 'دواء',
+    currentPills: 20,
+    dailyDose: 1,
+    unit: 'قرص',
+    warningThresholdDays: 5,
+    colorTag: 'teal',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    doseSchedule: [{ id: 'dose-1', amount: 1, time: '09:30' }],
+  };
+
+  const log = {
+    id: 'log-1',
+    medicationId: 'med-1',
+    medicationName: 'دواء',
+    type: 'dose_taken' as const,
+    amount: -1,
+    date: '2026-01-01',
+    timestamp: '2026-01-01T09:30:00.000Z',
+    description: 'dose',
+  };
+
+  it('accepts a valid medication and rejects malformed medication entries', () => {
+    expect(isValidMedicationRecord(medication)).toBe(true);
+    expect(isValidMedicationRecord(null)).toBe(false);
+    expect(
+      isValidMedicationRecord({ ...medication, currentPills: '20' })
+    ).toBe(false);
+    expect(
+      isValidMedicationRecord({
+        ...medication,
+        doseSchedule: [{ ...medication.doseSchedule[0], amount: 0 }],
+      })
+    ).toBe(false);
+  });
+
+  it('accepts a valid log and rejects malformed log entries', () => {
+    expect(isValidConsumptionLogRecord(log)).toBe(true);
+    expect(isValidConsumptionLogRecord(null)).toBe(false);
+    expect(
+      isValidConsumptionLogRecord({ ...log, amount: '1' })
+    ).toBe(false);
+    expect(
+      isValidConsumptionLogRecord({ ...log, type: 'unknown' })
+    ).toBe(false);
   });
 });

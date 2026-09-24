@@ -1,4 +1,4 @@
-import { toNativeBoundaryError, classifyNativeError, type NativeErrorCode } from './nativeErrors';
+import { toNativeBoundaryError, classifyNativeError } from './nativeErrors';
 import { AutoDeduction, isNativeAndroid } from './autoDeductionNativePlugin';
 import type { ListScheduledOccurrencesResult, RestoreFutureSchedulesResult } from './autoDeductionNativeTypes';
 

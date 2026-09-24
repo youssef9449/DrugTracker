@@ -12,18 +12,18 @@ vi.mock('@/utils/sound', () => ({
 }));
 
 // Mock the snooze scheduler so tests don't hit Capacitor's native bridge.
-vi.mock('@/utils/notifications/doseReminderNotifications', async () => {
+vi.mock('../utils/notificationTestFacade', async () => {
   const actual =
     await vi.importActual<
-      typeof import('@/utils/notifications/doseReminderNotifications')
-    >('@/utils/notifications/doseReminderNotifications');
+      typeof import('../utils/notificationTestFacade')
+    >('../utils/notificationTestFacade');
   return {
     ...actual,
     scheduleSnoozedDoseReminder: vi.fn().mockResolvedValue(undefined),
   };
 });
 
-import { scheduleSnoozedDoseReminder } from '@/utils/notifications/doseReminderNotifications';
+import { scheduleSnoozedDoseReminder } from '../utils/notificationTestFacade';
 
 /** Build a medication with a reminder enabled at the given time. */
 function makeMed(overrides: Partial<Medication> = {}): Medication {
@@ -505,7 +505,7 @@ describe('useDoseReminders — concurrent foreground alarm queue (#386)', () => 
       doseConsumptionHistory: { d1: [getTodayDateString()] },
     };
 
-    rerender([medA, consumedB]);
+    rerender({ medications: [medA, consumedB] });
 
     act(() => {
       result.current.dismissAlarm();

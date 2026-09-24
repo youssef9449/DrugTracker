@@ -74,6 +74,8 @@ export const AppTabContent: FC<AppTabContentProps> = (props) => {
     handleUndoRefill, testAlarm, handleSavePharmacy, handleDeletePharmacy,
     handleSaveUserContact, handleDeleteUserContact, handleSaveUserAddress, handleDeleteUserAddress,
   } = props;
+
+  return (
       <main className="flex-1 overflow-y-auto pb-24 relative">
             {activeTab === 'stock' && (
               <div>
@@ -231,4 +233,5 @@ export const AppTabContent: FC<AppTabContentProps> = (props) => {
               />
             )}
       </main>
+  );
 };

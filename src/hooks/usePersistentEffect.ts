@@ -43,10 +43,14 @@ export function usePersistentEffect({
   enabled,
 }: UsePersistentEffectOptions): void {
   const warnedRef = useRef(false);
+  const latestValueRef = useRef(value);
+  const pendingTimerRef = useRef<number | null>(null);
+  latestValueRef.current = value;
+
   useEffect(() => {
     if (!enabled) return;
     const doWrite = () => {
-      const err = persist(storageKey, value, { json });
+      const err = persist(storageKey, latestValueRef.current, { json });
       if (err && !warnedRef.current) {
         warnedRef.current = true;
         if (failureMessage && showToast) {
@@ -59,8 +63,29 @@ export function usePersistentEffect({
       }
     };
     if (debounceMs > 0) {
-      const handle = window.setTimeout(doWrite, debounceMs);
-      return () => window.clearTimeout(handle);
+      const handle = window.setTimeout(() => {
+        pendingTimerRef.current = null;
+        doWrite();
+      }, debounceMs);
+      pendingTimerRef.current = handle;
+
+      const flushOnTeardown = () => {
+        if (pendingTimerRef.current === null) return;
+        window.clearTimeout(pendingTimerRef.current);
+        pendingTimerRef.current = null;
+        doWrite();
+      };
+      window.addEventListener('pagehide', flushOnTeardown);
+      window.addEventListener('beforeunload', flushOnTeardown);
+
+      return () => {
+        window.clearTimeout(handle);
+        if (pendingTimerRef.current === handle) {
+          pendingTimerRef.current = null;
+        }
+        window.removeEventListener('pagehide', flushOnTeardown);
+        window.removeEventListener('beforeunload', flushOnTeardown);
+      };
     }
     doWrite();
   }, [storageKey, value, json, failureMessage, showToast, debounceMs, enabled]);

@@ -44,6 +44,10 @@ public class AutoDeductionReceiver extends BroadcastReceiver {
      * the bounded per-occurrence retry budget is not exhausted. Pure decision —
      * unit tested without Robolectric.
      */
+    static boolean shouldScheduleStockRetry(
+            AutoDeductionScheduler.FireResult result, int fireRetryCount) {
+        return shouldScheduleFireRetry(result, fireRetryCount);
+    }
     static boolean shouldScheduleFireRetry(
             AutoDeductionScheduler.FireResult result, int fireRetryCount) {
         return result != null

@@ -30,6 +30,11 @@ import org.json.JSONObject;
 public final class ExactAlarmRuntime {
     private static final String TAG = "ExactAlarmRuntime";
 
+    /** Private process-wide monitor; never exposed to callers. */
+    private static final class OperationLock {
+        private OperationLock() {}
+    }
+
     private final Context appContext;
     private final ExactAlarmStore store;
     private final int pendingIntentRequestCode;
@@ -77,6 +82,14 @@ public final class ExactAlarmRuntime {
     }
 
 
+    /** Execute a caller-owned delivery transaction under the shared runtime lock. */
+    public static void runWithOperationLock(Runnable action) {
+        if (action == null) return;
+        synchronized (OperationLock.class) {
+            action.run();
+        }
+    }
+
     /**
      * Single native source of truth for Android exact-alarm capability.
      * Feature adapters and lifecycle/bridge code must delegate here rather
@@ -94,14 +107,14 @@ public final class ExactAlarmRuntime {
     /** Raw durable schedule metadata snapshot for a feature adapter. */
     public String getScheduleRaw(String storageKey) {
         if (storageKey == null || storageKey.isEmpty()) return null;
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             return store.getScheduleRaw(storageKey);
         }
     }
 
     /** Feature-neutral snapshot of all durable schedule metadata keyed by storage identity. */
     public java.util.Map<String, String> listScheduleMetadata() {
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             java.util.Map<String, String> result = new java.util.LinkedHashMap<>();
             for (java.util.Map.Entry<String, ?> entry : store.getAllScheduleMetadata().entrySet()) {
                 String key = entry.getKey();
@@ -120,7 +133,7 @@ public final class ExactAlarmRuntime {
 
     public boolean hasSchedule(String storageKey) {
         if (storageKey == null || storageKey.isEmpty()) return false;
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             return store.hasSchedule(storageKey);
         }
     }
@@ -133,7 +146,7 @@ public final class ExactAlarmRuntime {
                 || expectedOperationVersion.isEmpty()) {
             return false;
         }
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             return store.removeScheduleIfOwnedLocked(
                     storageKey, expectedOperationVersion);
         }
@@ -141,28 +154,28 @@ public final class ExactAlarmRuntime {
 
     public boolean removeSchedule(String storageKey) {
         if (storageKey == null || storageKey.isEmpty()) return false;
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             return store.removeScheduleLocked(storageKey);
         }
     }
 
     public boolean hasCancellationTombstone(String storageKey) {
         if (storageKey == null || storageKey.isEmpty()) return false;
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             return store.hasCancellationTombstoneLocked(storageKey);
         }
     }
 
     public boolean isEffectivelyCancelled(String storageKey) {
         if (storageKey == null || storageKey.isEmpty()) return false;
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             return store.isEffectivelyCancelledLocked(storageKey);
         }
     }
 
     public boolean clearCancellationTombstone(String storageKey) {
         if (storageKey == null || storageKey.isEmpty()) return true;
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             return store.removeCancellationTombstoneLocked(storageKey);
         }
     }
@@ -174,7 +187,7 @@ public final class ExactAlarmRuntime {
     /** Snapshot of one durable schedule row. The returned object is a defensive copy. */
     public JSONObject getScheduleMetadata(String storageKey) {
         if (storageKey == null || storageKey.isEmpty()) return null;
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             String raw = store.getScheduleRaw(storageKey);
             if (raw == null || raw.isEmpty()) return null;
             try {
@@ -187,7 +200,7 @@ public final class ExactAlarmRuntime {
 
     /** Feature-neutral list of durable schedule storage keys. */
     public java.util.List<String> listScheduledStorageKeys() {
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             return new java.util.ArrayList<>(store.listFeatureStorageKeys());
         }
     }
@@ -204,7 +217,7 @@ public final class ExactAlarmRuntime {
                 || expectedOperationVersion.isEmpty()) {
             return false;
         }
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             return store.removeScheduleIfOwnedLocked(
                     storageKey,
                     expectedOperationVersion);
@@ -224,7 +237,7 @@ public final class ExactAlarmRuntime {
                 || expectedOperationVersion.isEmpty()) {
             return false;
         }
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             String raw = store.getScheduleRaw(storageKey);
             if (!ExactAlarmContract.isMetadataOwnedByOperationVersion(
                     raw,
@@ -249,7 +262,7 @@ public final class ExactAlarmRuntime {
      */
     public boolean isOneShotDelivered(String storageKey) {
         if (storageKey == null || storageKey.isEmpty()) return false;
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             String raw = store.getScheduleRaw(storageKey);
             if (raw == null || raw.isEmpty()) return false;
             try {
@@ -280,7 +293,7 @@ public final class ExactAlarmRuntime {
                 || receiverClass == null) {
             return PendingStateResult.failed("invalid_pending_request");
         }
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             try {
                 Intent intent = new Intent(appContext, receiverClass);
                 intent.setAction(action);
@@ -318,7 +331,7 @@ public final class ExactAlarmRuntime {
                 || expectedOperationVersion.isEmpty()) {
             return false;
         }
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             return ExactAlarmContract.isMetadataOwnedByOperationVersion(
                     store.getScheduleRaw(storageKey),
                     expectedOperationVersion)
@@ -339,7 +352,7 @@ public final class ExactAlarmRuntime {
                     "exact_alarm_permission_denied");
         }
 
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             String previousScheduleRaw =
                     store.getScheduleRaw(request.storageKey);
 
@@ -457,13 +470,23 @@ public final class ExactAlarmRuntime {
                 return ScheduleResult.fail("schedule_failed");
             }
 
-            // Only after AlarmManager accepted the new schedule may an older
-            // cancellation tombstone be physically removed. If this cleanup fails,
-            // ordering still makes the newer schedule authoritative; if install
-            // fails, the older tombstone remains intact.
-            store.clearCancellationIfSupersededLocked(
-                    request.storageKey,
-                    operationVersion);
+            // A fresh feature-owned schedule is an explicit new desired state,
+            // so it legitimately supersedes any prior cancellation tombstone once
+            // AlarmManager has accepted the new alarm. Restore/re-arm requests carry
+            // expectedExistingOperationVersion and must still respect a newer
+            // cancellation, handled by the ownership checks above.
+            if (request.expectedExistingOperationVersion == null
+                    || request.expectedExistingOperationVersion.isEmpty()) {
+                if (!store.removeCancellationTombstoneLocked(request.storageKey)
+                        && store.hasCancellationTombstoneLocked(request.storageKey)) {
+                    Log.w(TAG, "failed to clear superseded tombstone: "
+                            + request.storageKey);
+                }
+            } else {
+                store.clearCancellationIfSupersededLocked(
+                        request.storageKey,
+                        operationVersion);
+            }
 
             return ScheduleResult.success(
                     request.identityUri,
@@ -486,7 +509,7 @@ public final class ExactAlarmRuntime {
                     "invalid_cancel_request");
         }
 
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             boolean hadMetadata =
                     store.hasSchedule(storageKey);
             boolean alreadyCancelled =
@@ -573,7 +596,7 @@ public final class ExactAlarmRuntime {
             return false;
         }
 
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             AlarmManager manager = alarmManager();
             if (manager == null) return false;
 
@@ -630,7 +653,7 @@ public final class ExactAlarmRuntime {
             return false;
         }
 
-        synchronized (ExactAlarmOperationLock.LOCK) {
+        synchronized (OperationLock.class) {
             AlarmManager manager = alarmManager();
             if (manager == null) return false;
             try {

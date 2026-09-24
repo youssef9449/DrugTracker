@@ -36,10 +36,10 @@ assert(
   'restore must not re-arm an already accepted one-shot delivery'
 );
 assert(
-  receiver.includes('synchronized (ExactAlarmOperationLock.LOCK)')
-    && receiver.indexOf('synchronized (ExactAlarmOperationLock.LOCK)')
+  receiver.includes('ExactAlarmRuntime.runWithOperationLock(')
+    && receiver.indexOf('ExactAlarmRuntime.runWithOperationLock(')
       < receiver.indexOf('new NotificationRuntime(appContext).post('),
-  'Critical Stock delivery must be linearized against cancellation'
+  'Critical Stock delivery must be linearized through the private shared runtime lock'
 );
 assert(
   receiver.indexOf('adapter.ownsActiveSchedule(') < receiver.indexOf('new NotificationRuntime(appContext).post('),

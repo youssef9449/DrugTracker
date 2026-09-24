@@ -49,9 +49,9 @@ const mocks = vi.hoisted(() => ({
   verify: vi.fn(),
 }));
 
-vi.mock('@/utils/notifications', async () => {
-  const actual = await vi.importActual<typeof import('@/utils/notifications')>(
-    '@/utils/notifications'
+vi.mock('../utils/notificationTestFacade', async () => {
+  const actual = await vi.importActual<typeof import('../utils/notificationTestFacade')>(
+    '../utils/notificationTestFacade'
   );
   return {
     ...actual,
@@ -62,7 +62,7 @@ vi.mock('@/utils/notifications', async () => {
   };
 });
 
-import { sendCriticalStockAlert } from '@/utils/notifications';
+import { sendCriticalStockAlert } from '../utils/notificationTestFacade';
 
 const sendMock = vi.mocked(sendCriticalStockAlert);
 const scheduleMock = vi.mocked(mocks.schedule);

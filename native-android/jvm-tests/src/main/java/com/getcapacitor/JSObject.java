@@ -42,12 +42,12 @@ public class JSObject {
 
     public Boolean getBool(String key) {
         if (!json.has(key) || json.isNull(key)) {
-            return null;
+            return Boolean.FALSE;
         }
         try {
-            return json.getBoolean(key);
+            return Boolean.valueOf(json.getBoolean(key));
         } catch (Exception e) {
-            return null;
+            return Boolean.FALSE;
         }
     }
 

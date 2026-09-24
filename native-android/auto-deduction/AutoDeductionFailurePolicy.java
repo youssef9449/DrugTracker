@@ -8,6 +8,7 @@ interface AutoDeductionFailurePolicy {
     AutoDeductionFailurePolicy ALLOW_ALL = new AutoDeductionFailurePolicy() {};
 
     default boolean allowEventCommit() { return true; }
+    default boolean allowPendingFireCommit() { return true; }
     default boolean allowRecurrenceAuthCommit() { return true; }
     default boolean allowFireRetryEvidenceCommit() { return true; }
     default boolean allowRestoreFutureSchedules() { return true; }

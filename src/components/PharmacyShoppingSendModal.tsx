@@ -3,7 +3,7 @@ import { MessageCircle, MessageSquare, ExternalLink, X } from 'lucide-react';
 import type { Pharmacy, PharmacySettings } from '../types';
 import { describeOrderInBoxes, isSolidUnit } from '../utils/medicationPackaging';
 import { pluralizeArabic } from '../lib/arabicPlural';
-import { describeOrderQuantityBreakdown, type OrderItem } from '../utils/whatsapp';
+import type { OrderItem } from '../utils/whatsapp';
 import { Checkbox } from './ui/Checkbox';
 
 interface PharmacyShoppingSendModalProps {
@@ -91,7 +91,7 @@ export const PharmacyShoppingSendModal: FC<PharmacyShoppingSendModalProps> = ({
                   ))}
                   {pharmacies.length === 0 && selectedPharmacy && (
                     <option value={selectedPharmacy.id}>{selectedPharmacy.name}</option>
-            
+                  )}
                 </select>
               </label>
               <div className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-slate-200">
@@ -217,6 +217,5 @@ export const PharmacyShoppingSendModal: FC<PharmacyShoppingSendModalProps> = ({
             </div>
           </div>
         </div>
-      )}
   );
 };

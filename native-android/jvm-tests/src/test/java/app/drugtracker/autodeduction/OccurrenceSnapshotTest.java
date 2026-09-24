@@ -10,6 +10,7 @@ import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
 import static app.drugtracker.autodeduction.Phase2TestSupport.cancelPrefs;
 import static app.drugtracker.autodeduction.Phase2TestSupport.cancelKey;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -205,6 +206,8 @@ public class OccurrenceSnapshotTest {
             assertEquals(
                     AutoDeductionScheduler.OccurrenceSnapshot.Status.ABSENT,
                     snap.status);
+        } catch (Exception e) {
+            throw new AssertionError(e);
         }
     }
 

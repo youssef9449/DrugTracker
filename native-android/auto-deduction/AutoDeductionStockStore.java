@@ -458,6 +458,7 @@ public final class AutoDeductionStockStore {
                         : stockKey(entry.getKey()), encode(entry.getValue()));
             }
             editor.putLong(KEY_LAST_FOREGROUND_SEQ, mutationSeq);
+            editor.putBoolean(KEY_STOCK_INITIALIZED, true);
 
             if (!editor.commit()) {
                 return ForegroundApplyResult.failure("foreground_stock_commit_failed");

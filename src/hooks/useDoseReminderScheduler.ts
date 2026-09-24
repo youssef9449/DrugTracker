@@ -323,7 +323,7 @@ export function useDoseReminderScheduler({
     for (const med of medicationsRef.current) {
       if (!med.reminderEnabled) continue;
       if (!isMedicationTreatmentActiveOnDate(med, today)) continue;
-      const treatmentEndDate = getMedicationTreatmentEndDate(med);
+      const treatmentEndDate = getMedicationTreatmentEndDate(med) ?? undefined;
       const slots = getDoseReminderSlots(med);
       if (slots.length === 0) continue;
       for (const slot of slots) {

@@ -146,7 +146,7 @@ describe('native.ts — two-channel dose-reminder design', () => {
     const {
       DOSE_REMINDER_CHANNEL_ID,
       DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
-    } = await import('@/utils/notifications');
+    } = await import('./utils/notificationTestFacade');
 
     vi.mocked(LocalNotifications.listChannels).mockResolvedValue({ channels: [] });
     vi.mocked(LocalNotifications.createChannel).mockClear();
@@ -207,7 +207,7 @@ describe('native.ts — two-channel dose-reminder design', () => {
 
     const { LocalNotifications } = await import('@capacitor/local-notifications');
     const { initNativeBridge } = await import('@/native');
-    const { DOSE_REMINDER_CHANNEL_ID } = await import('@/utils/notifications');
+    const { DOSE_REMINDER_CHANNEL_ID } = await import('./utils/notificationTestFacade');
 
     vi.mocked(LocalNotifications.listChannels).mockResolvedValue({ channels: [] });
     vi.mocked(LocalNotifications.createChannel).mockClear();

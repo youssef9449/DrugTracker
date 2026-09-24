@@ -52,7 +52,7 @@ export function getAutoDeductionDefinition(
 
   return {
     medicationId: med.id,
-    enabled: med.autoDeductEnabled !== false,
+    enabled: med.autoDeductEnabled === true,
     treatmentStartDate: getMedicationTreatmentStartDate(med) ?? '',
     treatmentEndDate: getMedicationTreatmentEndDate(med) ?? '',
     doses,

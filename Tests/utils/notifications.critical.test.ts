@@ -48,7 +48,7 @@ vi.mock('@capacitor/local-notifications', () => ({
 import {
   cancelCriticalAlarm,
   scheduleCriticalAlarm,
-  verifyCriticalAlarmPending } from '@/utils/notifications';
+  verifyCriticalAlarmPending } from './notificationTestFacade';
 
 beforeEach(() => {
   vi.clearAllMocks();

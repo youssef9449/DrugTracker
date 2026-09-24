@@ -156,6 +156,55 @@ describe('usePersistentEffect', () => {
     }
   });
 
+  it('flushes the newest value on pagehide before the debounce expires', () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = renderHook(
+        ({ value }) =>
+          usePersistentEffect({
+            storageKey: 'k',
+            value,
+            enabled: true,
+            debounceMs: 400,
+          }),
+        { initialProps: { value: { a: 1 } } }
+      );
+
+      rerender({ value: { a: 2 } });
+      window.dispatchEvent(new Event('pagehide'));
+
+      expect(localStorage.getItem('k')).toBe('{"a":2}');
+      vi.advanceTimersByTime(1000);
+      expect(localStorage.getItem('k')).toBe('{"a":2}');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('flushes rapid final changes as one durable latest value on teardown', () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = renderHook(
+        ({ value }) =>
+          usePersistentEffect({
+            storageKey: 'k',
+            value,
+            enabled: true,
+            debounceMs: 400,
+          }),
+        { initialProps: { value: { step: 1 } } }
+      );
+
+      rerender({ value: { step: 2 } });
+      rerender({ value: { step: 3 } });
+      window.dispatchEvent(new Event('beforeunload'));
+
+      expect(localStorage.getItem('k')).toBe('{"step":3}');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('cancels the pending debounced write on unmount', () => {
     vi.useFakeTimers();
     try {

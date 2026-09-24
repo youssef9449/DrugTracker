@@ -3,6 +3,7 @@ import type { ConsumptionLog, Medication } from '../types';
 import { calculateMedicationStatus } from '../utils/medicationStatus';
 import { describeStockInStrips, isSolidUnit } from '../utils/medicationPackaging';
 import { getDepletionDate } from '../utils/dateCalculations';
+import { isMedicationAutoDeductActive } from '../utils/doseSchedule';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { VISUAL_RANGE_MULTIPLIER, MIN_VISUAL_RANGE_DAYS, DAYS_PER_MONTH } from '../utils/time';
 import {

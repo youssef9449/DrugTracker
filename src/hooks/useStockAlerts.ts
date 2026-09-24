@@ -60,7 +60,7 @@ export function useStockAlerts({
       const { status, daysLeft } = calculateMedicationStatus(med);
       const isCriticalish = status === 'critical' || status === 'out_of_stock';
       const canNotify =
-        criticalStockAlertsEnabled && med.criticalStockAlertsEnabled !== false;
+        criticalStockAlertsEnabled && med.criticalStockAlertsEnabled === true;
 
       if (!isCriticalish) {
         const claim = getCriticalNotificationClaim(claims, med.id);

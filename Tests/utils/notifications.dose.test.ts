@@ -52,7 +52,7 @@ import {
   scheduleDoseReminder,
   scheduleSnoozedDoseReminder,
   isDoseReminderTimeStillAhead,
-} from '@/utils/notifications';
+} from './notificationTestFacade';
 
 /**
  * Extract the scheduled payload (id + schedule) of the LAST

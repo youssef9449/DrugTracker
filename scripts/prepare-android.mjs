@@ -432,6 +432,14 @@ function upsertApplicationMetaData(xml, androidName, value) {
 ));
 ({ manifest } = removeReceiverByName(
   manifest,
+  'app.drugtracker.criticalstock.CriticalStockSystemReceiver'
+));
+({ manifest } = removeReceiverByName(
+  manifest,
+  'app.drugtracker.dosereminder.DoseReminderSystemReceiver'
+));
+({ manifest } = removeReceiverByName(
+  manifest,
   'com.capacitorjs.plugins.localnotifications.TimedNotificationPublisher'
 ));
 ({ manifest } = removeReceiverByName(

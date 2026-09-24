@@ -9,9 +9,8 @@ import type { Medication } from '../../src/types';
 import {
   getAutoDeductionSlotsForDate,
   autoDeductionScheduleKey,
-  localEpochMs,
-  tomorrowDateString,
   isFireRetryRecoveryPending } from '../../src/hooks/useAutoDeductionScheduler';
+import { localEpochMs, tomorrowDateString } from '../../src/utils/dateCalculations';
 import { autoDeductionOccurrenceKey } from '../../src/utils/autoDeductionNativeIdentity';
 import { getAutoDeductionDefinitionForDate } from '../../src/utils/autoDeductionDefinition';
 

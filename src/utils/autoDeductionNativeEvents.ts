@@ -2,6 +2,7 @@ import type { PluginListenerHandle } from '@capacitor/core';
 import { classifyNativeError, toNativeBoundaryError, type NativeErrorCode } from './nativeErrors';
 import { AutoDeduction, isNativeAndroid } from './autoDeductionNativePlugin';
 import type { AutoDeductionEvent, ExactAutoDeductionFiredEvent, MarkReconciledResult } from './autoDeductionNativeTypes';
+export type { MarkReconciledResult } from './autoDeductionNativeTypes';
 
 export interface ListFiredEventsResult {
   ok: boolean;

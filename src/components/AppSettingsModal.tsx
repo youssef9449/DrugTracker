@@ -226,7 +226,13 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
       label={isPharmacyOnly ? 'إعدادات الصيدلية' : 'إعدادات التطبيق'}
     >
       <div
-        className="w-full sm:max-w-lg bg-white rounded-t-[28px] sm:rounded-[28px] shadow-xl border border-slate-200/80 overflow-hidden max-h-[92vh] flex flex-col animate-in slide-in-from-bottom duration-200"
+        className={
+          'w-full sm:max-w-lg bg-white rounded-t-[28px] sm:rounded-[28px] shadow-xl border'
+        className={
+          'w-full sm:max-w-lg bg-white rounded-t-[28px] sm:rounded-[28px] shadow-xl border'
+          + 'border-slate-200/80 overflow-hidden max-h-[92vh] flex flex-col animate-in'
+          + 'slide-in-from-bottom duration-200'
+        }
         dir="rtl"
       >
         {/* Header */}
@@ -252,7 +258,10 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="w-10 h-10 rounded-full text-teal-200 hover:text-white hover:bg-teal-700/80 transition flex items-center justify-center cursor-pointer"
+            className={
+              'w-10 h-10 rounded-full text-teal-200 hover:text-white '
+              + 'hover:bg-teal-700/80 transition flex items-center justify-center cursor-pointer'
+            }
             title="إغلاق"
             aria-label="إغلاق"
           >
@@ -298,7 +307,11 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
           <div className="pt-2">
             <button
               type="submit"
-              className="w-full h-11 px-6 bg-teal-700 hover:bg-teal-800 active:scale-98 text-white rounded-full font-semibold text-sm flex items-center justify-center gap-2 shadow-2xs transition cursor-pointer"
+              className={
+                'w-full h-11 px-6 bg-teal-700 hover:bg-teal-800 active:scale-98 '
+                + 'text-white rounded-full font-semibold text-sm flex items-center '
+                + 'justify-center gap-2 shadow-2xs transition cursor-pointer'
+              }
             >
               <Check className="w-4 h-4" />
               <span>{isPharmacyOnly ? 'حفظ إعدادات الصيدلية' : 'حفظ الإعدادات'}</span>

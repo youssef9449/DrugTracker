@@ -139,10 +139,20 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
           ) : null}
           <span>معدل الخصم: {medication.dailyDose} {medication.unit}/يوم</span>
           {hasStrips && (
-            <StripsBadge medication={medication} className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded shrink-0" />
+            <StripsBadge medication={medication}
+              className={
+                'text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5'
+                + 'rounded shrink-0'
+              }
+            />
           )}
           {!isSolid && medication.packageSize && medication.packageSize > 0 && (
-            <PackageSizeBadge medication={medication} className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded shrink-0" />
+            <PackageSizeBadge medication={medication}
+              className={
+                'text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5'
+                + 'rounded shrink-0'
+              }
+            />
           )}
         </div>
         {/* Quick Menu (extracted — see MedicationMenu.tsx) */}
@@ -206,7 +216,13 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
       <div className="mt-3 flex items-center gap-2">
         <button
           onClick={() => onOpenRefill(medication)}
-          className="flex-1 h-9 px-4 rounded-full bg-teal-700 hover:bg-teal-800 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 shadow-2xs cursor-pointer"
+          className={
+            'flex-1 h-9 px-4 rounded-full bg-teal-700 hover:bg-teal-800 text-white'
+          className={
+            'flex-1 h-9 px-4 rounded-full bg-teal-700 hover:bg-teal-800 text-white'
+            + 'font-semibold text-xs flex items-center justify-center gap-1.5 transition'
+            + 'active:scale-98 shadow-2xs cursor-pointer'
+          }
         >
           <Plus className="w-4 h-4" />
           <span>تعبئة رصيد</span>
@@ -214,7 +230,13 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
         {onNavigateToShopping && (
           <button
             onClick={onNavigateToShopping}
-            className="h-9 px-4 rounded-full bg-white hover:bg-slate-50 text-teal-800 border border-teal-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 cursor-pointer shrink-0"
+            className={
+              'h-9 px-4 rounded-full bg-white hover:bg-slate-50 text-teal-800 border'
+            className={
+              'h-9 px-4 rounded-full bg-white hover:bg-slate-50 text-teal-800 border'
+              + 'border-teal-300 font-semibold text-xs flex items-center justify-center gap-1.5'
+              + 'transition active:scale-98 cursor-pointer shrink-0'
+            }
             title="تجهيز طلب الشراء في الواتساب"
           >
             <ShoppingCart className="w-3.5 h-3.5 text-teal-700" />
@@ -280,10 +302,20 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
             </span>
           )}
           {hasStrips && (
-            <StripsBadge medication={medication} className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/50 shrink-0" />
+            <StripsBadge medication={medication}
+              className={
+                'text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border'
+                + 'border-emerald-200/50 shrink-0'
+              }
+            />
           )}
           {!isSolid && medication.packageSize && medication.packageSize > 0 && (
-            <PackageSizeBadge medication={medication} className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/50 shrink-0" />
+            <PackageSizeBadge medication={medication}
+              className={
+                'text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border'
+                + 'border-emerald-200/50 shrink-0'
+              }
+            />
           )}
           {medication.notes && (
             <span className="text-[11px] text-slate-400 truncate max-w-[180px]">
@@ -378,9 +410,13 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
   return (
     <div
       id={`med-card-${medication.id}`}
-      className={`bg-white rounded-2xl border border-slate-200 p-2 shadow-sm hover:shadow-md transition-shadow duration-200 relative overflow-hidden border-r-[3px] ${tag.border} ${
-        isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : ''
-      }`}
+      className={
+        `bg-white rounded-2xl border border-slate-200 p-2 shadow-sm `
+        + `hover:shadow-md transition-shadow duration-200 relative overflow-hidden `
+        + `border-r-[3px] ${tag.border} ${
+          isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : ''
+        }`
+      }
     >
       <MedicationCardHeader
         medication={medication}
@@ -411,7 +447,11 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
             type="button"
             onClick={() => onOpenRefill(medication)}
             title="تعبئة"
-            className="w-5 h-5 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors active:scale-95 cursor-pointer"
+            className={
+            className={
+              'w-5 h-5 flex items-center justify-center rounded-full bg-teal-100 text-teal-800'
+              + 'hover:bg-teal-200 transition-colors active:scale-95 cursor-pointer'
+            }
           >
             <Plus className="w-3 h-3" />
           </button>
@@ -464,9 +504,13 @@ export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) =
   return (
     <div
       id={`med-card-${medication.id}`}
-      className={`bg-white rounded-2xl border border-slate-200 p-2.5 shadow-sm hover:shadow-md transition-shadow duration-200 relative overflow-hidden border-r-[3px] ${tag.border} ${
-        isOut ? 'bg-red-50/20' : isCrit ? 'bg-rose-50/20' : ''
-      }`}
+      className={
+        `bg-white rounded-2xl border border-slate-200 p-2.5 shadow-sm `
+        + `hover:shadow-md transition-shadow duration-200 relative overflow-hidden `
+        + `border-r-[3px] ${tag.border} ${
+          isOut ? 'bg-red-50/20' : isCrit ? 'bg-rose-50/20' : ''
+        }`
+      }
     >
       <MedicationCardHeader
         medication={medication}
@@ -497,7 +541,11 @@ export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) =
             type="button"
             onClick={() => onOpenRefill(medication)}
             title="تعبئة رصيد"
-            className="w-6 h-6 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors active:scale-95 cursor-pointer"
+            className={
+            className={
+              'w-6 h-6 flex items-center justify-center rounded-full bg-teal-100 text-teal-800'
+              + 'hover:bg-teal-200 transition-colors active:scale-95 cursor-pointer'
+            }
           >
             <Plus className="w-3.5 h-3.5" />
           </button>

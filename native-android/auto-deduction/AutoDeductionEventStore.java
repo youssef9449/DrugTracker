@@ -365,6 +365,15 @@ public final class AutoDeductionEventStore {
                 return new MarkResult(true, false);
             }
             if (!decoded.isSuccess()) {
+                if (decoded.status != null
+                        && !decoded.status.isEmpty()
+                        && !AutoDeductionContract.STATUS_REJECTED.equals(decoded.status)
+                        && !AutoDeductionContract.STATUS_FIRED.equals(decoded.status)
+                        && !AutoDeductionContract.STATUS_RECONCILED.equals(decoded.status)) {
+                    // Unknown status is not a valid event transition target. Leave the
+                    // row untouched so an explicit recovery/quarantine path can own it.
+                    return new MarkResult(false, false);
+                }
                 if ("invalid_json".equals(decoded.error)) {
                     return new MarkResult(
                             terminalizeRejectedLocked(prefKey, "invalid_json").ok,
@@ -373,9 +382,7 @@ public final class AutoDeductionEventStore {
                 return new MarkResult(
                         terminalizeRejectedLocked(
                                 prefKey,
-                                decoded.error == null
-                                        ? "malformed_fields"
-                                        : decoded.error).ok,
+                                "malformed_fields").ok,
                         false);
             }
 
@@ -652,12 +659,14 @@ public final class AutoDeductionEventStore {
                 return EventLookupResult.absent();
             }
 
-            if (!storageIdentityMatchesPayload(
-                    parseStorageKeyIdentity(prefKey), record)
-                    || !medicationId.equals(record.occurrence.medicationId)
+            StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
+            if (!storageIdentityMatchesPayload(storageIdentity, record)) {
+                return terminalizeRejectedLocked(prefKey, "identity_mismatch");
+            }
+            if (!medicationId.equals(record.occurrence.medicationId)
                     || !doseId.equals(record.occurrence.doseId)
                     || !calendarDate.equals(record.occurrence.calendarDate)) {
-                return terminalizeRejectedLocked(prefKey, "identity_mismatch");
+                return terminalizeRejectedLocked(prefKey, "malformed_fields");
             }
 
             return EventLookupResult.found(record);

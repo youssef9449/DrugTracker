@@ -4,7 +4,6 @@ import type { Medication, ConsumptionLog } from '../../src/types';
 import { makeMedication as baseMed, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
 import { reconcileFiredEvents, isExactAutoOccurrenceApplied, exactAutoLogId } from '../../src/utils/autoDeductionReconciliation';
 
-import type { AutoDeductionEvent } from '../../src/utils/autoDeductionNativeTypes';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 
 

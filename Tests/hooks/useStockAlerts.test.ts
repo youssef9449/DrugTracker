@@ -11,7 +11,7 @@ vi.mock('../utils/notificationTestFacade', () => ({
 }));
 
 import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notificationTestFacade';
-import { readCriticalClaims as readClaims, writeCriticalClaims as writeClaims, writeCriticalClaim as writeClaim, clearCriticalClaims } from '../helpers/criticalStockClaims';
+import { readCriticalClaims as readClaims, writeCriticalClaim as writeClaim } from '../helpers/criticalStockClaims';
 
 const sendMock = vi.mocked(sendCriticalStockAlert);
 const cancelMock = vi.mocked(cancelCriticalAlarm);

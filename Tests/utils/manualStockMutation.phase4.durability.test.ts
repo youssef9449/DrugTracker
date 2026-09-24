@@ -848,6 +848,87 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   });
 
 
+  it('durableMatchesEnvelopeSnapshot: full match → finalize + clear without re-apply (via recovery)', async () => {
+    // Envelope snapshot exactly equals durable → recovery finalizes + clears
+    // without re-applying the snapshot (no extra mutation).
+    durable = {
+      medications: [med({ currentPills: 8, doseConsumptionHistory: { d1: [TODAY] } })],
+      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+    };
+    let phase4Exact: ExactAutoEnvelope | null = {
+      version: 1,
+      status: 'js_ready',
+      medications: durable.medications.map((m) => ({ ...m })),
+      logs: durable.logs.map((l) => ({ ...l })),
+      toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
+      createdAt: new Date().toISOString(),
+      mutationSeq: 3,
+      globalAutoDeductEnabled: true,
+    };
+    let lastApplied = 3;
+    __setStockMutationOrderingTestHooks({
+      loadLastApplied: () => lastApplied,
+      persistLastApplied: (seq) => { lastApplied = seq; return null; },
+      allocate: () => { return { ok: true, seq: 99 }; },
+    });
+
+    marked = [];
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => ({ ok: true, events: [] }),
+      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
+      loadEnvelope: () => phase4Exact,
+      saveEnvelope: (e) => { phase4Exact = e; return null; },
+    });
+
+    // Snapshot matched → finalize (no-op, seq 3 <= lastApplied 3) + clear + ACK.
+    expect(phase4Exact).toBeNull();
+    expect(durable.medications[0].currentPills).toBe(8);
+    expect(durable.logs.filter((l) => l.id === 'match-clear')).toHaveLength(1);
+    expect(marked).toEqual([`med-1|d1|${TODAY}`]);
+    expect(recon.markedCount).toBe(1);
+  });
+
+  it('durableMatchesEnvelopeSnapshot: mismatch → apply snapshot then finalize then clear', async () => {
+    // Envelope snapshot differs from durable → recovery re-applies the
+    // envelope snapshot, finalizes, then clears.
+    durable = { medications: [med({ currentPills: 10 })], logs: [] };
+    let phase4Exact: ExactAutoEnvelope | null = {
+      version: 1,
+      status: 'js_ready',
+      medications: [med({ currentPills: 7, doseConsumptionHistory: { d1: [TODAY] } })],
+      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+      toAcknowledge: [{ medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY }],
+      createdAt: new Date().toISOString(),
+      mutationSeq: 4,
+      globalAutoDeductEnabled: true,
+    };
+    let lastApplied = 0;
+    __setStockMutationOrderingTestHooks({
+      loadLastApplied: () => lastApplied,
+      persistLastApplied: (seq) => { lastApplied = seq; return null; },
+      allocate: () => { return { ok: true, seq: 4 }; },
+    });
+
+    marked = [];
+    const recon = await runAutoDeductionReconciliation({
+      globalAutoDeductEnabled: true,
+      listFired: async () => ({ ok: true, events: [] }),
+      markReconciled: async (m, d, c) => { marked.push(`${m}|${d}|${c}`); return { ok: true, changed: true }; },
+      loadEnvelope: () => phase4Exact,
+      saveEnvelope: (e) => { phase4Exact = e; return null; },
+    });
+
+    // Snapshot re-applied: durable now matches envelope (currentPills=7).
+    expect(durable.medications[0].currentPills).toBe(7);
+    expect(durable.logs.some((l) => l.id === 'mismatch-apply')).toBe(true);
+    expect(phase4Exact).toBeNull();
+    expect(lastApplied).toBe(4);
+    expect(marked).toEqual([`med-1|d1|${TODAY}`]);
+    expect(recon.markedCount).toBe(1);
+  });
+
+  it('crash after persistence before finalization → restart finalizes without double mutation', async () => {
   it('crash after persistence before finalization → restart finalizes without double mutation', async () => {
     // Simulate: envelope seq=5, durable already reflects the snapshot (commit
     // succeeded), but lastApplied did NOT advance (finalize crashed). Restart

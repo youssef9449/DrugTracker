@@ -4,7 +4,7 @@ import { calculateMedicationStatus } from '../utils/medicationStatus';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { DAYS_PER_MONTH } from '../utils/time';
 import { formatDepletionDate } from '../utils/medicationPresentation';
-import { Pill, Plus, Calendar, CheckCircle2, CheckCircle, ShoppingCart, Clock } from 'lucide-react';
+import { Plus, Calendar, CheckCircle2, ShoppingCart, Clock } from 'lucide-react';
 import { MedicationMenu, MedicationOverflowMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
 import {

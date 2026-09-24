@@ -50,7 +50,7 @@ vi.mock('../utils/notificationTestFacade', async () => {
 });
 
 import { scheduleCriticalAlarm, cancelCriticalAlarm, verifyCriticalAlarmPending } from '../utils/notificationTestFacade';
-import { readCriticalClaims as readClaims, writeCriticalClaims as writeClaims, writeCriticalClaim as writeClaim, clearCriticalClaims } from '../helpers/criticalStockClaims';
+import { readCriticalClaims as readClaims, writeCriticalClaims as writeClaims, writeCriticalClaim as writeClaim } from '../helpers/criticalStockClaims';
 
 const scheduleMock = vi.mocked(scheduleCriticalAlarm);
 const cancelMock = vi.mocked(cancelCriticalAlarm);

@@ -9,13 +9,10 @@ import {
   CheckCircle2,
   MessageSquare,
   MessageCircle,
-  Volume2,
-  VolumeX,
   Bell,
   BellOff,
   AlertTriangle,
-  Zap,
-  ZapOff,
+  ,
 } from 'lucide-react';
 import { Medication, PharmacySettings } from '../types';
 import { Toggle } from './ui/Toggle';

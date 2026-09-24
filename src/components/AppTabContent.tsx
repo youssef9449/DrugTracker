@@ -65,13 +65,13 @@ export const AppTabContent: FC<AppTabContentProps> = (props) => {
   const {
     activeTab, filter, searchQuery, medications, logs, pharmacySettings, isCompactView,
     medicationSortField, medicationSortDirection, soundEnabled, medicationsWithStatus,
-    filteredMedications, alertsCount, sufficientCount, lastRefillByMed, userContacts, userAddresses,
+    filteredMedications, alertsCount, sufficientCount, userContacts, userAddresses,
     showToast, setFilter, setSearchQuery, setMedicationSortField, setMedicationSortDirection,
     setIsCompactView, setPharmacySettings, setEditingMedication, setIsAddModalOpen,
     setRefillMedication, setHistoryMedication, navigateToTab, registerBackOverlay, openAdd,
     handleDeleteMedication, handleToggleAutoDeduct, handleToggleMedicationReminder,
     handleToggleMedicationCriticalStockAlerts, handleConsumeDose, handleCardRestoreDose,
-    handleUndoRefill, testAlarm, handleSavePharmacy, handleDeletePharmacy,
+    handleSavePharmacy, handleDeletePharmacy,
     handleSaveUserContact, handleDeleteUserContact, handleSaveUserAddress, handleDeleteUserAddress,
   } = props;
 

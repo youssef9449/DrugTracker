@@ -143,15 +143,20 @@ assert(
   retry.includes('host.schedulingAdapter().scheduleFireRetry('),
   'retry alarm installation must cross the Auto scheduling adapter from the retry collaborator'
 );
-assert(
-  scheduler.includes('implements AutoDeductionRecurrence.Host')
-    && scheduler.includes('implements AutoDeductionRecovery.Host')
-    && scheduler.includes('implements AutoDeductionFireService.Host')
-    && scheduler.includes('implements AutoDeductionCancellation.Host')
-    && scheduler.includes('implements AutoDeductionOccurrenceState.Host')
-    && scheduler.includes('implements AutoDeductionRetry.Host'),
-  'scheduler facade must provide narrow collaborator host contracts'
-);
+const requiredHosts = [
+  'AutoDeductionRecurrence.Host',
+  'AutoDeductionRecovery.Host',
+  'AutoDeductionFireService.Host',
+  'AutoDeductionCancellation.Host',
+  'AutoDeductionOccurrenceState.Host',
+  'AutoDeductionRetry.Host',
+];
+for (const hostContract of requiredHosts) {
+  assert(
+    scheduler.includes(hostContract),
+    'scheduler facade must provide collaborator host contract: ' + hostContract
+  );
+}
 assert(
   adapter.includes('import app.drugtracker.alarmruntime.ExactAlarmRuntime;'),
   'adapter must own the ExactAlarmRuntime dependency'

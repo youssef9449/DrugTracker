@@ -40,14 +40,14 @@ public class JSObject {
         return json.optString(key, null);
     }
 
-    public boolean getBool(String key) {
+    public Boolean getBool(String key) {
         if (!json.has(key) || json.isNull(key)) {
-            return false;
+            return Boolean.FALSE;
         }
         try {
-            return json.getBoolean(key);
+            return Boolean.valueOf(json.getBoolean(key));
         } catch (Exception e) {
-            return false;
+            return Boolean.FALSE;
         }
     }
 

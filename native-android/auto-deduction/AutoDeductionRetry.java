@@ -6,13 +6,33 @@ import app.drugtracker.autodeduction.AutoDeductionScheduler.ScheduleResult;
 
 /** Focused Auto-Deduction responsibility collaborator: AutoDeductionRetry. */
 final class AutoDeductionRetry {
-    private final AutoDeductionScheduler scheduler;
+    interface Host {
+        Context appContext();
+        boolean isOccurrenceCancelledKey(String occurrenceKey);
+        AutoDeductionSchedulingAdapter schedulingAdapter();
+        long getRecurrenceGenerationLocked(String medicationId, String doseId);
+        AutoDeductionFailurePolicy failurePolicy();
+        AutoDeductionEventStore eventStore();
+        boolean persistSuccessorObligation(
+                String medicationId, String doseId, String calendarDate,
+                String timeHhmm, double amount, String treatmentEndDate,
+                String operationVersion, long recurrenceGeneration);
+        boolean markSuccessorObligationStockApplied(
+                String medicationId, String doseId, String calendarDate);
+        ScheduleResult scheduleNextOccurrenceFromIndependentEvidenceLocked(
+                String medicationId, String doseId, String calendarDate,
+                AutoDeductionPersistenceModels.RetryEvidenceRecord evidence);
+        boolean clearSuccessorObligation(
+                String medicationId, String doseId, String calendarDate);
+    }
+
+    private final Host host;
     private final AutoDeductionRetryEvidenceStore evidenceStore;
 
-    AutoDeductionRetry(AutoDeductionScheduler scheduler) {
-        this.scheduler = scheduler;
+    AutoDeductionRetry(Host host) {
+        this.host = host;
         this.evidenceStore = new AutoDeductionRetryEvidenceStore(
-                scheduler.appContext());
+                host.appContext());
     }
 
 boolean scheduleFireRetry(
@@ -39,11 +59,11 @@ boolean scheduleFireRetry(
                 medicationId, doseId, calendarDate);
         final String prefKey = key;
         synchronized (AutoDeductionScheduler.class) {
-            if (scheduler.isOccurrenceCancelledKey(key)) {
+            if (host.isOccurrenceCancelledKey(key)) {
                 return false;
             }
             AutoDeductionPersistenceModels.ScheduleRecord current =
-                    scheduler.schedulingAdapter().getScheduleRecord(prefKey);
+                    host.schedulingAdapter().getScheduleRecord(prefKey);
             AutoDeductionPersistenceModels.RetryEvidenceRecord existingEvidence =
                     evidenceStore.get(medicationId, doseId, calendarDate);
             int priorRetryCount = existingEvidence == null
@@ -61,7 +81,7 @@ boolean scheduleFireRetry(
             }
             if (current != null) {
                 long activeGen =
-                        scheduler.getRecurrenceGenerationLocked(medicationId, doseId);
+                        host.getRecurrenceGenerationLocked(medicationId, doseId);
                 if (operationVersion == null || operationVersion.isEmpty()
                         || recurrenceGeneration <= 0L
                         || !operationVersion.equals(current.operationVersion)
@@ -72,7 +92,7 @@ boolean scheduleFireRetry(
                 // A missing schedule is allowed only for an already-durable historical
                 // retry source. The evidence itself must still belong to the active
                 // recurrence generation and the requested retry payload must match it.
-                long activeGen = scheduler.getRecurrenceGenerationLocked(
+                long activeGen = host.getRecurrenceGenerationLocked(
                         medicationId, doseId);
                 if (existingEvidence == null
                         || existingEvidence.recurrenceGeneration != activeGen
@@ -92,7 +112,7 @@ boolean scheduleFireRetry(
                     persistedRetryCount)) {
                 return false;
             }
-            return scheduler.schedulingAdapter().scheduleFireRetry(
+            return host.schedulingAdapter().scheduleFireRetry(
                     medicationId,
                     doseId,
                     calendarDate,
@@ -139,7 +159,7 @@ boolean recordIndependentFireRetryEvidenceLocked(
                             operationVersion,
                             count,
                             System.currentTimeMillis());
-            boolean ok = evidenceStore.save(record, scheduler.failurePolicy());
+            boolean ok = evidenceStore.save(record, host.failurePolicy());
             if (!ok) {
                 Log.e("AutoDeductionScheduler",
                         "independent fire-retry evidence commit failed for " + key);
@@ -192,7 +212,7 @@ public FireResult recoverFireFromIndependentEvidence(
             AutoDeductionPersistenceModels.RetryEvidenceRecord evidence =
                     evidenceStore.get(medicationId, doseId, calendarDate);
             if (evidence == null) {
-                if (scheduler.isOccurrenceCancelledKey(key)) {
+                if (host.isOccurrenceCancelledKey(key)) {
                     return FireResult.cancelled();
                 }
                 return new FireResult(FireResult.Status.FAILED, false);
@@ -203,10 +223,10 @@ public FireResult recoverFireFromIndependentEvidence(
             // may invalidate recurrence continuation, but it must not erase the
             // already-authorized occurrence or prevent its Native stock recovery.
             final boolean occurrenceCancelled =
-                    scheduler.isOccurrenceCancelledKey(key);
+                    host.isOccurrenceCancelledKey(key);
             AutoDeductionPersistenceModels.ScheduleRecord current =
-                    scheduler.schedulingAdapter().getScheduleRecord(key);
-            long activeGeneration = scheduler.getRecurrenceGenerationLocked(
+                    host.schedulingAdapter().getScheduleRecord(key);
+            long activeGeneration = host.getRecurrenceGenerationLocked(
                     medicationId, doseId);
             final boolean ownsCurrentSchedule =
                     !occurrenceCancelled
@@ -236,7 +256,7 @@ public FireResult recoverFireFromIndependentEvidence(
             }
 
             AutoDeductionEventStore.InsertFiredResult ir =
-                    scheduler.eventStore().insertFiredIfAbsent(
+                    host.eventStore().insertFiredIfAbsent(
                             medicationId,
                             doseId,
                             calendarDate,
@@ -275,7 +295,7 @@ public FireResult recoverFireFromIndependentEvidence(
                     : current.operationVersion;
 
             if (ownsCurrentSchedule
-                    && !scheduler.persistSuccessorObligation(
+                    && !host.persistSuccessorObligation(
                             medicationId,
                             doseId,
                             calendarDate,
@@ -288,7 +308,7 @@ public FireResult recoverFireFromIndependentEvidence(
             }
 
             AutoDeductionStockStore.AutoApplyResult stockResult =
-                    new AutoDeductionStockStore(scheduler.appContext()).applyAutoDeductionForRecovery(
+                    new AutoDeductionStockStore(host.appContext()).applyAutoDeductionForRecovery(
                             medicationId,
                             doseId,
                             calendarDate,
@@ -309,7 +329,7 @@ public FireResult recoverFireFromIndependentEvidence(
             }
 
             if (ownsCurrentSchedule
-                    && !scheduler.markSuccessorObligationStockApplied(
+                    && !host.markSuccessorObligationStockApplied(
                             medicationId, doseId, calendarDate)) {
                 return new FireResult(FireResult.Status.FAILED, false);
             }
@@ -323,10 +343,10 @@ public FireResult recoverFireFromIndependentEvidence(
             }
 
             ScheduleResult successor =
-                    scheduler.scheduleNextOccurrenceFromIndependentEvidenceLocked(
+                    host.scheduleNextOccurrenceFromIndependentEvidenceLocked(
                             medicationId, doseId, calendarDate, evidence);
             if (successor.ok) {
-                scheduler.clearSuccessorObligation(
+                host.clearSuccessorObligation(
                         medicationId, doseId, calendarDate);
                 clearIndependentFireRetryEvidenceLocked(key);
                 return result;
@@ -345,7 +365,7 @@ public FireResult recoverFireFromIndependentEvidence(
                 // metadata only means there is no safe successor to create from
                 // this evidence; do not relabel the successfully recovered D as
                 // CANCELLED.
-                scheduler.clearSuccessorObligation(
+                host.clearSuccessorObligation(
                         medicationId, doseId, calendarDate);
                 clearIndependentFireRetryEvidenceLocked(key);
                 return result;

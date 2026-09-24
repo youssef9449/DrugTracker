@@ -92,7 +92,7 @@ public InvalidateResult invalidateRecurrenceAuthorization(
                 || doseId == null || doseId.isEmpty()) {
             return InvalidateResult.fail("invalid_args");
         }
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             String authKey = recurrenceAuthKey(medicationId, doseId);
             long prev = recurrenceAuthPrefs.getLong(authKey, 0L);
 
@@ -149,7 +149,7 @@ ScheduleResult installFutureSuccessorIfGenerationHolds(
         final String futureKey = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
         final String futurePrefKey = futureKey;
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             if (!isRecurrenceGenerationAuthorizedLocked(
                     medicationId, doseId, expectedRecurrenceGeneration)) {
                 scheduler.removeScheduleMetadataIfVersionLocked(pastPrefKey, observedVersion);
@@ -315,7 +315,7 @@ ScheduleResult installFutureSuccessorIfGenerationHolds(
                         triggerAt,
                         treatmentEndDate == null ? "" : treatmentEndDate,
                         "");
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             return scheduleOccurrenceLocked(key, record, null, null);
         }
     }
@@ -410,7 +410,7 @@ public ScheduleResult scheduleNextOccurrence(
             double amount
     ) {
         long generation;
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             generation = ensureRecurrenceGenerationLocked(
                     medicationId, doseId);
         }
@@ -456,7 +456,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
         boolean originalSourceWasLive = false;
         String originalSourceOperationVersion = "";
 
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             if (!isRecurrenceGenerationAuthorizedLocked(
                     medicationId, doseId, expectedRecurrenceGeneration)) {
                 return ScheduleResult.fail("recurrence_authorization_invalid");
@@ -543,7 +543,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                             && Double.compare(amount, activeAmount) == 0;
 
             if (epoch > scheduler.recoveryNowForService()) {
-                synchronized (scheduler.scheduleLock()) {
+                synchronized (AutoDeductionScheduler.class) {
                     if (!isRecurrenceGenerationAuthorizedLocked(
                             medicationId, doseId, expectedRecurrenceGeneration)) {
                         return ScheduleResult.fail("recurrence_authorization_invalid");
@@ -649,7 +649,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                     AutoDeductionContract.occurrenceKey(
                             medicationId, doseId, calendarDate);
 
-            synchronized (scheduler.scheduleLock()) {
+            synchronized (AutoDeductionScheduler.class) {
                 if (!isRecurrenceGenerationAuthorizedLocked(
                         medicationId, doseId, obligation.recurrenceGeneration)) {
                     scheduler.successorObligationStore().clear(
@@ -769,7 +769,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
             }
 
             if (epoch.longValue() > scheduler.recoveryNowForService()) {
-                synchronized (scheduler.scheduleLock()) {
+                synchronized (AutoDeductionScheduler.class) {
                     if (!isRecurrenceGenerationAuthorizedLocked(
                             medicationId,
                             doseId,
@@ -913,7 +913,7 @@ ScheduleResult scheduleNextOccurrenceIfSnapshotOwnsPast(
             return ScheduleResult.fail("snapshot_stale");
         }
         final long generation;
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             if (!scheduler.schedulingAdapter()
                     .isScheduleOwnedByOperationVersion(pastPrefKey, observedVersion)) {
                 return ScheduleResult.fail("snapshot_stale");

@@ -7,7 +7,7 @@ import type { ExactAutoEnvelope } from '../../src/utils/runAutoDeductionReconcil
 
 import { makeScheduledMedication as med, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
 import { runGatedManualConsume, runGatedManualRestore, runGatedAddMedication, runGatedRefill, runGatedUndoRefill, runGatedAutoDeductToggle, runGatedGlobalAutoDeductToggle, runGatedDeleteMedication } from '../../src/utils/manualStockMutation';
-import { loadExactAutoStockEnvelope, durableMatchesEnvelopeSnapshot as matchesDurableEnvelope } from '../../src/utils/stockEnvelopeRecovery';
+import { loadExactAutoStockEnvelope } from '../../src/utils/stockEnvelopeRecovery';
 import { allocateMutationSeq, persistLastAppliedMutationSeq, loadLastAppliedMutationSeq } from '../../src/utils/stockMutationOrdering';
 import { runAutoDeductionReconciliation } from '../../src/utils/runAutoDeductionReconciliation';
 

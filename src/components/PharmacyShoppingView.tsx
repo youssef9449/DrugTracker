@@ -356,7 +356,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       .map((med) => {
         const { quantity: suggestedPills } = calculateMedicationOrderQuantity(
           med,
-          shoppingDurationDays(med, medicationPeriods, settings.defaultDurationDays)
+          getDurationDays(med)
         );
         return {
           name: med.name,
@@ -385,7 +385,7 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     return medications.map((med) => {
       const { quantity: suggestedPills } = calculateMedicationOrderQuantity(
         med,
-        shoppingDurationDays(med, medicationPeriods, settings.defaultDurationDays)
+        getDurationDays(med)
       );
       return {
         name: med.name,

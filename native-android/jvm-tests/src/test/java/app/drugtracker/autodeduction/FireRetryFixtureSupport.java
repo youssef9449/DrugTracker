@@ -3,11 +3,18 @@ package app.drugtracker.autodeduction;
 import static app.drugtracker.autodeduction.Phase2TestSupport.appContext;
 import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
 import static app.drugtracker.autodeduction.Phase2TestSupport.futureCalendarDate;
+import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+
+import app.drugtracker.alarmruntime.ExactAlarmContract;
 
 import android.app.AlarmManager;
 import android.content.Context;
 
+import org.json.JSONObject;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.runner.RunWith;

@@ -210,6 +210,7 @@ public class FireRetryScheduleTest {
     public void scheduleFireRetry_keepsRetryStateOutOfSharedMetadata()
             throws Exception {
         String date = futureCalendarDate(2);
+        seedAutoStock("med", 10.0);
         long epoch = futureEpochMs(date, "12:00");
         AutoDeductionScheduler s = newScheduler();
         assertTrue(s.scheduleOccurrence(
@@ -755,6 +756,7 @@ public class FireRetryScheduleTest {
     public void recoverWithoutSch_existingEvidence_producesDurableFired()
             throws Exception {
         String date = "2026-09-16";
+        seedAutoStock("med", 10.0);
         AutoDeductionScheduler s = newScheduler();
         synchronized (getScheduleLock()) {
             assertTrue(s.recordIndependentFireRetryEvidenceLocked(

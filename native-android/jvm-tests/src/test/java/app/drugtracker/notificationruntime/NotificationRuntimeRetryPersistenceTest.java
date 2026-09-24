@@ -15,7 +15,6 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -65,7 +64,7 @@ public class NotificationRuntimeRetryPersistenceTest {
         assertNotNull(raw);
         assertEquals("dose", identityField(raw, "namespace"));
         assertEquals("med-1", identityField(raw, "identity"));
-        assertTrue(new JSONObject(raw).optLong("queuedAtEpochMs", 0L) > 0L);
+        assertTrue(queuedAt(raw) > 0L);
     }
 
     @Test
@@ -123,6 +122,14 @@ public class NotificationRuntimeRetryPersistenceTest {
                 .orElseThrow()
                 .getValue();
         assertEquals("med-b", identityField(raw, "identity"));
+    }
+
+    private static long queuedAt(String raw) {
+        try {
+            return new JSONObject(raw).getLong("queuedAtEpochMs");
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
     }
 
     private int entryCount() {

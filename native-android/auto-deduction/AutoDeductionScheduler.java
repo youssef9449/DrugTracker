@@ -153,6 +153,23 @@ public final class AutoDeductionScheduler {
                 return AutoDeductionScheduler.this.removeScheduleMetadataIfVersion(
                         prefKey, expectedVersion);
             }
+            @Override public Map<String, String> getAllScheduleMetadata() {
+                return AutoDeductionScheduler.this.getAllScheduleMetadata();
+            }
+            @Override public boolean hasCancellationTombstone(String occurrenceKey) {
+                return AutoDeductionScheduler.this.hasCancellationTombstone(occurrenceKey);
+            }
+            @Override public boolean clearCancellationTombstoneLocked(String occurrenceKey) {
+                return AutoDeductionScheduler.this.clearCancellationTombstoneLocked(occurrenceKey);
+            }
+            @Override public boolean persistSuccessorObligation(
+                    String medicationId, String doseId, String calendarDate, String timeHhmm,
+                    double amount, String treatmentEndDate, String operationVersion,
+                    long recurrenceGeneration) {
+                return AutoDeductionScheduler.this.persistSuccessorObligation(
+                        medicationId, doseId, calendarDate, timeHhmm, amount,
+                        treatmentEndDate, operationVersion, recurrenceGeneration);
+            }
             @Override public AutoDeductionSchedulingAdapter schedulingAdapter() {
                 return AutoDeductionScheduler.this.schedulingAdapter;
             }

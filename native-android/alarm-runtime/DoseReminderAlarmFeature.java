@@ -18,6 +18,13 @@ public final class DoseReminderAlarmFeature
 
     private static final String TAG = "DoseReminderAlarmFeature";
 
+    /**
+     * Recovery delay (ms) for a stale snooze found during restore: re-armed
+     * slightly in the future so delivery runs with fresh state instead of
+     * firing instantly mid-recovery (#513 named constants).
+     */
+    private static final long SNOOZE_RECOVERY_DELAY_MS = 1_000L;
+
     @Override
     public void restore(
             Context context,
@@ -30,58 +37,90 @@ public final class DoseReminderAlarmFeature
         DoseReminderAlarmAdapter adapter =
                 new DoseReminderAlarmAdapter(context);
         for (String key : adapter.listScheduledKeys()) {
+            // #506: shared restoration policy — every record reaches a
+            // terminal state (restore / resolve / remove / preserve).
             String[] parts = key.split("::", 2);
-            if (parts.length != 2
-                    || parts[0].isEmpty()
-                    || parts[1].isEmpty()) {
-                continue;
-            }
+            boolean identityKeyValid =
+                    parts.length == 2 && !parts[0].isEmpty() && !parts[1].isEmpty();
 
-            String medicationId = parts[0];
-            String doseId = parts[1];
-            JSONObject meta = adapter.getScheduleMetadata(
+            String medicationId = identityKeyValid ? parts[0] : null;
+            String doseId = identityKeyValid ? parts[1] : null;
+            JSONObject meta = identityKeyValid
+                    ? adapter.getScheduleMetadata(medicationId, doseId)
+                    : null;
+            boolean cancelled = identityKeyValid && adapter.isOccurrenceEffectivelyCancelled(
                     medicationId,
                     doseId);
-            if (meta == null) {
-                continue;
-            }
-            if (adapter.isOccurrenceEffectivelyCancelled(
-                    medicationId,
-                    doseId)) {
-                continue;
-            }
 
-            String reminderTime = meta.optString("reminderTime", "");
-            if (reminderTime.isEmpty()) {
+            String reminderTime = meta == null ? "" : meta.optString("reminderTime", "");
+            String treatmentEndDate = meta == null ? "" : meta.optString("treatmentEndDate", "");
+            double amount = meta == null ? 0d : meta.optDouble("amount", 0d);
+            String calendarDate = meta == null ? "" : meta.optString("calendarDate", "");
+            long triggerFromRecord = reminderTime.isEmpty() || calendarDate.isEmpty()
+                    ? -1L
+                    : ExactAlarmContract.resolveLocalDateTimeEpochMs(calendarDate, reminderTime, false);
+            long now = System.currentTimeMillis();
+            boolean triggerInPast = triggerFromRecord > 0L && triggerFromRecord <= now;
+            boolean treatmentEndInvalid = !treatmentEndDate.isEmpty()
+                    && !ExactAlarmContract.isValidCalendarDate(treatmentEndDate);
+
+            String missingField = null;
+            if (reminderTime.isEmpty()) missingField = "reminderTime";
+            else if (amount <= 0d) missingField = "amount";
+            else if (calendarDate.isEmpty()) missingField = "calendarDate";
+            else if (treatmentEndInvalid) missingField = "treatmentEndDate";
+
+            ExactAlarmRestorePolicy.Outcome outcome = ExactAlarmRestorePolicy.evaluate(
+                    cancelled,
+                    identityKeyValid,
+                    meta != null,
+                    missingField,
+                    triggerFromRecord > 0L,
+                    triggerInPast,
+                    /* ownershipConflict */ false);
+
+            if (outcome.action == ExactAlarmRestorePolicy.Action.PRESERVE) {
                 continue;
             }
+            if (outcome.action == ExactAlarmRestorePolicy.Action.REMOVE_MALFORMED) {
+                // Terminal cleanup: the record cannot be restored, so remove it
+                // through the feature cancel path over the shared runtime.
+                if (identityKeyValid) {
+                    DoseReminderAlarmAdapter.CancelResult removed =
+                            adapter.cancelOccurrence(medicationId, doseId);
+                    Log.w(TAG, reason + ": removed malformed alarm record "
+                            + key + " (" + outcome.reason + ", removed=" + removed.isOk() + ")");
+                } else {
+                    Log.w(TAG, reason + ": malformed alarm record key retained for diagnosis: "
+                            + key + " (" + outcome.reason + ")");
+                }
+                continue;
+            }
+            medicationId = parts[0];
+            doseId = parts[1];
             String medicationName = meta.optString(
                     "medicationName", "");
             String unit = meta.optString("unit", "قرص");
             String doseDescription = meta.optString("doseDescription", "");
-            String treatmentEndDate = meta.optString("treatmentEndDate", "");
-            double amount = meta.optDouble("amount", 0d);
             boolean allowManualTakeAction = meta.optBoolean(
                     "allowManualTakeAction", true);
-            String calendarDate = meta.optString(
-                    "calendarDate", "");
             String operationVersion = meta.optString(
                     ExactAlarmContract.FIELD_OPERATION_VERSION,
                     "");
 
-            long trigger = ExactAlarmContract.resolveLocalDateTimeEpochMs(calendarDate, reminderTime, false);
-            long now = System.currentTimeMillis();
-            if (trigger <= now) {
+            long trigger = triggerFromRecord;
+            if (outcome.action == ExactAlarmRestorePolicy.Action.RESOLVE_STALE) {
                 trigger = advanceOneCalendarDay(
                         calendarDate,
                         reminderTime,
                         now);
             }
-            if (trigger <= now || amount <= 0d) {
-                continue;
-            }
-            if (!treatmentEndDate.isEmpty()
-                    && !ExactAlarmContract.isValidCalendarDate(treatmentEndDate)) {
+            if (trigger <= now) {
+                Log.w(TAG, reason + ": unrecoverable alarm record removed: "
+                        + key + " (no future occurrence)");
+                DoseReminderAlarmAdapter.CancelResult removed =
+                        adapter.cancelOccurrence(medicationId, doseId);
+                Log.w(TAG, reason + ": removal ok=" + removed.isOk());
                 continue;
             }
             if (!treatmentEndDate.isEmpty()) {
@@ -178,7 +217,7 @@ public final class DoseReminderAlarmFeature
 
             long now = System.currentTimeMillis();
             if (triggerAt <= now) {
-                triggerAt = now + 1_000L;
+                triggerAt = now + SNOOZE_RECOVERY_DELAY_MS;
             }
 
             DoseReminderAlarmAdapter.ScheduleResult result =

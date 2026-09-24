@@ -371,39 +371,31 @@ public final class ExactAlarmRuntime {
         }
     }
 
+    /**
+     * Grace window (ms) for schedules whose trigger time has just passed:
+     * a schedule is rejected as past only when it is older than this
+     * tolerance, so clock jitter between JS and native never rejects a
+     * legitimately-current occurrence (#513 named constants).
+     */
+    private static final long EXACT_ALARM_PAST_GRACE_MS = 2000L;
+
     public ScheduleResult schedule(ScheduleRequest request) {
-        if (!isValidScheduleRequest(request)) {
-            return ScheduleResult.fail("invalid_request");
-        }
-        if (request.triggerAtEpochMs
-                <= System.currentTimeMillis() - 2000L) {
-            return ScheduleResult.fail("trigger_in_past");
-        }
-        if (!canScheduleExactAlarms()) {
-            return ScheduleResult.fail(
-                    "exact_alarm_permission_denied");
+        // Focused transaction steps (#468): validation, ownership, record
+        // preparation, platform installation, and tombstone finalization are
+        // extracted; the transaction ORDER and lock semantics are unchanged.
+        String preconditionError = validateSchedulePreconditions(request);
+        if (preconditionError != null) {
+            return ScheduleResult.fail(preconditionError);
         }
 
         synchronized (OperationLock.class) {
             String previousScheduleRaw =
                     store.getScheduleRaw(request.storageKey);
 
-            if (request.expectedExistingOperationVersion != null
-                    && !ExactAlarmContract.isMetadataOwnedByOperationVersion(
-                            store.getScheduleRaw(
-                                    request.storageKey),
-                            request.expectedExistingOperationVersion)) {
-                return ScheduleResult.fail("ownership_lost");
-            }
-
-            // Recovery/re-arm requests are allowed to replace only the exact
-            // schedule version they read. If a newer cancellation tombstone
-            // appeared after the caller's pre-check, do not let recovery
-            // allocate a fresh version that would supersede that cancellation.
-            if (request.expectedExistingOperationVersion != null
-                    && !request.expectedExistingOperationVersion.isEmpty()
-                    && store.isEffectivelyCancelledLocked(request.storageKey)) {
-                return ScheduleResult.fail("ownership_lost");
+            String ownershipError =
+                    verifyScheduleOwnershipLocked(request);
+            if (ownershipError != null) {
+                return ScheduleResult.fail(ownershipError);
             }
 
             String operationVersion =
@@ -413,30 +405,9 @@ public final class ExactAlarmRuntime {
                         "ordering_sequence_write_failed");
             }
 
-            JSONObject metadata = new JSONObject();
-            try {
-                copyFeatureMetadata(
-                        request.featureMetadata,
-                        metadata);
-                metadata.put(
-                        ExactAlarmContract.FIELD_OPERATION_VERSION,
-                        operationVersion);
-                metadata.put(
-                        ExactAlarmContract.FIELD_IDENTITY_URI,
-                        request.identityUri);
-                metadata.put(
-                        ExactAlarmContract.FIELD_STORAGE_KEY,
-                        request.storageKey);
-                metadata.put(
-                        ExactAlarmContract.FIELD_ACTION,
-                        request.action);
-                metadata.put(
-                        ExactAlarmContract.FIELD_RECEIVER_CLASS,
-                        request.receiverClass.getName());
-                metadata.put(
-                        ExactAlarmContract.FIELD_TRIGGER_AT_EPOCH_MS,
-                        request.triggerAtEpochMs);
-            } catch (JSONException | RuntimeException e) {
+            JSONObject metadata =
+                    buildScheduleMetadata(request, operationVersion);
+            if (metadata == null) {
                 return ScheduleResult.fail("metadata_build_failed");
             }
 
@@ -447,81 +418,173 @@ public final class ExactAlarmRuntime {
                         "schedule_metadata_write_failed");
             }
 
-            AlarmManager manager = alarmManager();
-            if (manager == null) {
-                rollbackScheduleLocked(
-                        request.storageKey,
-                        operationVersion,
-                        previousScheduleRaw);
-                return ScheduleResult.fail(
-                        "alarm_manager_unavailable");
+            String installError = installExactAlarmLocked(
+                    request,
+                    operationVersion,
+                    previousScheduleRaw);
+            if (installError != null) {
+                return ScheduleResult.fail(installError);
             }
 
-            try {
-                PendingIntent pendingIntent =
-                        buildPendingIntent(
-                                request.identityUri,
-                                request.action,
-                                request.receiverClass,
-                                request.deliveryExtras,
-                                operationVersion);
-                if (pendingIntent == null) {
-                    rollbackScheduleLocked(
-                            request.storageKey,
-                            operationVersion,
-                            previousScheduleRaw);
-                    return ScheduleResult.fail(
-                            "pending_intent_build_failed");
-                }
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    manager.setExactAndAllowWhileIdle(
-                            AlarmManager.RTC_WAKEUP,
-                            request.triggerAtEpochMs,
-                            pendingIntent);
-                } else {
-                    manager.setExact(
-                            AlarmManager.RTC_WAKEUP,
-                            request.triggerAtEpochMs,
-                            pendingIntent);
-                }
-            } catch (SecurityException e) {
-                Log.w(TAG, "exact alarm install denied", e);
-                rollbackScheduleLocked(
-                        request.storageKey,
-                        operationVersion,
-                        previousScheduleRaw);
-                return ScheduleResult.fail(
-                        "exact_alarm_permission_denied");
-            } catch (Exception e) {
-                Log.e(TAG, "exact alarm install failed", e);
-                rollbackScheduleLocked(
-                        request.storageKey,
-                        operationVersion,
-                        previousScheduleRaw);
-                return ScheduleResult.fail("schedule_failed");
-            }
-
-            // A fresh feature-owned schedule is an explicit new desired state,
-            // so it legitimately supersedes any prior cancellation tombstone once
-            // AlarmManager has accepted the new alarm. Restore/re-arm requests carry
-            // expectedExistingOperationVersion and must still respect a newer
-            // cancellation, handled by the ownership checks above.
-            if (request.expectedExistingOperationVersion == null
-                    || request.expectedExistingOperationVersion.isEmpty()) {
-                if (!store.removeCancellationTombstoneLocked(request.storageKey)
-                        && store.hasCancellationTombstoneLocked(request.storageKey)) {
-                    Log.w(TAG, "failed to clear superseded tombstone: "
-                            + request.storageKey);
-                }
-            } else {
-                store.clearCancellationIfSupersededLocked(
-                        request.storageKey,
-                        operationVersion);
-            }
+            finalizeTombstoneStateLocked(request, operationVersion);
 
             return ScheduleResult.success(
                     request.identityUri,
+                    operationVersion);
+        }
+    }
+
+    /** Request validation + capability preconditions outside the lock. */
+    private String validateSchedulePreconditions(ScheduleRequest request) {
+        if (!isValidScheduleRequest(request)) {
+            return "invalid_request";
+        }
+        if (request.triggerAtEpochMs
+                <= System.currentTimeMillis() - EXACT_ALARM_PAST_GRACE_MS) {
+            return "trigger_in_past";
+        }
+        if (!canScheduleExactAlarms()) {
+            return "exact_alarm_permission_denied";
+        }
+        return null;
+    }
+
+    /**
+     * Ownership verification inside the transaction: recovery/re-arm requests
+     * may replace only the exact schedule version they read, and a newer
+     * cancellation tombstone must not be superseded by a restored version.
+     */
+    private String verifyScheduleOwnershipLocked(ScheduleRequest request) {
+        if (request.expectedExistingOperationVersion != null
+                && !ExactAlarmContract.isMetadataOwnedByOperationVersion(
+                        store.getScheduleRaw(
+                                request.storageKey),
+                        request.expectedExistingOperationVersion)) {
+            return "ownership_lost";
+        }
+        if (request.expectedExistingOperationVersion != null
+                && !request.expectedExistingOperationVersion.isEmpty()
+                && store.isEffectivelyCancelledLocked(request.storageKey)) {
+            return "ownership_lost";
+        }
+        return null;
+    }
+
+    /** Prepare the durable metadata record for this operation version. */
+    private JSONObject buildScheduleMetadata(
+            ScheduleRequest request,
+            String operationVersion) {
+        JSONObject metadata = new JSONObject();
+        try {
+            copyFeatureMetadata(
+                    request.featureMetadata,
+                    metadata);
+            metadata.put(
+                    ExactAlarmContract.FIELD_OPERATION_VERSION,
+                    operationVersion);
+            metadata.put(
+                    ExactAlarmContract.FIELD_IDENTITY_URI,
+                    request.identityUri);
+            metadata.put(
+                    ExactAlarmContract.FIELD_STORAGE_KEY,
+                    request.storageKey);
+            metadata.put(
+                    ExactAlarmContract.FIELD_ACTION,
+                    request.action);
+            metadata.put(
+                    ExactAlarmContract.FIELD_RECEIVER_CLASS,
+                    request.receiverClass.getName());
+            metadata.put(
+                    ExactAlarmContract.FIELD_TRIGGER_AT_EPOCH_MS,
+                    request.triggerAtEpochMs);
+        } catch (JSONException | RuntimeException e) {
+            return null;
+        }
+        return metadata;
+    }
+
+    /**
+     * Platform installation with ownership-safe rollback. Returns null on
+     * success, or the failure token after rollback already ran.
+     */
+    private String installExactAlarmLocked(
+            ScheduleRequest request,
+            String operationVersion,
+            String previousScheduleRaw) {
+        AlarmManager manager = alarmManager();
+        if (manager == null) {
+            rollbackScheduleLocked(
+                    request.storageKey,
+                    operationVersion,
+                    previousScheduleRaw);
+            return "alarm_manager_unavailable";
+        }
+
+        try {
+            PendingIntent pendingIntent =
+                    buildPendingIntent(
+                            request.identityUri,
+                            request.action,
+                            request.receiverClass,
+                            request.deliveryExtras,
+                            operationVersion);
+            if (pendingIntent == null) {
+                rollbackScheduleLocked(
+                        request.storageKey,
+                        operationVersion,
+                        previousScheduleRaw);
+                return "pending_intent_build_failed";
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                manager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        request.triggerAtEpochMs,
+                        pendingIntent);
+            } else {
+                manager.setExact(
+                        AlarmManager.RTC_WAKEUP,
+                        request.triggerAtEpochMs,
+                        pendingIntent);
+            }
+        } catch (SecurityException e) {
+            Log.w(TAG, "exact alarm install denied", e);
+            rollbackScheduleLocked(
+                    request.storageKey,
+                    operationVersion,
+                    previousScheduleRaw);
+            return "exact_alarm_permission_denied";
+        } catch (Exception e) {
+            Log.e(TAG, "exact alarm install failed", e);
+            rollbackScheduleLocked(
+                    request.storageKey,
+                    operationVersion,
+                    previousScheduleRaw);
+            return "schedule_failed";
+        }
+        return null;
+    }
+
+    /**
+     * A fresh feature-owned schedule is an explicit new desired state, so it
+     * legitimately supersedes any prior cancellation tombstone once
+     * AlarmManager has accepted the new alarm. Restore/re-arm requests carry
+     * expectedExistingOperationVersion and must still respect a newer
+     * cancellation, handled by the ownership checks above.
+     */
+    private void finalizeTombstoneStateLocked(
+            ScheduleRequest request,
+            String operationVersion) {
+        if (request.expectedExistingOperationVersion == null
+                || request.expectedExistingOperationVersion.isEmpty()) {
+            if (!store.removeCancellationTombstoneLocked(request.storageKey)
+                    && store.hasCancellationTombstoneLocked(request.storageKey)) {
+                Log.w(TAG, "failed to clear superseded tombstone: "
+                        + request.storageKey);
+            }
+        } else {
+            store.clearCancellationIfSupersededLocked(
+                    request.storageKey,
                     operationVersion);
         }
     }

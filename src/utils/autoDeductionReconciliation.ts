@@ -11,6 +11,7 @@
 import type { ConsumptionLog, Medication } from '../types';
 import type { AutoDeductionEvent } from './autoDeductionNativeTypes';
 import { autoDeductionOccurrenceKey } from './autoDeductionNativeIdentity';
+import { isValidCalendarDateString } from './date/calendarPrimitives';
 import {
   isDoseConsumedOnDate,
   isDoseSkippedOnDate,
@@ -47,21 +48,15 @@ function isValidEventAmount(amount: unknown): amount is number {
   return typeof amount === 'number' && Number.isFinite(amount) && amount > 0;
 }
 /**
- * Exact occurrence calendarDate must be YYYY-MM-DD (same shape as native
- * AutoDeductionContract.isValidCalendarDate). Invalid dates are unrecoverable
- * identity failures — correcting the date changes the occurrence key.
+ * Exact occurrence calendarDate must be a REAL calendar date (YYYY-MM-DD
+ * shape + valid month/day incl. leap years) — semantically consistent with
+ * the native contract (#523: native ExactAlarmContract/Calendar strict
+ * validation). Impossible dates like 2026-02-31 are rejected on BOTH sides.
+ * Invalid dates are unrecoverable identity failures — correcting the date
+ * changes the occurrence key.
  */
 export function isValidExactCalendarDate(calendarDate: string): boolean {
-  if (!calendarDate || calendarDate.length !== 10) return false;
-  if (calendarDate.charAt(4) !== '-' || calendarDate.charAt(7) !== '-') {
-    return false;
-  }
-  for (let i = 0; i < 10; i++) {
-    if (i === 4 || i === 7) continue;
-    const c = calendarDate.charAt(i);
-    if (c < '0' || c > '9') return false;
-  }
-  return true;
+  return isValidCalendarDateString(calendarDate);
 }
 /**
  * Occurrence identity for Exact Auto is medicationId + doseId + calendarDate.

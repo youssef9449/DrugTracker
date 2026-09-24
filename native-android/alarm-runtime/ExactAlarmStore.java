@@ -71,6 +71,12 @@ final class ExactAlarmStore {
                         cancellationKey(featureStorageKey), null);
     }
 
+    /**
+     * Synchronous commit (#493): schedule metadata MUST be durably visible
+     * BEFORE the AlarmManager install so a crash between the two steps cannot
+     * leave an armed alarm without a durable ownership record. Runs on the
+     * background executor — never on a UI thread.
+     */
     boolean writeScheduleLocked(
             String featureStorageKey,
             JSONObject metadata) {
@@ -81,6 +87,11 @@ final class ExactAlarmStore {
                 .commit();
     }
 
+    /**
+     * Synchronous commit (#493): ownership-safe rollback must restore the
+     * previous durable record synchronously so a rollback failure is
+     * observable to the schedule transaction. Background executor only.
+     */
     boolean writeScheduleRawLocked(
             String featureStorageKey,
             String rawMetadata) {
@@ -98,6 +109,14 @@ final class ExactAlarmStore {
     }
 
 
+    /**
+     * Synchronous commit (#493): the cancel transaction needs the real
+     * persistence outcome — a failed removal keeps the metadata row, which
+     * the tombstone-ordering reconciliation must then resolve. The durable
+     * tombstone (also committed) remains the correctness authority; this
+     * commit supplies the explicit success/failure signal. Background
+     * executor only.
+     */
     boolean removeScheduleLocked(String featureStorageKey) {
         return schedules.edit()
                 .remove(storageKey(featureStorageKey))
@@ -115,6 +134,12 @@ final class ExactAlarmStore {
         return removeScheduleLocked(featureStorageKey);
     }
 
+    /**
+     * Synchronous commit (#493): the tombstone is THE durable cancellation
+     * proof and must be on disk before AlarmManager.cancel runs — otherwise a
+     * crash could leave an armed alarm with no durable cancellation evidence.
+     * Background executor only.
+     */
     boolean writeCancellationTombstoneLocked(
             String featureStorageKey,
             String operationVersion) {
@@ -125,6 +150,12 @@ final class ExactAlarmStore {
                 .commit();
     }
 
+    /**
+     * Synchronous commit (#493): clearing a superseded tombstone is
+     * best-effort (a leftover tombstone is reconciled by ordering), but the
+     * explicit outcome drives the diagnostic log and avoids racing the
+     * immediately-following ownership reads. Background executor only.
+     */
     boolean removeCancellationTombstoneLocked(
             String featureStorageKey) {
         return cancellations.edit()
@@ -137,6 +168,10 @@ final class ExactAlarmStore {
         long last = ordering.getLong(
                 ExactAlarmContract.ORDERING_SEQUENCE_KEY, 0L);
         long next = last + 1L;
+        // Synchronous commit (#493): the ordering sequence must be durably
+        // monotonic BEFORE any dependent schedule/tombstone write — a lost
+        // increment would let two operations claim the same ordering token.
+        // Background executor only.
         if (!ordering.edit()
                 .putLong(
                         ExactAlarmContract.ORDERING_SEQUENCE_KEY,

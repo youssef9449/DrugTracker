@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.ArrayList;
 import app.drugtracker.alarmruntime.ExactAlarmContract;
 import app.drugtracker.alarmruntime.ExactAlarmFeatureAdapter;
+import app.drugtracker.alarmruntime.ExactAlarmRestorePolicy;
 import app.drugtracker.alarmruntime.ExactAlarmRuntime;
 /** Critical Stock boundary over the shared exact-alarm runtime. */
 public final class CriticalStockAlarmAdapter
@@ -35,8 +36,18 @@ public final class CriticalStockAlarmAdapter
                 PENDING_INTENT_REQUEST_CODE);
     }
     /**
+     * Recovery delay (ms) for a stale Critical Stock occurrence found during
+     * restore: re-armed slightly in the future so the delivery path runs with
+     * fresh state instead of firing instantly mid-recovery (#513).
+     */
+    private static final long CRITICAL_RECOVERY_DELAY_MS = 15_000L;
+
+    /**
      * Shared lifecycle recovery entry point. Only durable Critical Stock
      * schedules are restored here; episode/claim policy remains in TypeScript.
+     * Every durable record reaches a terminal state through the shared
+     * restoration policy (#506): valid → restore; stale → resolve; malformed
+     * → remove with a structured reason; ownership conflict → preserve.
      */
     @Override
     public void restore(
@@ -60,17 +71,25 @@ public final class CriticalStockAlarmAdapter
         for (String medicationId : adapter.listScheduledMedicationIds()) {
             JSONObject metadata =
                     adapter.getScheduleMetadata(medicationId);
-            if (metadata == null) continue;
+            if (metadata == null) {
+                // #506: a durable key without usable metadata is removed with
+                // a structured reason instead of being silently skipped.
+                CancelResult removed = adapter.cancel(medicationId);
+                android.util.Log.w(
+                        "CriticalStockAlarmAdapter",
+                        reason + ": alarm record without metadata removed "
+                                + medicationId + " (removed=" + removed.isOk() + ")");
+                continue;
+            }
+            String operationVersion = metadata.optString(
+                    ExactAlarmContract.FIELD_OPERATION_VERSION, "");
+
             String medicationName = metadata.optString("medicationName", "");
             String unit = metadata.optString("unit", "قرص");
             String notificationTitle =
                     metadata.optString("notificationTitle", "");
             String notificationBody =
                     metadata.optString("notificationBody", "");
-            String date = metadata.optString("alarmDate", "");
-            String time = metadata.optString("alarmTime", "");
-            String operationVersion = metadata.optString(
-                    ExactAlarmContract.FIELD_OPERATION_VERSION, "");
             if ("accepted".equals(metadata.optString("deliveryState", ""))
                     && !operationVersion.isEmpty()) {
                 if (!adapter.completeOneShot(medicationId, operationVersion)) {
@@ -80,11 +99,44 @@ public final class CriticalStockAlarmAdapter
                 }
                 continue;
             }
+
+            String date = metadata.optString("alarmDate", "");
+            String time = metadata.optString("alarmTime", "");
             long triggerAt = ExactAlarmContract.resolveLocalDateTimeEpochMs(date, time, false);
+            // #506: shared restoration policy decides the terminal state for
+            // every record; ownership conflicts would preserve the newer
+            // authoritative record (not applicable in this single-writer loop).
+            ExactAlarmRestorePolicy.Outcome outcome = ExactAlarmRestorePolicy.evaluate(
+                    /* cancelled */ false,
+                    /* identityKeyValid */ medicationId != null && !medicationId.isEmpty(),
+                    /* metadataPresent */ true,
+                    /* missingRequiredField */ null,
+                    /* triggerDatetimeValid */ triggerAt > 0L,
+                    /* triggerInPast */ triggerAt > 0L && triggerAt <= System.currentTimeMillis(),
+                    /* ownershipConflict */ false);
+            if (outcome.action == ExactAlarmRestorePolicy.Action.PRESERVE) {
+                continue;
+            }
+            if (outcome.action == ExactAlarmRestorePolicy.Action.REMOVE_MALFORMED) {
+                CancelResult removed = adapter.cancel(medicationId);
+                if (!removed.isOk()) {
+                    android.util.Log.w(
+                            "CriticalStockAlarmAdapter",
+                            reason + ": malformed alarm record not removable "
+                                    + medicationId + " (" + removed.error + ")");
+                } else {
+                    android.util.Log.w(
+                            "CriticalStockAlarmAdapter",
+                            reason + ": removed malformed alarm record "
+                                    + medicationId + " (" + outcome.reason + ")");
+                }
+                continue;
+            }
             long now = System.currentTimeMillis();
-            if (triggerAt <= 0L) continue;
-            if (triggerAt <= now) {
-                triggerAt = now + 15_000L;
+            if (outcome.action == ExactAlarmRestorePolicy.Action.RESOLVE_STALE) {
+                // Feature resolution for a stale occurrence: re-arm slightly
+                // in the future so delivery runs with fresh state.
+                triggerAt = now + CRITICAL_RECOVERY_DELAY_MS;
             }
             ScheduleResult result = adapter.schedule(
                     medicationId,

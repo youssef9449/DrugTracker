@@ -5,7 +5,7 @@ import type { ManualStockEnvelope } from '../../src/utils/stockEnvelopeRecovery'
 
 
 import { makeScheduledMedication as med } from '../fixtures/testFixtures';
-import { runGatedManualConsume, runGatedAddMedication, runGatedAutoDeductToggle, runGatedGlobalAutoDeductToggle } from '../../src/utils/manualStockMutation';
+import { runGatedAddMedication, runGatedAutoDeductToggle, runGatedGlobalAutoDeductToggle } from '../../src/utils/manualStockMutation';
 
 
 

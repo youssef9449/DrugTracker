@@ -53,7 +53,6 @@ describe('Phase 4 — Refill/UndoRefill through the durable gate', () => {
   let failLastApplied: boolean;
   let failAllocate: boolean;
   let generation: number;
-  let marked: string[];
 
     beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -66,7 +65,6 @@ describe('Phase 4 — Refill/UndoRefill through the durable gate', () => {
     failLastApplied = false;
     failAllocate = false;
     generation = 0;
-    marked = [];
     let lastApplied = 0;
     let nextSeq = 0;
     __resetStockMutationOrderingForTests();

@@ -1,11 +1,10 @@
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
-import type { ManualStockEnvelope } from '../../src/utils/stockEnvelopeRecovery';
 
 
 import { makeScheduledMedication as med } from '../fixtures/testFixtures';
-import { runGatedManualConsume, runGatedDeleteMedication } from '../../src/utils/manualStockMutation';
+import { runGatedDeleteMedication } from '../../src/utils/manualStockMutation';
 
 
 

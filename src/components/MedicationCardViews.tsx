@@ -28,7 +28,7 @@ export interface MedicationCardViewProps {
   nonSolidPackageDesc: string | null;
   tag: Tag;
   percentLeft: number;
-  getProgressColor: () => string;
+  progressColor: string;
   onOpenRefill: (medication: Medication) => void;
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
@@ -179,7 +179,6 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
         medication={medication}
         containerClass="bg-white/90 border-amber-200 mt-2"
         textClass="text-amber-950"
-        badgeClass="text-amber-900 bg-amber-100"
       />
       {/* Quick Action: Immediate Refill + Shopping List CTA */}
       <div className="mt-3 flex items-center gap-2">
@@ -323,7 +322,6 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
         medication={medication}
         containerClass="bg-emerald-50/70 border-emerald-200/80 mt-2"
         textClass="text-emerald-950"
-        badgeClass="text-emerald-900 bg-emerald-100"
       />
       {/* Auto-deduct paused note */}
       {!isAutoActive && <AutoDeductPausedNote />}
@@ -332,10 +330,10 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
 };
 
 export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) => {
-  const { medication, isAutoActive, statusInfo, depletion, currentPills, tag, percentLeft, getProgressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
+  const { medication, isAutoActive, statusInfo, depletion, currentPills, tag, percentLeft, progressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
   const isOut = statusInfo.status === 'out_of_stock';
   const isCrit = statusInfo.status === 'critical';
-  const isWarn = statusInfo.status === 'warning';
+  const isWarn = false;
   const isTemporaryCourse = medication.isChronic === false;
   const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
   const todayStr = getTodayDateString();
@@ -514,7 +512,7 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
         }
       >
         <div
-          className={`h-full rounded-full transition-all duration-300 ${getProgressColor()}`}
+          className={`h-full rounded-full transition-all duration-300 ${progressColor}`}
           style={{ width: `${percentLeft}%` }}
         />
       </div>
@@ -523,10 +521,10 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
 };
 
 export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) => {
-  const { medication, isAutoActive, statusInfo, depletion, currentPills, stripsDesc, nonSolidPackageDesc, tag, percentLeft, getProgressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
+  const { medication, isAutoActive, statusInfo, depletion, currentPills, stripsDesc, nonSolidPackageDesc, tag, percentLeft, progressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
   const isOut = statusInfo.status === 'out_of_stock';
   const isCrit = statusInfo.status === 'critical';
-  const isWarn = statusInfo.status === 'warning';
+  const isWarn = false;
   const isTemporaryCourse = medication.isChronic === false;
   const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
   const todayStr = getTodayDateString();
@@ -735,7 +733,7 @@ export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) =
         }
       >
         <div
-          className={`h-full rounded-full transition-all duration-500 ${getProgressColor()}`}
+          className={`h-full rounded-full transition-all duration-500 ${progressColor}`}
           style={{ width: `${percentLeft}%` }}
         />
       </div>

@@ -152,18 +152,12 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     100,
     Math.max(0, Math.round((statusInfo.daysLeft / maxVisualRange) * 100))
   );
-  const getProgressColor = () => {
-    switch (statusInfo.status) {
-      case 'out_of_stock':
-        return 'bg-red-500';
-      case 'critical':
-        return 'bg-rose-500';
-      case 'warning':
-        return 'bg-amber-500';
-      default:
-        return 'bg-teal-600';
-    }
-  };
+  const progressColor =
+    statusInfo.status === 'out_of_stock'
+      ? 'bg-red-500'
+      : statusInfo.status === 'critical'
+        ? 'bg-rose-500'
+        : 'bg-teal-600';
   // Retained for future use (per user instruction, not rendered inside cards):
   void lastRefillQuantity;
   void onUndoRefill;
@@ -182,7 +176,7 @@ export const MedicationCard: FC<MedicationCardProps> = ({
     nonSolidPackageDesc,
     tag,
     percentLeft,
-    getProgressColor,
+    progressColor,
     onOpenRefill,
     onEdit,
     onDelete,

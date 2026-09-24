@@ -34,7 +34,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     setHelperBoxes, setHelperStrips, setHelperLoose, helperTotal, error, setError,
     reminderEnabled, setReminderEnabled, autoDeductEnabled, setAutoDeductEnabled,
     isChronic, setIsChronic, durationDaysStr, setDurationDaysStr,
-    setTreatmentStartDateStr, previewDays, handleUnitChange, handleStripsChange,
+    setTreatmentStartDateStr, handleUnitChange, handleStripsChange,
     handlePillsPerStripChange, applyStockHelper, handleSubmit,
   } = useAddMedicationForm({ isOpen, onSave, initialData, defaultAutoDeductEnabled });
 
@@ -144,7 +144,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
             setReminderEnabled={setReminderEnabled}
             setError={setError}
             setTreatmentStartDateStr={setTreatmentStartDateStr}
-            previewDays={previewDays}
           />          <div className="p-3 bg-white border border-slate-200 rounded-xl text-xs flex items-center justify-between">
             <span className="text-slate-600">يكفي تقريباً لمدة:</span>
             <span className="font-bold text-teal-800 font-mono">{previewDays} يوماً</span>

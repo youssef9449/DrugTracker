@@ -21,7 +21,6 @@ interface MedicationCourseAndScheduleProps {
   setReminderEnabled: Dispatch<SetStateAction<boolean>>;
   setError: Dispatch<SetStateAction<string>>;
   setTreatmentStartDateStr: Dispatch<SetStateAction<string>>;
-  previewDays: number;
 }
 
 export const MedicationCourseAndSchedule: FC<MedicationCourseAndScheduleProps> = ({

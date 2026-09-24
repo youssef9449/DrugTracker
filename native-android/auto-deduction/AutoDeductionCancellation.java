@@ -6,16 +6,27 @@ import app.drugtracker.autodeduction.AutoDeductionScheduler.CancelResult;
 
 /** Focused Auto-Deduction responsibility collaborator: AutoDeductionCancellation. */
 final class AutoDeductionCancellation {
-    private final AutoDeductionScheduler scheduler;
+    interface Host {
+        Map<String, String> getAllScheduleMetadata();
+        AutoDeductionSchedulingAdapter schedulingAdapter();
+        boolean quarantineMalformedScheduleMetadata(
+                String prefKey, String expectedRaw, String reason);
+        boolean hasCancellationTombstoneStored(String occurrenceKey);
+        boolean isEffectivelyCancelledStored(String occurrenceKey);
+        boolean clearCancellationTombstoneStored(String occurrenceKey);
+        long getRecurrenceGenerationLocked(String medicationId, String doseId);
+    }
 
-    AutoDeductionCancellation(AutoDeductionScheduler scheduler) {
-        this.scheduler = scheduler;
+    private final Host host;
+
+    AutoDeductionCancellation(Host host) {
+        this.host = host;
     }
 
 CancelResult cancelAllSchedulesForDoseLocked(
             String medicationId,
             String doseId) {
-        Map<String, String> all = scheduler.getAllScheduleMetadata();
+        Map<String, String> all = host.getAllScheduleMetadata();
         if (all == null || all.isEmpty()) return CancelResult.success();
 
         java.util.List<AutoDeductionPersistenceModels.ScheduleRecord> toCancel =
@@ -26,9 +37,9 @@ CancelResult cancelAllSchedulesForDoseLocked(
             if (storageKey == null || storageKey.isEmpty()) continue;
 
             AutoDeductionPersistenceModels.ScheduleRecord schedule =
-                    scheduler.schedulingAdapter().getScheduleRecord(storageKey);
+                    host.schedulingAdapter().getScheduleRecord(storageKey);
             if (schedule == null) {
-                if (!scheduler.quarantineMalformedScheduleMetadata(
+                if (!host.quarantineMalformedScheduleMetadata(
                         storageKey, raw, "malformed_schedule_record")) {
                     return CancelResult.fail("schedule_metadata_removal_failed");
                 }
@@ -44,7 +55,7 @@ CancelResult cancelAllSchedulesForDoseLocked(
                 new java.util.ArrayList<>();
         for (AutoDeductionPersistenceModels.ScheduleRecord schedule : toCancel) {
             AutoDeductionSchedulingAdapter.CancelResult result =
-                    scheduler.schedulingAdapter().cancelOccurrence(
+                    host.schedulingAdapter().cancelOccurrence(
                             medicationId,
                             doseId,
                             schedule.occurrence.calendarDate);
@@ -79,7 +90,7 @@ public CancelResult cancelOccurrence(
         }
         synchronized (AutoDeductionScheduler.class) {
             AutoDeductionSchedulingAdapter.CancelResult result =
-                    scheduler.schedulingAdapter().cancelOccurrence(
+                    host.schedulingAdapter().cancelOccurrence(
                             medicationId,
                             doseId,
                             calendarDate);
@@ -94,7 +105,7 @@ public CancelResult cancelOccurrence(
 boolean hasCancellationTombstone(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
         synchronized (AutoDeductionScheduler.class) {
-            return scheduler.hasCancellationTombstoneStored(occurrenceKey);
+            return host.hasCancellationTombstoneStored(occurrenceKey);
         }
     }
 
@@ -115,13 +126,13 @@ public boolean isOccurrenceCancelled(
 boolean isOccurrenceCancelledKey(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return false;
         synchronized (AutoDeductionScheduler.class) {
-            return scheduler.isEffectivelyCancelledStored(occurrenceKey);
+            return host.isEffectivelyCancelledStored(occurrenceKey);
         }
     }
 
 boolean clearCancellationTombstoneLocked(String occurrenceKey) {
         if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
-        return scheduler.clearCancellationTombstoneStored(occurrenceKey);
+        return host.clearCancellationTombstoneStored(occurrenceKey);
     }
     private boolean restoreSchedulesLocked(
             String medicationId,
@@ -138,14 +149,14 @@ boolean clearCancellationTombstoneLocked(String occurrenceKey) {
                 allRestored = false;
                 continue;
             }
-            long generation = scheduler.getRecurrenceGenerationLocked(
+            long generation = host.getRecurrenceGenerationLocked(
                     medicationId, doseId);
             if (generation <= 0L) {
                 allRestored = false;
                 continue;
             }
             AutoDeductionSchedulingAdapter.ScheduleResult restored =
-                    scheduler.schedulingAdapter().scheduleOccurrence(
+                    host.schedulingAdapter().scheduleOccurrence(
                             schedule.occurrence.canonicalKey(),
                             medicationId,
                             doseId,

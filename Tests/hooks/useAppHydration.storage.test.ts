@@ -24,6 +24,7 @@ vi.mock('@/utils/autoDeductionNativeStock', () => ({
 }));
 
 import { useAppHydration } from '@/hooks/useAppHydration';
+import { applyNotificationPermissionResultIfUnset } from '@/utils/appHydrationPhases';
 
 function makeSetters() {
   return {
@@ -79,5 +80,51 @@ describe('useAppHydration — storage failures', () => {
       expect(setters.setHydrated).toHaveBeenCalledWith(true);
     });
     expect(setters.setIsFirstRun).not.toHaveBeenCalledWith(true);
+  });
+});
+
+describe('notification permission result application', () => {
+  it('applies a first-open grant while the persisted preference is unset', () => {
+    const setNotificationsEnabled = vi.fn();
+
+    applyNotificationPermissionResultIfUnset(true, setNotificationsEnabled);
+
+    expect(setNotificationsEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it('applies a first-open denial while the persisted preference is unset', () => {
+    const setNotificationsEnabled = vi.fn();
+
+    applyNotificationPermissionResultIfUnset(false, setNotificationsEnabled);
+
+    expect(setNotificationsEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it('never overwrites an explicit persisted preference', () => {
+    localStorage.setItem('notifications_enabled', 'true');
+    const setNotificationsEnabled = vi.fn();
+
+    applyNotificationPermissionResultIfUnset(false, setNotificationsEnabled);
+
+    expect(setNotificationsEnabled).not.toHaveBeenCalled();
+
+    localStorage.setItem('notifications_enabled', 'false');
+    applyNotificationPermissionResultIfUnset(true, setNotificationsEnabled);
+
+    expect(setNotificationsEnabled).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite state when the preference read itself fails', () => {
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('storage blocked');
+    });
+    const setNotificationsEnabled = vi.fn();
+
+    try {
+      applyNotificationPermissionResultIfUnset(true, setNotificationsEnabled);
+      expect(setNotificationsEnabled).not.toHaveBeenCalled();
+    } finally {
+      getItem.mockRestore();
+    }
   });
 });

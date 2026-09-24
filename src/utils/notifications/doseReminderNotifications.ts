@@ -4,7 +4,7 @@ import {
   cancelDoseSnoozeNative,
 } from '../doseReminderNative';
 import { cancelNotification, scheduleNotification } from '../notificationRuntime';
-import { getNativePlatform, isNativePlatform } from './notificationPlatform';
+import { getNativePlatform } from './notificationPlatform';
 import { scheduleWebNotification } from './webNotifications';
 
 export const DOSE_REMINDER_CHANNEL_ID = 'dose-reminder-v3';
@@ -52,7 +52,9 @@ export async function cancelSnoozedDoseReminder(
     await cancelDoseSnoozeNative(medId, doseId);
     return;
   }
-  if (!isNativePlatform()) return;
+  // #546: Web (and iOS) must cancel through the same Notification Runtime
+  // identity used at scheduling time ('dose-reminder-snooze' + medId::doseId).
+  // A silent early return on Web would leave snoozed reminders active.
   try {
     const cancelled = await cancelNotification(
       'dose-reminder-snooze',

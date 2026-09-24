@@ -11,7 +11,7 @@ import {
 } from './notifications/notificationPermissions';
 import { getExactAlarmPermission, type ExactAlarmPermission } from './exactAlarm';
 import { initNativeBridge } from '../native';
-import { isNotificationChannelEnabled, retryPersistedNotificationDeliveries } from './notificationRuntime';
+import { getNotificationChannelState, retryPersistedNotificationDeliveries } from './notificationRuntime';
 import {
   DOSE_REMINDER_CHANNEL_ID,
   DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
@@ -296,15 +296,19 @@ export async function initializeNativeRuntime(
   void retryPersistedNotificationDeliveries();
 
   const [backgroundChannel, foregroundChannel] = await Promise.all([
-    isNotificationChannelEnabled(DOSE_REMINDER_CHANNEL_ID),
-    isNotificationChannelEnabled(DOSE_REMINDER_FOREGROUND_CHANNEL_ID),
+    getNotificationChannelState(DOSE_REMINDER_CHANNEL_ID),
+    getNotificationChannelState(DOSE_REMINDER_FOREGROUND_CHANNEL_ID),
   ]);
 
   const savedPreference = readStorageItem(NOTIFICATIONS_KEY);
+  // #482: only a REAL OS denial ('disabled') may flip the persisted
+  // preference off. An 'unknown' capability state (transient native error)
+  // leaves the user's preference untouched. (#503 adds channel bootstrap
+  // before this gate so a missing channel is created, not treated as denial.)
   if (
     savedPreference.ok
     && savedPreference.value === 'true'
-    && (!backgroundChannel || !foregroundChannel)
+    && (backgroundChannel === 'disabled' || foregroundChannel === 'disabled')
   ) {
     setNotificationsEnabled(false);
   }

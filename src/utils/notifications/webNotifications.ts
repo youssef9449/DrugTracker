@@ -193,6 +193,27 @@ export function getWebScheduledNotification(
   return entry;
 }
 
+/**
+ * List the logical identities of all DURABLE scheduled entries for a
+ * namespace. Web-side stale reconciliation uses this to discover which
+ * identities exist (there is no native pending-list on Web). Read-only:
+ * expired entries are filtered from the result but not mutated here —
+ * expiry belongs to delivery/reconciliation.
+ */
+export function listWebScheduledNotificationIdentities(
+  namespace: string
+): string[] {
+  const entries = readEntries();
+  const prefix = namespace + '::';
+  const identities: string[] = [];
+  for (const [key, entry] of Object.entries(entries)) {
+    if (!key.startsWith(prefix)) continue;
+    if (entry.fireAt <= Date.now()) continue;
+    identities.push(key.slice(prefix.length));
+  }
+  return identities;
+}
+
 export async function cancelScheduledWebNotification(
   namespace: string,
   identity: string

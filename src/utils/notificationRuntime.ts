@@ -258,14 +258,29 @@ export async function retryPersistedNotificationDeliveries(): Promise<number> {
   }
 }
 
-export async function isNotificationChannelEnabled(channelId: string): Promise<boolean> {
-  if (!isAndroidNotificationRuntime()) return true;
+/**
+ * Tri-state notification-channel capability (#482).
+ *
+ * `enabled` / `disabled` reflect the real OS channel state; `unknown` means
+ * the capability check itself failed (transient native/plugin error) and
+ * MUST NOT be interpreted as a user decision. Consumers never flip a
+ * persisted preference based on `unknown`.
+ */
+export type NotificationChannelState = 'enabled' | 'disabled' | 'unknown';
+
+export async function getNotificationChannelState(
+  channelId: string
+): Promise<NotificationChannelState> {
+  if (!isAndroidNotificationRuntime()) return 'enabled';
   try {
     const result = await NotificationRuntime.checkChannel({ channelId });
-    return result?.enabled === true;
+    if (!result || typeof result.enabled !== 'boolean') {
+      return 'unknown';
+    }
+    return result.enabled ? 'enabled' : 'disabled';
   } catch (error) {
     console.warn('[notification-runtime] channel capability check failed:', error);
-    return false;
+    return 'unknown';
   }
 }
 

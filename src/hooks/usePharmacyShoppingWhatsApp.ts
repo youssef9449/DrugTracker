@@ -44,6 +44,7 @@ export function usePharmacyShoppingWhatsApp({
   const whatsappAddresses = useMemo(() => settings.whatsappAddresses ?? [], [settings.whatsappAddresses]);
   const selectedWhatsappContactIds = settings.selectedWhatsappContactIds ?? whatsappContacts.map((contact) => contact.id);
   const selectedWhatsappAddressIds = settings.selectedWhatsappAddressIds ?? whatsappAddresses.map((item) => item.id);
+  const [isSendModalOpen, setIsSendModalOpen] = useState(false);
 
   const orderItemsForMessage = useMemo((): OrderItem[] => {
     if (activeOrderItems.length > 0) return activeOrderItems;

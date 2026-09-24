@@ -117,18 +117,46 @@ assert(
   'fire-retry persistence must be owned by AutoDeductionRetryEvidenceStore'
 );
 
+for (const [name, content] of [
+  ['recurrence', recurrence],
+  ['cancellation', cancellation],
+  ['retry', retry],
+  ['fire', read('native-android/auto-deduction/AutoDeductionFireService.java')],
+  ['recovery', read('native-android/auto-deduction/AutoDeductionRecovery.java')],
+  ['occurrence-state', read('native-android/auto-deduction/AutoDeductionOccurrenceState.java')],
+]) {
+  assert(
+    !content.includes('private final AutoDeductionScheduler scheduler')
+      && !content.includes('(AutoDeductionScheduler scheduler)'),
+    name + ' collaborator must not use AutoDeductionScheduler as a service locator'
+  );
+}
 assert(
-  recurrence.includes('scheduler.schedulingAdapter().scheduleOccurrence('),
+  recurrence.includes('host.schedulingAdapter().scheduleOccurrence('),
   'occurrence scheduling must cross the Auto scheduling adapter from the recurrence collaborator'
 );
 assert(
-  cancellation.includes('scheduler.schedulingAdapter().cancelOccurrence('),
+  cancellation.includes('host.schedulingAdapter().cancelOccurrence('),
   'occurrence cancellation must cross the Auto scheduling adapter from the cancellation collaborator'
 );
 assert(
-  retry.includes('scheduler.schedulingAdapter().scheduleFireRetry('),
+  retry.includes('host.schedulingAdapter().scheduleFireRetry('),
   'retry alarm installation must cross the Auto scheduling adapter from the retry collaborator'
 );
+const requiredHosts = [
+  'AutoDeductionRecurrence.Host',
+  'AutoDeductionRecovery.Host',
+  'AutoDeductionFireService.Host',
+  'AutoDeductionCancellation.Host',
+  'AutoDeductionOccurrenceState.Host',
+  'AutoDeductionRetry.Host',
+];
+for (const hostContract of requiredHosts) {
+  assert(
+    scheduler.includes(hostContract),
+    'scheduler facade must provide collaborator host contract: ' + hostContract
+  );
+}
 assert(
   adapter.includes('import app.drugtracker.alarmruntime.ExactAlarmRuntime;'),
   'adapter must own the ExactAlarmRuntime dependency'

@@ -5,6 +5,7 @@ import { playSuccessChime } from '../utils/sound';
 import { TOAST_MESSAGES, STORAGE_ERRORS } from '../constants/uiStrings';
 import { DEFAULT_SNOOZE_MINUTES } from '../utils/time';
 import { cancelNotification } from '../utils/notificationRuntime';
+import { runAsyncCommand } from '../utils/async/runAsyncCommand';
 import type { MedicationHandlerState, MedicationHandlersDeps } from './medicationHandlerTypes';
 
 export function useMedicationAlarmHandlers(deps: MedicationHandlersDeps, state: MedicationHandlerState) {
@@ -29,7 +30,21 @@ export function useMedicationAlarmHandlers(deps: MedicationHandlersDeps, state: 
       setLogs(result.logs);
     }
     if (result.outcome === 'applied' && result.log) {
-      void cancelNotification('dose-reminder', medicationId + '::' + (doseId ?? ''));
+      runAsyncCommand(
+        'dose-reminder.notification-cancel',
+        async () => {
+          const cancelled = await cancelNotification(
+            'dose-reminder',
+            medicationId + '::' + (doseId ?? '')
+          );
+          if (!cancelled) {
+            throw new Error('dose_reminder_notification_cancel_failed');
+          }
+        },
+        (error) => {
+          console.warn('[dose-reminder] notification cancellation failed:', error);
+        }
+      );
       if (displayName) {
         showToast(TOAST_MESSAGES.doseTaken(displayName, result.doseAmount, displayUnit));
       }
@@ -50,12 +65,28 @@ export function useMedicationAlarmHandlers(deps: MedicationHandlersDeps, state: 
   }, [dismissAlarm, soundEnabled, setMedications, setLogs, showToast]);
 
   const handleTakeDoseFromAlarm = useCallback((med: Medication, doseId?: string) => {
-    void runAlarmTake(med.id, doseId, med);
-  }, [runAlarmTake]);
+    runAsyncCommand(
+      'dose-reminder.take',
+      async () => {
+        await runAlarmTake(med.id, doseId, med);
+      },
+      () => {
+        showToast(STORAGE_ERRORS.generic);
+      }
+    );
+  }, [runAlarmTake, showToast]);
 
   const handleTakeDoseFromAlarmById = useCallback((medicationId: string, doseId?: string) => {
-    void runAlarmTake(medicationId, doseId);
-  }, [runAlarmTake]);
+    runAsyncCommand(
+      'dose-reminder.take-by-id',
+      async () => {
+        await runAlarmTake(medicationId, doseId);
+      },
+      () => {
+        showToast(STORAGE_ERRORS.generic);
+      }
+    );
+  }, [runAlarmTake, showToast]);
 
   const handleSnoozeFromAlarm = (med: Medication) => {
     snoozeAlarm(DEFAULT_SNOOZE_MINUTES);

@@ -14,6 +14,7 @@ import {
   DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
 } from '../utils/notifications/doseReminderNotifications';
 import { playSuccessChime } from '../utils/sound';
+import { runAsyncCommand } from '../utils/async/runAsyncCommand';
 /**
  * Registers native notification-action, dose-received, and app-resume
  * handlers. Cleanup unregisters on unmount / dependency change.
@@ -51,13 +52,17 @@ export function useNativeActionHandlers(opts: {
       // created the displayed occurrence. Reject stale actions after a
       // schedule replacement/cancellation before any durable Take mutation.
       if (operationVersion) {
-        void isDoseReminderOccurrenceOwned(
-          medicationId,
-          doseId ?? '',
-          operationVersion
-        ).then((owned) => {
-          if (owned) handleTakeDoseFromAlarmById(medicationId, doseId);
-        });
+        runAsyncCommand(
+          'notification-action.ownership',
+          async () => {
+            const owned = await isDoseReminderOccurrenceOwned(
+              medicationId,
+              doseId ?? '',
+              operationVersion
+            );
+            if (owned) handleTakeDoseFromAlarmById(medicationId, doseId);
+          }
+        );
         return;
       }
       // Notification actions carry durable identity. Never require the React
@@ -117,7 +122,12 @@ export function useNativeActionHandlers(opts: {
       // the right channel when the scheduler re-schedules.
       setDoseLifecycleTick((tick) => tick + 1);
       if (isActive) {
-        void retryPersistedNotificationDeliveries();
+        runAsyncCommand(
+          'app-resume.notification-delivery-retry',
+          async () => {
+            await retryPersistedNotificationDeliveries();
+          }
+        );
         setCriticalAlarmResumeTick((tick) => tick + 1);
         setDoseAlarmResumeTick((tick) => tick + 1);
         getExactAlarmPermission()

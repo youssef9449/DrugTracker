@@ -4,17 +4,36 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 import app.drugtracker.autodeduction.AutoDeductionScheduler.ScheduleResult;
+import app.drugtracker.autodeduction.AutoDeductionScheduler.FireResult;
 import app.drugtracker.autodeduction.AutoDeductionScheduler.InvalidateResult;
 import app.drugtracker.autodeduction.AutoDeductionScheduler.CancelResult;
 
 /** Focused Auto-Deduction responsibility collaborator: AutoDeductionRecurrence. */
 final class AutoDeductionRecurrence {
-    private final AutoDeductionScheduler scheduler;
+    interface Host {
+        Context appContext();
+        AutoSuccessorObligationStore successorObligationStore();
+        CancelResult cancelAllSchedulesForDoseLocked(String medicationId, String doseId);
+        AutoDeductionFailurePolicy failurePolicy();
+        boolean removeScheduleMetadataIfVersionLocked(String prefKey, String expectedVersion);
+        AutoDeductionSchedulingAdapter schedulingAdapter();
+        boolean isOccurrenceCancelledKey(String occurrenceKey);
+        AutoDeductionEventStore eventStore();
+        long recoveryNowForService();
+        FireResult recoverMissedOccurrence(
+                String medicationId, String doseId, String calendarDate,
+                long scheduledAt, double amount, long generation,
+                String treatmentEndDate, String fallbackTimeHhmm);
+        boolean markSuccessorObligationStockApplied(
+                String medicationId, String doseId, String calendarDate);
+    }
+
+    private final Host host;
     private final SharedPreferences recurrenceAuthPrefs;
 
-    AutoDeductionRecurrence(AutoDeductionScheduler scheduler) {
-        this.scheduler = scheduler;
-        Context context = scheduler.appContext();
+    AutoDeductionRecurrence(Host host) {
+        this.host = host;
+        Context context = host.appContext();
         this.recurrenceAuthPrefs = context.getSharedPreferences(
                 AutoDeductionContract.PREFS_RECURRENCE_AUTH,
                 Context.MODE_PRIVATE);
@@ -68,7 +87,7 @@ long ensureRecurrenceGenerationLocked(String medicationId, String doseId) {
         // obligations retain operationVersion ownership for replacement safety.
         if (operationVersion == null) return false;
         try {
-            return scheduler.successorObligationStore().save(
+            return host.successorObligationStore().save(
                     new AutoDeductionPersistenceModels.SuccessorObligationRecord(
                             new AutoDeductionPersistenceModels.OccurrenceId(
                                     medicationId, doseId, calendarDate),
@@ -100,7 +119,7 @@ public InvalidateResult invalidateRecurrenceAuthorization(
             // the recurrence generation is intentionally left unchanged so the
             // previous JS state remains natively valid and can be retried safely.
             CancelResult cancel =
-                    scheduler.cancelAllSchedulesForDoseLocked(medicationId, doseId);
+                    host.cancelAllSchedulesForDoseLocked(medicationId, doseId);
             if (!cancel.isOk()) {
                 Log.e("AutoDeductionScheduler",
                         "invalidateRecurrenceAuthorization: cancellation failed for "
@@ -114,7 +133,7 @@ public InvalidateResult invalidateRecurrenceAuthorization(
             }
 
             long next = prev <= 0L ? 1L : prev + 1L;
-            boolean committed = scheduler.failurePolicy().allowRecurrenceAuthCommit()
+            boolean committed = host.failurePolicy().allowRecurrenceAuthCommit()
                     && recurrenceAuthPrefs.edit().putLong(authKey, next).commit();
             if (!committed) {
                 Log.e("AutoDeductionScheduler",
@@ -152,14 +171,14 @@ ScheduleResult installFutureSuccessorIfGenerationHolds(
         synchronized (AutoDeductionScheduler.class) {
             if (!isRecurrenceGenerationAuthorizedLocked(
                     medicationId, doseId, expectedRecurrenceGeneration)) {
-                scheduler.removeScheduleMetadataIfVersionLocked(pastPrefKey, observedVersion);
+                host.removeScheduleMetadataIfVersionLocked(pastPrefKey, observedVersion);
                 return ScheduleResult.fail("recurrence_generation_unauthorized");
             }
             // Past snapshot must still be the one we are recovering from (if present).
             if (pastPrefKey != null && observedVersion != null && !observedVersion.isEmpty()) {
-                if (!scheduler.schedulingAdapter()
+                if (!host.schedulingAdapter()
                         .isScheduleOwnedByOperationVersion(pastPrefKey, observedVersion)
-                        && scheduler.schedulingAdapter().getScheduleRecord(pastPrefKey) != null) {
+                        && host.schedulingAdapter().getScheduleRecord(pastPrefKey) != null) {
                     return ScheduleResult.fail("snapshot_stale");
                 }
             }
@@ -167,7 +186,7 @@ ScheduleResult installFutureSuccessorIfGenerationHolds(
                     ? ""
                     : treatmentEndDateOverride;
             AutoDeductionPersistenceModels.ScheduleRecord currentPast =
-                    scheduler.schedulingAdapter().getScheduleRecord(pastPrefKey);
+                    host.schedulingAdapter().getScheduleRecord(pastPrefKey);
             if (currentPast != null) {
                 treatmentEndDate = currentPast.treatmentEndDate;
             }
@@ -198,7 +217,7 @@ ScheduleResult installFutureSuccessorIfGenerationHolds(
             boolean sameKeyRecovery =
                     pastPrefKey != null && pastPrefKey.equals(futurePrefKey);
             boolean futureAlreadyExists =
-                    scheduler.schedulingAdapter().getScheduleRecord(futurePrefKey) != null;
+                    host.schedulingAdapter().getScheduleRecord(futurePrefKey) != null;
             if (futureAlreadyExists) {
                 if (sameKeyRecovery) {
                     // The persisted source is itself the first future occurrence.
@@ -213,7 +232,7 @@ ScheduleResult installFutureSuccessorIfGenerationHolds(
             }
             // Effective cancellation (tombstone) must not be cleared by recovery:
             // scheduleOccurrenceLocked would clearCancellationTombstoneLocked.
-            if (scheduler.isOccurrenceCancelledKey(futureKey)) {
+            if (host.isOccurrenceCancelledKey(futureKey)) {
                 Log.i("AutoDeductionScheduler", "catchUp: future successor cancelled — leave tombstone, no reinstall "
                         + futureKey);
                 return new ScheduleResult(true, "cancelled_skip", futureKey);
@@ -301,7 +320,7 @@ ScheduleResult installFutureSuccessorIfGenerationHolds(
         if (triggerAt <= System.currentTimeMillis() - 2000L) {
             return ScheduleResult.fail("trigger_in_past");
         }
-        if (!app.drugtracker.alarmruntime.ExactAlarmRuntime.canScheduleExactAlarms(scheduler.appContext())) {
+        if (!app.drugtracker.alarmruntime.ExactAlarmRuntime.canScheduleExactAlarms(host.appContext())) {
             return ScheduleResult.fail("exact_alarm_permission_denied");
         }
         String key = AutoDeductionContract.occurrenceKey(
@@ -368,7 +387,7 @@ ScheduleResult installFutureSuccessorIfGenerationHolds(
         }
 
         AutoDeductionSchedulingAdapter.ScheduleResult result =
-                scheduler.schedulingAdapter().scheduleOccurrence(
+                host.schedulingAdapter().scheduleOccurrence(
                         record.occurrence.canonicalKey(),
                         medicationId,
                         doseId,
@@ -393,11 +412,11 @@ ScheduleResult installFutureSuccessorIfGenerationHolds(
             return true;
         }
         AutoDeductionPersistenceModels.ScheduleRecord current =
-                scheduler.schedulingAdapter().getScheduleRecord(pastPrefKey);
+                host.schedulingAdapter().getScheduleRecord(pastPrefKey);
         if (current == null || !observedVersion.equals(current.operationVersion)) {
             return true;
         }
-        return scheduler.schedulingAdapter().removeScheduleIfOwned(
+        return host.schedulingAdapter().removeScheduleIfOwned(
                 pastPrefKey,
                 observedVersion);
     }
@@ -464,7 +483,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
 
             String nextKey = AutoDeductionContract.occurrenceKey(
                     medicationId, doseId, nextDate);
-            if (scheduler.isOccurrenceCancelledKey(nextKey)) {
+            if (host.isOccurrenceCancelledKey(nextKey)) {
                 return new ScheduleResult(true, "cancelled_skip", nextKey);
             }
 
@@ -472,12 +491,12 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
             // duplicate/stale deliveries, even when the source occurrence has
             // already been consumed and its metadata retired.
             if (!sourceKey.equals(nextKey)
-                    && scheduler.schedulingAdapter().getScheduleRecord(nextKey) != null) {
+                    && host.schedulingAdapter().getScheduleRecord(nextKey) != null) {
                 return new ScheduleResult(true, "already_present", nextKey);
             }
 
             AutoDeductionPersistenceModels.ScheduleRecord source =
-                    scheduler.schedulingAdapter().getScheduleRecord(sourceKey);
+                    host.schedulingAdapter().getScheduleRecord(sourceKey);
             if (source != null) {
                 operationVersion = source.operationVersion;
                 activeTime = source.timeHhmm;
@@ -500,7 +519,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                 // to prove the occurrence identity and requested amount for idempotent
                 // continuation.
                 AutoDeductionPersistenceModels.SuccessorObligationRecord obligation =
-                        scheduler.successorObligationStore().get(
+                        host.successorObligationStore().get(
                                 medicationId, doseId, fromCalendarDate);
                 if (obligation != null
                         && obligation.recurrenceGeneration == expectedRecurrenceGeneration
@@ -512,7 +531,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                     operationVersion = obligation.operationVersion;
                 } else {
                     AutoDeductionEventStore.EventLookupResult fired =
-                            scheduler.eventStore().getFiredUnreconciledEvent(
+                            host.eventStore().getFiredUnreconciledEvent(
                                     medicationId, doseId, fromCalendarDate);
                     if (!fired.ok || fired.record == null
                             || Double.compare(fired.record.amount, amount) != 0) {
@@ -542,7 +561,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                     timeHhmm.equals(activeTime)
                             && Double.compare(amount, activeAmount) == 0;
 
-            if (epoch > scheduler.recoveryNowForService()) {
+            if (epoch > host.recoveryNowForService()) {
                 synchronized (AutoDeductionScheduler.class) {
                     if (!isRecurrenceGenerationAuthorizedLocked(
                             medicationId, doseId, expectedRecurrenceGeneration)) {
@@ -551,10 +570,10 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
 
                     String futureKey = AutoDeductionContract.occurrenceKey(
                             medicationId, doseId, nextDate);
-                    if (scheduler.isOccurrenceCancelledKey(futureKey)) {
+                    if (host.isOccurrenceCancelledKey(futureKey)) {
                         return new ScheduleResult(true, "cancelled_skip", futureKey);
                     }
-                    if (scheduler.schedulingAdapter().getScheduleRecord(futureKey) != null) {
+                    if (host.schedulingAdapter().getScheduleRecord(futureKey) != null) {
                         return new ScheduleResult(true, "already_present", futureKey);
                     }
                     if (!sourcePayloadMatches) {
@@ -573,10 +592,10 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                             liveSourceOwned ? operationVersion : "",
                             treatmentEndDate);
                     if (successor.ok) {
-                        scheduler.successorObligationStore().clear(
+                        host.successorObligationStore().clear(
                                 medicationId, doseId, fromCalendarDate);
                         if (originalSourceWasLive) {
-                            scheduler.schedulingAdapter().removeScheduleIfOwned(
+                            host.schedulingAdapter().removeScheduleIfOwned(
                                     sourceKey,
                                     originalSourceOperationVersion);
                         }
@@ -589,12 +608,12 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                 return ScheduleResult.fail("snapshot_stale");
             }
 
-            if (!new AutoDeductionStockStore(scheduler.appContext()).isInitialized()) {
+            if (!new AutoDeductionStockStore(host.appContext()).isInitialized()) {
                 return ScheduleResult.fail("stock_not_initialized");
             }
 
             AutoDeductionScheduler.FireResult recovered =
-                    scheduler.recoverMissedOccurrence(
+                    host.recoverMissedOccurrence(
                             medicationId,
                             doseId,
                             nextDate,
@@ -614,7 +633,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                 return ScheduleResult.fail("successor_catchup_failed");
             }
 
-            scheduler.successorObligationStore().clear(
+            host.successorObligationStore().clear(
                     medicationId, doseId, fromCalendarDate);
             // The recovered overdue occurrence is now the source for the next
             // iteration. Its consumed schedule no longer exists, so continue from
@@ -632,7 +651,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
     /** Resolve durable successor obligations left by a process death. */
     boolean recoverSuccessorObligations() {
         AutoSuccessorObligationStore.ListResult listed =
-                scheduler.successorObligationStore().listAll();
+                host.successorObligationStore().listAll();
         if (!listed.ok) {
             Log.e("AutoDeductionScheduler",
                     "successor obligation listing failed: " + listed.error);
@@ -652,24 +671,24 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
             synchronized (AutoDeductionScheduler.class) {
                 if (!isRecurrenceGenerationAuthorizedLocked(
                         medicationId, doseId, obligation.recurrenceGeneration)) {
-                    scheduler.successorObligationStore().clear(
+                    host.successorObligationStore().clear(
                             medicationId, doseId, calendarDate);
                     continue;
                 }
-                if (scheduler.isOccurrenceCancelledKey(sourceKey)) {
-                    scheduler.successorObligationStore().clear(
+                if (host.isOccurrenceCancelledKey(sourceKey)) {
+                    host.successorObligationStore().clear(
                             medicationId, doseId, calendarDate);
                     continue;
                 }
 
                 AutoDeductionPersistenceModels.ScheduleRecord source =
-                        scheduler.schedulingAdapter().getScheduleRecord(sourceKey);
+                        host.schedulingAdapter().getScheduleRecord(sourceKey);
                 if (source != null) {
                     if (!obligation.operationVersion.equals(source.operationVersion)
                             || !obligation.timeHhmm.equals(source.timeHhmm)
                             || Double.compare(obligation.amount, source.amount) != 0
                             || !source.treatmentEndDate.equals(obligation.treatmentEndDate)) {
-                        scheduler.successorObligationStore().clear(
+                        host.successorObligationStore().clear(
                                 medicationId, doseId, calendarDate);
                         continue;
                     }
@@ -677,7 +696,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                     // A non-empty operationVersion must still be proven against the
                     // source schedule. Empty means the source was an overdue
                     // catch-up occurrence whose one-shot schedule has been consumed.
-                    scheduler.successorObligationStore().clear(
+                    host.successorObligationStore().clear(
                             medicationId, doseId, calendarDate);
                     continue;
                 }
@@ -685,7 +704,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
 
             if (!obligation.stockApplied) {
                 AutoDeductionStockStore.AutoApplyResult stockResult =
-                        new AutoDeductionStockStore(scheduler.appContext()).applyAutoDeductionForRecovery(
+                        new AutoDeductionStockStore(host.appContext()).applyAutoDeductionForRecovery(
                                 medicationId,
                                 doseId,
                                 calendarDate,
@@ -694,7 +713,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                     allResolved = false;
                     continue;
                 }
-                if (!scheduler.markSuccessorObligationStockApplied(
+                if (!host.markSuccessorObligationStockApplied(
                         medicationId, doseId, calendarDate)) {
                     allResolved = false;
                     continue;
@@ -703,7 +722,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
 
             ScheduleResult result = scheduleNextOccurrenceFromObligation(obligation);
             if (result.ok) {
-                scheduler.successorObligationStore().clear(
+                host.successorObligationStore().clear(
                         medicationId, doseId, calendarDate);
                 continue;
             }
@@ -712,7 +731,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                     || "snapshot_stale".equals(result.error)
                     || "treatment_ended".equals(result.error)
                     || "cancelled_skip".equals(result.error)) {
-                scheduler.successorObligationStore().clear(
+                host.successorObligationStore().clear(
                         medicationId, doseId, calendarDate);
             } else {
                 allResolved = false;
@@ -768,7 +787,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                 return ScheduleResult.fail("invalid_next_datetime");
             }
 
-            if (epoch.longValue() > scheduler.recoveryNowForService()) {
+            if (epoch.longValue() > host.recoveryNowForService()) {
                 synchronized (AutoDeductionScheduler.class) {
                     if (!isRecurrenceGenerationAuthorizedLocked(
                             medicationId,
@@ -779,25 +798,25 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                     String key = AutoDeductionContract.occurrenceKey(
                             medicationId, doseId, nextDate);
                     AutoDeductionPersistenceModels.ScheduleRecord existing =
-                            scheduler.schedulingAdapter().getScheduleRecord(key);
+                            host.schedulingAdapter().getScheduleRecord(key);
                     if (existing != null) {
                         // The successor is already authoritative. Retire the consumed
                         // source row only when the obligation still proves ownership.
                         if (!currentObligationDate.equals(nextDate)
                                 && !obligation.operationVersion.isEmpty()) {
-                            scheduler.schedulingAdapter().removeScheduleIfOwned(
+                            host.schedulingAdapter().removeScheduleIfOwned(
                                     AutoDeductionContract.occurrenceKey(
                                             medicationId,
                                             doseId,
                                             currentObligationDate),
                                     obligation.operationVersion);
                         }
-                        scheduler.successorObligationStore().clear(
+                        host.successorObligationStore().clear(
                                 medicationId, doseId, currentObligationDate);
                         return new ScheduleResult(true, "already_present", key);
                     }
-                    if (scheduler.isOccurrenceCancelledKey(key)) {
-                        scheduler.successorObligationStore().clear(
+                    if (host.isOccurrenceCancelledKey(key)) {
+                        host.successorObligationStore().clear(
                                 medicationId, doseId, currentObligationDate);
                         return new ScheduleResult(true, "cancelled_skip", key);
                     }
@@ -813,7 +832,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                             "",
                             obligation.treatmentEndDate);
                     if (successor.ok) {
-                        scheduler.successorObligationStore().clear(
+                        host.successorObligationStore().clear(
                                 medicationId, doseId, currentObligationDate);
                     }
                     return successor;
@@ -821,11 +840,11 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
             }
 
             if (!new AutoDeductionStockStore(
-                    scheduler.appContext()).isInitialized()) {
+                    host.appContext()).isInitialized()) {
                 return ScheduleResult.fail("stock_not_initialized");
             }
 
-            AutoDeductionScheduler.FireResult recovered = scheduler.recoverMissedOccurrence(
+            AutoDeductionScheduler.FireResult recovered = host.recoverMissedOccurrence(
                     medicationId,
                     doseId,
                     nextDate,
@@ -845,7 +864,7 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
                 return ScheduleResult.fail("successor_catchup_failed");
             }
 
-            scheduler.successorObligationStore().clear(
+            host.successorObligationStore().clear(
                     medicationId,
                     doseId,
                     currentObligationDate);
@@ -872,7 +891,7 @@ ScheduleResult scheduleNextOccurrenceFromIndependentEvidenceLocked(
         String prefKey = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
         AutoDeductionPersistenceModels.ScheduleRecord current =
-                scheduler.schedulingAdapter().getScheduleRecord(prefKey);
+                host.schedulingAdapter().getScheduleRecord(prefKey);
         if (current == null) {
             return ScheduleResult.fail("snapshot_stale");
         }
@@ -914,7 +933,7 @@ ScheduleResult scheduleNextOccurrenceIfSnapshotOwnsPast(
         }
         final long generation;
         synchronized (AutoDeductionScheduler.class) {
-            if (!scheduler.schedulingAdapter()
+            if (!host.schedulingAdapter()
                     .isScheduleOwnedByOperationVersion(pastPrefKey, observedVersion)) {
                 return ScheduleResult.fail("snapshot_stale");
             }

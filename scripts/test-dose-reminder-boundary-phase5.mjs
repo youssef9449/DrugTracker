@@ -16,6 +16,7 @@ const productionDoseFiles = [
   'src/hooks/useDoseReminders.ts',
   'src/hooks/useNativeActionHandlers.ts',
   'src/hooks/useDoseReminderScheduler.ts',
+  'src/utils/doseReminderReconciliation.ts',
   'src/utils/doseReminderNative.ts',
   'src/utils/doseReminderScheduling.ts',
   'src/utils/notifications/doseReminderNotifications.ts',
@@ -40,6 +41,7 @@ for (const file of productionDoseFiles) {
 const app = read('src/App.tsx');
 const appState = read('src/hooks/useAppRuntimeState.ts');
 const scheduler = read('src/hooks/useDoseReminderScheduler.ts');
+const reconciliation = read('src/utils/doseReminderReconciliation.ts');
 const controller = read('src/hooks/useDoseReminders.ts');
 const handlers = read('src/hooks/useNativeActionHandlers.ts');
 const adapter = read('native-android/dose-reminder/DoseReminderAlarmAdapter.java');
@@ -54,9 +56,16 @@ assert(
   'App runtime state must translate its own policy into the neutral capability'
 );
 assert(
-  scheduler.includes('allowManualTakeActionByMedicationId') &&
-  scheduler.includes('allowManualTakeAction'),
-  'Dose scheduler must consume only the neutral capability'
+  reconciliation.includes('allowManualTakeActionByMedicationId') &&
+  reconciliation.includes('allowManualTakeAction'),
+  'Dose reconciliation service must consume only the neutral capability'
+);
+assert(
+  scheduler.includes('DoseReminderReconciliationService') &&
+  !scheduler.includes('setTimeout') &&
+  !scheduler.includes('scheduleDoseReminder(') &&
+  !scheduler.includes('cancelDoseReminder('),
+  'React Dose scheduler hook must remain a thin lifecycle adapter'
 );
 assert(
   controller.includes('allowManualTakeActionByMedicationId'),

@@ -316,6 +316,108 @@ public class EventStoreRejectedTest {
     }
 
     @Test
+    public void malformedPendingRecord_isQuarantinedAndRemovedOnlyAfterSuccessfulCommit()
+            throws Exception {
+        String key = AutoDeductionContract.occurrenceKey(
+                "med-bad", "dose", "2026-09-18");
+        String pendingKey = "pend:" + key;
+
+        pendingPrefs().edit()
+                .putString(pendingKey, "not-valid-json{{{")
+                .commit();
+
+        AutoDeductionEventStore.FiredEventsResult result =
+                newEventStore().listFiredEventsResult();
+
+        assertTrue(result.ok);
+        assertTrue(result.records.isEmpty());
+        assertFalse(pendingPrefs().contains(pendingKey));
+
+        String quarantined = pendingPrefs().getString(
+                AutoDeductionEventStore.KEY_PENDING_QUARANTINE_PREFIX + key,
+                null);
+        assertNotNull(quarantined);
+        JSONObject quarantine = new JSONObject(quarantined);
+        assertEquals("QUARANTINED", quarantine.optString("status"));
+        assertEquals("malformed_pending_record",
+                quarantine.optString("reason"));
+        assertEquals(pendingKey, quarantine.optString("originalKey"));
+        assertEquals("not-valid-json{{{", quarantine.optString("raw"));
+    }
+
+    @Test
+    public void malformedPendingDoesNotBlockValidNeighborPromotion() throws Exception {
+        String badKey = AutoDeductionContract.occurrenceKey(
+                "med-bad", "dose", "2026-09-19");
+        String goodKey = AutoDeductionContract.occurrenceKey(
+                "med-good", "dose", "2026-09-19");
+
+        pendingPrefs().edit()
+                .putString("pend:" + badKey, "not-valid-json{{{")
+                .putString("pend:" + goodKey,
+                        firedPayload("med-good", "dose", "2026-09-19", 2.0))
+                .commit();
+
+        AutoDeductionEventStore.FiredEventsResult result =
+                newEventStore().listFiredEventsResult();
+
+        assertTrue(result.ok);
+        assertEquals(1, result.records.size());
+        assertEquals("med-good",
+                result.records.get(0).occurrence.medicationId);
+        assertTrue(eventPrefs().contains("evt:" + goodKey));
+        assertFalse(pendingPrefs().contains("pend:" + goodKey));
+        assertFalse(pendingPrefs().contains("pend:" + badKey));
+        assertNotNull(pendingPrefs().getString(
+                AutoDeductionEventStore.KEY_PENDING_QUARANTINE_PREFIX + badKey,
+                null));
+    }
+
+    @Test
+    public void quarantineCommitFailure_keepsMalformedPendingEvidence() throws Exception {
+        String key = AutoDeductionContract.occurrenceKey(
+                "med-bad", "dose", "2026-09-20");
+        String pendingKey = "pend:" + key;
+        pendingPrefs().edit()
+                .putString(pendingKey, "not-valid-json{{{")
+                .commit();
+
+        AutoDeductionFailurePolicy denyQuarantine =
+                new AutoDeductionFailurePolicy() {
+                    @Override
+                    public boolean allowPendingQuarantineCommit() {
+                        return false;
+                    }
+                };
+
+        AutoDeductionEventStore.FiredEventsResult result =
+                newEventStore(denyQuarantine).listFiredEventsResult();
+
+        assertFalse(result.ok);
+        assertTrue(result.records.isEmpty());
+        assertNotNull(pendingPrefs().getString(pendingKey, null));
+        assertTrue(pendingPrefs().getString(
+                AutoDeductionEventStore.KEY_PENDING_QUARANTINE_PREFIX + key,
+                null) == null);
+    }
+
+    private static String firedPayload(
+            String medicationId,
+            String doseId,
+            String calendarDate,
+            double amount) throws Exception {
+        JSONObject payload = new JSONObject();
+        payload.put("medicationId", medicationId);
+        payload.put("doseId", doseId);
+        payload.put("calendarDate", calendarDate);
+        payload.put("scheduledAtEpochMs", 1_000L);
+        payload.put("amount", amount);
+        payload.put("status", AutoDeductionContract.STATUS_FIRED);
+        payload.put("createdAtEpochMs", 1_000L);
+        return payload.toString();
+    }
+
+    @Test
     public void getFiredUnreconciledEvent_matchingIdentity_returnsFired() {
         AutoDeductionEventStore store = newEventStore();
         assertEquals(

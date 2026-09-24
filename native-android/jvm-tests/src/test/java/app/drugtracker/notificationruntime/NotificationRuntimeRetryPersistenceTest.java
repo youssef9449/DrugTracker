@@ -1,6 +1,7 @@
 package app.drugtracker.notificationruntime;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -100,6 +101,38 @@ public class NotificationRuntimeRetryPersistenceTest {
                 .map(entry -> identityField((String) entry.getValue(), "identity"))
                 .anyMatch("newest"::equals);
         assertTrue(newestPresent);
+    }
+
+    @Test
+    public void staleRetryCleanupCannotRemoveReplacementForSameIdentity() throws Exception {
+        NotificationRuntime.Request first = request("dose", "med-a");
+        runtime.persistRetry(first);
+
+        String entryKey = findEntryKey();
+        String oldToken = new JSONObject(prefs.getString(entryKey, null))
+                .getString("retryToken");
+
+        runtime.persistRetry(first);
+        String replacementToken = new JSONObject(prefs.getString(entryKey, null))
+                .getString("retryToken");
+        assertFalse(oldToken.equals(replacementToken));
+
+        java.lang.reflect.Method clearRetryIfUnchanged =
+                NotificationRuntime.class.getDeclaredMethod(
+                        "clearRetryIfUnchanged",
+                        String.class,
+                        String.class);
+        clearRetryIfUnchanged.setAccessible(true);
+
+        boolean removed = (Boolean) clearRetryIfUnchanged.invoke(
+                runtime, entryKey, oldToken);
+
+        assertFalse(removed);
+        assertEquals(1, entryCount());
+        assertEquals(
+                replacementToken,
+                new JSONObject(prefs.getString(entryKey, null))
+                        .getString("retryToken"));
     }
 
     @Test

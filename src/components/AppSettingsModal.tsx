@@ -287,45 +287,12 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
         <form onSubmit={handleSave} className="p-5 overflow-y-auto space-y-4 flex-1">
           {!isPharmacyOnly && (
             <>
-              {/* Auto Daily Deduction Section */}
-              <div className="bg-teal-50/70 border border-teal-200/80 rounded-2xl p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className={`p-1.5 rounded-lg ${
-                        draftAutoDeduct ? 'bg-teal-600 text-white' : 'bg-amber-100 text-amber-600 border border-amber-300/60'
-                      }`}
-                    >
-                      {draftAutoDeduct ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4 text-amber-500" />}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-800">الخصم التلقائي للمخزون</span>
-                        <span
-                          className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                            draftAutoDeduct ? 'bg-teal-200 text-teal-900' : 'bg-slate-200 text-slate-700'
-                          }`}
-                        >
-                          {draftAutoDeduct ? 'مفعّل' : 'متوقف'}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-slate-500 leading-tight">
-                        يُخصم تلقائياً عند ميعاد كل جرعة
-                      </p>
-                    </div>
-                  </div>
-                  <Toggle
-                    checked={draftAutoDeduct}
-                    onChange={() => setDraftAutoDeduct((v) => !v)}
-                    label="تبديل الخصم التلقائي"
-                  />
-                </div>
-                <p className="text-[10px] text-slate-500 leading-tight border-t border-teal-100/80 pt-2">
-                  {draftAutoDeduct
-                    ? 'عند التفعيل يُخصم عند ميعاد الجرعات ويُحدَّث الرصيد وموعد النفاذ.'
-                    : 'عند الإيقاف يتوقف الخصم التلقائي ويبقى الرصيد ثابتاً.'}
-                </p>
-              </div>
+              <AppPreferencesSection
+                draftAutoDeduct={draftAutoDeduct}
+                setDraftAutoDeduct={setDraftAutoDeduct}
+                draftSound={draftSound}
+                setDraftSound={setDraftSound}
+              />
               {/* Notifications & Alerts Management Section */}
               <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-3">
                 <div className="flex items-center justify-between">
@@ -451,24 +418,6 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                     <span>المنبهات الدقيقة مفعّلة — تذكيرات الجرعات مضمونة في موعدها</span>
                   </div>
                 )}
-              </div>
-              {/* Sound management section */}
-              <div className="bg-teal-50/70 border border-teal-200/80 rounded-2xl p-3.5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    {draftSound ? (
-                      <Volume2 className="w-4 h-4 text-teal-600" />
-                    ) : (
-                      <VolumeX className="w-4 h-4 text-slate-400" />
-                    )}
-                    <span className="text-xs font-bold text-slate-700">تأثيرات صوتية في التطبيق</span>
-                  </div>
-                  <Toggle
-                    checked={draftSound}
-                    onChange={() => setDraftSound((v) => !v)}
-                    label="تبديل التأثيرات الصوتية"
-                  />
-                </div>
               </div>
             </>
           )}

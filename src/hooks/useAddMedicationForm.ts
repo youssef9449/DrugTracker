@@ -13,6 +13,30 @@ import {
   calculateStripBasedPackageSize,
 } from '../utils/addMedicationFormCalculations';
 
+/** Domain-oriented form model for add/edit medication (#529). */
+export interface AddMedicationFormModel {
+  details: { name: string; category: string; colorTag: string; unit: string };
+  stock: { currentPills: number; currentPillsStr: string; packageSize: number; packageSizeStr: string };
+  packaging: {
+    stripsPerBox: string;
+    pillsPerStrip: string;
+    noStrips: boolean;
+    showStockHelper: boolean;
+    helperBoxes: string;
+    helperStrips: string;
+    helperLoose: string;
+  };
+  dosage: { dosesPerDay: number; doseSchedule: import('../types').MedicationDose[]; warningThresholdDays: string };
+  treatment: {
+    isChronic: boolean;
+    durationDaysStr: string;
+    treatmentStartDateStr: string;
+    reminderEnabled: boolean;
+    autoDeductEnabled: boolean;
+  };
+  ui: { error: string };
+}
+
 export interface UseAddMedicationFormOptions {
   isOpen: boolean;
   onSave: (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => Promise<boolean>;

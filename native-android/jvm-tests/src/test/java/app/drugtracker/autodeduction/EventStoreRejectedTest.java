@@ -269,6 +269,7 @@ public class EventStoreRejectedTest {
         payload.put("scheduledAtEpochMs", 1_000L);
         payload.put("amount", 2.0);
         payload.put("status", AutoDeductionContract.STATUS_FIRED);
+        payload.put("createdAtEpochMs", 1_000L);
 
         pendingPrefs().edit().putString("pend:" + key, payload.toString()).commit();
 
@@ -297,6 +298,7 @@ public class EventStoreRejectedTest {
         payload.put("scheduledAtEpochMs", 1_000L);
         payload.put("amount", 2.0);
         payload.put("status", AutoDeductionContract.STATUS_FIRED);
+        payload.put("createdAtEpochMs", 1_000L);
 
         pendingPrefs().edit().putString("pend:" + key, payload.toString()).commit();
 

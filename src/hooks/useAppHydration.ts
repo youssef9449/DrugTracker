@@ -41,11 +41,9 @@ export function useAppHydration(setters: AppHydrationSetters): void {
 
   useEffect(() => {
     const persistedState = loadPersistedAppState({
-      setMedications,
       setLogs,
       setPharmacySettings,
       setIsFirstRun,
-      setIsAutoDeductPromptOpen,
       setSoundEnabled,
       setNotificationsEnabled,
       setCriticalStockAlertsEnabled,

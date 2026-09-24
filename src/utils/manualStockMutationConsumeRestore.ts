@@ -4,26 +4,17 @@ import type {
   GatedManualConsumeResult,
   GatedManualRestoreResult,
 } from './manualStockMutationTypes';
-import { consumeDose, restoreDose } from './medActions';
+import { consumeDose, restoreDose, resolveRestoreDoseId } from './medActions';
 import { getOccurrenceSnapshot, type OccurrenceSnapshotResult } from './autoDeductionNativeEvents';
 import { isDoseSkippedOnDate } from './dateCalculations';
 import { generateId } from './id';
+import { resolveDoseId } from './doseIdentity';
 import type { GatedManualOutcome } from './manualStockMutationTypes';
 
 export function shouldDismissAlarmAfterManualTake(
   outcome: GatedManualOutcome
 ): boolean {
   return outcome === 'applied' || outcome === 'already_consumed';
-}
-
-function resolveConsumeDoseId(
-  med: Medication,
-  doseId?: string
-): string | undefined {
-  const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
-  if (doseId != null && doseId !== '') return doseId;
-  if (schedule.length === 1) return schedule[0].id;
-  return undefined;
 }
 
 export function runGatedManualConsume(opts: {
@@ -64,21 +55,26 @@ export function runGatedManualConsume(opts: {
         reason: 'missing_med',
       };
     }
-    // Resolve dose identity once from durable med (never React). Multi-dose
-    // without doseId cannot proceed; single-dose maps to the sole slot id.
-    const resolvedDoseId = resolveConsumeDoseId(med, opts.doseId);
-    if (resolvedDoseId === undefined) {
+    // Resolve dose identity ONCE from durable med (never React) via the
+    // canonical resolver. Multi-dose without doseId cannot proceed;
+    // single-dose maps to the sole slot id; explicit ids are validated
+    // against schedule rows and normalized.
+    const resolved = resolveDoseId(med, opts.doseId);
+    if (!resolved.ok) {
       return {
-        outcome: 'missing_dose_id' as const,
+        outcome: resolved.reason === 'missing_dose_id'
+          ? ('missing_dose_id' as const)
+          : ('rejected' as const),
         medications: fresh.medications,
         logs: fresh.logs,
         doseAmount: 0,
         log: null,
-        reason: 'missing_dose_id',
+        reason: resolved.reason,
         medicationName: med.name,
         unit: med.unit,
       };
     }
+    const resolvedDoseId = resolved.doseId;
     // Authoritative amount: native occurrence snapshot under SCHEDULE_LOCK.
     // FIRED → immutable native event amount; SCHEDULED / ABSENT / CANCELLED
     // → fresh durable JS schedule amount; native failure → no mutation.
@@ -187,6 +183,8 @@ export function runGatedManualConsume(opts: {
       logs,
       doseAmount: result.doseAmount,
       log: result.log,
+      /** Canonical consumed identity for downstream notification cancel. */
+      doseId: resolvedDoseId,
       medicationName: med.name,
       unit: med.unit,
     };
@@ -249,8 +247,12 @@ export function runGatedManualRestore(opts: {
       // already handled). This happens when the first Restore cleared the
       // consume marker and set a skip; the second Restore finds no active
       // deduction and no consume marker.
+      // Identity: the CANONICAL resolved dose id — never the original
+      // optional input after resolution (#516). For a single-slot medication
+      // an omitted opts.doseId still checks (and persists) under the slot id.
       if (result.reason === 'missing_deduction_evidence') {
-        const occurrenceDoseId = opts.doseId;
+        const canonical = resolveRestoreDoseId(med, opts.doseId);
+        const occurrenceDoseId = canonical.ok ? canonical.doseId : null;
         if (occurrenceDoseId && isDoseSkippedOnDate(med, occurrenceDoseId, todayStr)) {
           return {
             outcome: 'already_restored' as const,

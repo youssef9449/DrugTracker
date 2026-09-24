@@ -12,6 +12,8 @@ import { getNativePlatform, isNativePlatform } from './notifications/notificatio
 import { cancelNotification, getPendingNotificationResult, scheduleNotification } from './notificationRuntime';
 import { classifyNativeError, type NativeBoundaryFailure } from './nativeErrors';
 import { scheduleWebNotification } from './notifications/webNotifications';
+import { isValidTimeHhmm } from './time';
+import { normalizeDoseId } from './doseIdentity';
 import {
   getDoseReminderChannelId,
   DOSE_REMINDER_TAKE_ACTION,
@@ -201,11 +203,8 @@ export async function scheduleDoseReminder(
   doseId: string,
   options?: ScheduleDoseReminderOptions,
 ): Promise<void> {
-  const parts = reminderTime.split(':').map((n) => parseInt(n, 10));
-  const [hour, minute] = parts;
-  if (parts.length < 2 || Number.isNaN(hour) || Number.isNaN(minute)) return;
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return;
-  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!isValidTimeHhmm(reminderTime)) return;
+  const id = normalizeDoseId(doseId);
   if (!id || !(Number(doseAmount) > 0)) return;
   if (getNativePlatform() === 'android') {
     await scheduleDoseReminderNative(

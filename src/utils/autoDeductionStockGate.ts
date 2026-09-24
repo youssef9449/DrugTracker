@@ -10,7 +10,13 @@
  */
 
 import type { ConsumptionLog, Medication } from '../types';
-import { loadJson, loadString, persist } from './storage';
+import {
+  isValidConsumptionLogRecord,
+  isValidMedicationRecord,
+  loadString,
+  persist,
+  readJsonOutcome,
+} from './storage';
 import { persistLastAppliedMutationSeq } from './stockMutationOrdering';
 
 export const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
@@ -57,12 +63,37 @@ export function loadDurableGlobalAutoDeductEnabled(): boolean {
   return loadString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true') !== 'false';
 }
 
+/** Runtime-validated medication-list parser for durable stock reads. */
+function parseMedicationList(raw: unknown): Medication[] | null {
+  if (!Array.isArray(raw) || !raw.every(isValidMedicationRecord)) return null;
+  return raw;
+}
+
+/** Runtime-validated consumption-log parser for durable stock reads. */
+function parseConsumptionLogs(raw: unknown): ConsumptionLog[] | null {
+  if (!Array.isArray(raw) || !raw.every(isValidConsumptionLogRecord)) return null;
+  return raw;
+}
+
 export function loadDurableAutoStockState(): AutoStockDurableState {
-  const meds = loadJson<Medication[] | null>(STORAGE_MEDS_KEY, null);
-  const logs = loadJson<ConsumptionLog[] | null>(STORAGE_LOGS_KEY, null);
+  // Durable Auto-owned state is a trusted reconciliation input: malformed
+  // records are surfaced as explicit invalid outcomes (diagnosable) instead
+  // of silently collapsing into an authoritative empty snapshot.
+  const meds = readJsonOutcome(STORAGE_MEDS_KEY, parseMedicationList);
+  const logs = readJsonOutcome(STORAGE_LOGS_KEY, parseConsumptionLogs);
+  if (meds.status === 'invalid' || meds.status === 'read_failed') {
+    console.warn(
+      `[auto-stock] durable medication state unusable (${meds.status}: ${'reason' in meds ? meds.reason : ''}); failing closed.`
+    );
+  }
+  if (logs.status === 'invalid' || logs.status === 'read_failed') {
+    console.warn(
+      `[auto-stock] durable log state unusable (${logs.status}: ${'reason' in logs ? logs.reason : ''}); failing closed.`
+    );
+  }
   return {
-    medications: Array.isArray(meds) ? meds : [],
-    logs: Array.isArray(logs) ? logs : [],
+    medications: meds.status === 'ok' ? meds.value : [],
+    logs: logs.status === 'ok' ? logs.value : [],
     globalAutoDeductEnabled: loadDurableGlobalAutoDeductEnabled(),
   };
 }

@@ -15,6 +15,12 @@ export interface GatedManualConsumeResult {
   doseAmount: number;
   log: ConsumptionLog | null;
   reason?: string;
+  /**
+   * Canonical dose identity actually consumed (present on success).
+   * Downstream notification cancellation MUST use this value — never the
+   * original optional caller argument (#515).
+   */
+  doseId?: string;
   /** Fresh durable medication name/unit for UI (never from React snapshot). */
   medicationName?: string;
   unit?: string;

@@ -12,16 +12,26 @@
  */
 import type { Medication, MedicationDose } from '../types';
 import { generateId } from './id';
-import { timeToMinutes } from './time';
+import { timeToMinutes, isValidTimeHhmm } from './time';
+import {
+  validateMedicationDose,
+  normalizeDoseId,
+  normalizeDoseDescription,
+  normalizeDoseTimeValue,
+} from './doseIdentity';
 import { isDoseConsumedOnDate, isDoseSkippedOnDate, getTodayDateString } from './dateCalculations';
 /**
  * Auto-Deduction active for a medication based solely on its own preference.
- * Runtime Auto follows medication.autoDeductEnabled (undefined defaults ON).
+ * Runtime Auto follows medication.autoDeductEnabled. The documented model
+ * default is ON: an omitted/undefined `autoDeductEnabled` resolves to
+ * enabled, an explicit `false` is OFF, an explicit `true` is ON. This
+ * helper is the SINGLE policy source — schedule definition and elapsed-dose
+ * completion must consume it instead of re-deriving the default (#499).
  */
 export function isMedicationAutoDeductActive(
   medication: Medication
 ): boolean {
-  return medication.autoDeductEnabled === true;
+  return medication.autoDeductEnabled !== false;
 }
 /** Sensible UI maximum for doses per day (compact mobile form). */
 export const MAX_DOSES_PER_DAY = 12;
@@ -44,24 +54,18 @@ export const DEFAULT_DOSE_TIMES = [
   '23:00',
   '23:30',
 ] as const;
-const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
-/** Normalize an optional persisted dose description without trusting runtime shape. */
-function normalizeDoseDescription(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed === '' ? undefined : trimmed;
-}
-/** True if the string is a valid 24h HH:mm (or H:mm). */
+/** True if the string is a valid strict 24h HH:mm (canonical persisted contract). */
 export function isValidDoseTime(time: string): boolean {
-  if (!time || typeof time !== 'string') return false;
-  if (!TIME_RE.test(time)) return false;
-  return timeToMinutes(time) >= 0;
+  return isValidTimeHhmm(time);
 }
-/** Normalize to zero-padded HH:mm when valid; otherwise return original. */
+/**
+ * Normalize to zero-padded HH:mm. Accepts valid H:mm/HH:mm input (UI
+ * boundary) so form input is padded before strict validation; invalid
+ * input is returned unchanged for the caller to reject.
+ */
 export function normalizeTimeString(time: string): string {
-  if (!isValidDoseTime(time)) return time;
-  const [h, m] = time.split(':').map((n) => parseInt(n, 10));
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  const padded = normalizeDoseTimeValue(time);
+  return padded ?? time;
 }
 /** Sort schedule chronologically; stable for equal times. */
 export function sortDoseSchedule(schedule: MedicationDose[]): MedicationDose[] {
@@ -91,9 +95,9 @@ export function getDoseScheduleForUI(
   }
   return sortDoseSchedule(
     med.doseSchedule
-      .filter((d) => d && isValidDoseTime(d.time) && Number(d.amount) > 0)
+      .filter((d) => d && isValidDoseTime(normalizeTimeString(d.time)) && Number(d.amount) > 0)
       .map((d) => ({
-        id: d.id || generateId('dose'),
+        id: normalizeDoseId(d.id) || generateId('dose'),
         amount: Number(d.amount),
         time: normalizeTimeString(d.time),
         ...(normalizeDoseDescription(d.description) !== undefined
@@ -218,7 +222,7 @@ export function validateAndNormalizeDoseSchedule(
         message: `كمية الجرعة ${i + 1} يجب أن تكون أكبر من صفر`,
       };
     }
-    if (!isValidDoseTime(row.time)) {
+    if (!isValidDoseTime(normalizeTimeString(row.time))) {
       return {
         ok: false,
         error: 'invalid_time',
@@ -235,7 +239,7 @@ export function validateAndNormalizeDoseSchedule(
     }
     seenTimes.add(time);
     normalized.push({
-      id: row.id || generateId('dose'),
+      id: normalizeDoseId(row.id) || generateId('dose'),
       amount,
       time,
       ...(normalizeDoseDescription(row.description) !== undefined
@@ -291,7 +295,7 @@ export function isDoseCompletedToday(
   const autoActive =
     autoDeductActive !== undefined
       ? autoDeductActive
-      : med.autoDeductEnabled === true;
+      : isMedicationAutoDeductActive(med);
   if (autoActive && isDoseTimeElapsedToday(dose.time, now)) {
     return true;
   }

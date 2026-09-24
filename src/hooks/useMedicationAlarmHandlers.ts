@@ -33,9 +33,17 @@ export function useMedicationAlarmHandlers(deps: MedicationHandlersDeps, state: 
       runAsyncCommand(
         'dose-reminder.notification-cancel',
         async () => {
+          // The consume result carries the CANONICAL dose identity that was
+          // actually consumed (single-dose Take with omitted doseId resolves
+          // to the slot id). Cancellation must use that identity — the Dose
+          // Reminder schedule/cancel identity is medicationId::<doseId>.
+          // Never reconstruct the identity from the original optional arg.
+          if (!result.doseId) {
+            throw new Error('dose_reminder_cancel_identity_missing');
+          }
           const cancelled = await cancelNotification(
             'dose-reminder',
-            medicationId + '::' + (doseId ?? '')
+            medicationId + '::' + result.doseId
           );
           if (!cancelled) {
             throw new Error('dose_reminder_notification_cancel_failed');

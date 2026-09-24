@@ -19,9 +19,9 @@ import {
 import {
   isValidConsumptionLogRecord,
   isValidMedicationRecord,
-  loadJson,
   loadString,
   persist,
+  readJsonOutcome,
   readStorageItem,
 } from './storage';
 import { convergeAutoDeductionStock } from './autoDeductionNativeStock';
@@ -58,6 +58,14 @@ export interface PersistedAppHydrationState {
   isFirstEverOpen: boolean;
   loadedMedications: Medication[];
   shouldShowAutoDeductPrompt: boolean;
+}
+
+/** Runtime-validated pharmacy-settings parser for durable reads. */
+function parsePharmacySettings(
+  raw: unknown
+): Partial<PharmacySettings> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  return raw as Partial<PharmacySettings>;
 }
 
 /**
@@ -98,30 +106,40 @@ export function loadPersistedAppState(
   if (isFirstEverOpen) {
     setters.setIsFirstRun(true);
   } else {
-    const parsed = loadJson<unknown>(STORAGE_MEDS_KEY, null);
-    if (Array.isArray(parsed)) {
-      const validMedications = parsed.filter(isValidMedicationRecord);
-      if (validMedications.length !== parsed.length) {
-        console.warn('[App] Ignored malformed persisted medication records during hydration.');
-      }
-      loadedMedications = validMedications;
+    // Hydration distinguishes missing vs invalid vs unreadable durable state.
+    // A corrupt medication snapshot is never treated as an authoritative
+    // empty list — startup proceeds fail-safe with a loud diagnostic.
+    const medsOutcome = readJsonOutcome(STORAGE_MEDS_KEY, (raw) =>
+      Array.isArray(raw) && raw.every(isValidMedicationRecord) ? raw : null
+    );
+    if (medsOutcome.status === 'ok') {
+      loadedMedications = medsOutcome.value;
+    } else if (medsOutcome.status === 'invalid' || medsOutcome.status === 'read_failed') {
+      console.warn(
+        `[App] Persisted medication state unusable (${medsOutcome.status}: ${medsOutcome.status === 'missing' ? '' : medsOutcome.reason}); starting fail-safe.`
+      );
     }
   }
 
-  const savedLogs = loadJson<unknown>(STORAGE_LOGS_KEY, null);
-  if (Array.isArray(savedLogs)) {
-    const validLogs = savedLogs.filter(isValidConsumptionLogRecord);
-    if (validLogs.length !== savedLogs.length) {
-      console.warn('[App] Ignored malformed persisted consumption-log records during hydration.');
-    }
-    setters.setLogs(validLogs);
-  }
-
-  const parsedPharmacy = loadJson<Partial<PharmacySettings> | null>(
-    STORAGE_PHARMACY_KEY,
-    null
+  const logsOutcome = readJsonOutcome(STORAGE_LOGS_KEY, (raw) =>
+    Array.isArray(raw) && raw.every(isValidConsumptionLogRecord) ? raw : null
   );
-  if (parsedPharmacy && typeof parsedPharmacy === 'object') {
+  if (logsOutcome.status === 'ok') {
+    setters.setLogs(logsOutcome.value);
+  } else if (logsOutcome.status === 'invalid' || logsOutcome.status === 'read_failed') {
+    console.warn(
+      `[App] Persisted consumption-log state unusable (${logsOutcome.status}: ${logsOutcome.status === 'missing' ? '' : logsOutcome.reason}); starting fail-safe.`
+    );
+  }
+
+  const pharmacyOutcome = readJsonOutcome(STORAGE_PHARMACY_KEY, parsePharmacySettings);
+  const parsedPharmacy = pharmacyOutcome.status === 'ok' ? pharmacyOutcome.value : null;
+  if (pharmacyOutcome.status === 'invalid' || pharmacyOutcome.status === 'read_failed') {
+    console.warn(
+      `[App] Persisted pharmacy settings unusable (${pharmacyOutcome.status}); keeping defaults.`
+    );
+  }
+  if (parsedPharmacy) {
     const pharmacies = Array.isArray(parsedPharmacy.pharmacies)
       ? parsedPharmacy.pharmacies
       : [];

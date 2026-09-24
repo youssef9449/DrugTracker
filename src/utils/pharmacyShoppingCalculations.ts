@@ -62,7 +62,7 @@ export function getSelectedUnits(orderUnits: Record<string, OrderUnit[]>, med: M
   return orderUnits[med.id] || getShoppingDefaultUnits(med);
 }
 
-export function getUnitQuantity(customOrderQuantities: CustomOrderQuantities, orderUnits: Record<string, OrderUnit[]>, quantityModes: Record<string, QuantityMode>, med: Medication, unit: OrderUnit, suggestedPills: number): number {
+export function getUnitQuantity(customOrderQuantities: CustomOrderQuantities, quantityModes: Record<string, QuantityMode>, med: Medication, unit: OrderUnit, suggestedPills: number): number {
   if (getQuantityMode(quantityModes, med) === 'custom') {
     const stored = customOrderQuantities[med.id]?.[unit];
     if (stored === '') return 0;

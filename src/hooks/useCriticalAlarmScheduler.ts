@@ -54,11 +54,10 @@ export interface UseCriticalAlarmSchedulerOptions {
  * even if the app is killed; system lifecycle recovery is handled by
  * DrugTrackerAlarmSystemReceiver → ExactAlarmLifecycle.
  *
- * The persistent claim ({@link CriticalNotificationClaim}) is the
- * business source of truth; this hook is just the EXECUTOR that arms and
- * cancels the native alarm and records the claim after a successful
- * schedule. It never decides whether the user has been notified for an
- * active critical episode — that is the foreground hook's job.
+ * {@link evaluateCriticalStockPolicy} is the business decision source of
+ * truth; this hook is only the EXECUTOR that arms/cancels the native alarm
+ * and persists successful schedule outcomes. The foreground hook consumes
+ * the same policy for immediate delivery.
  *
  * Decision table (per med, per effect run):
  *
@@ -86,8 +85,9 @@ export interface UseCriticalAlarmSchedulerOptions {
  *   dailyDose <= 0):
  *     cancel any alarm this session armed — nothing will cross the
  *     threshold without user action. The claim is NOT touched here:
- *     ending the business episode (clearing the claim) is the foreground
- *     hook's synchronous job (useStockAlerts).
+ *     the policy identifies whether the claim is stale; the foreground
+ *     coordinator applies that decision because it is the delivery path
+ *     responsible for foreground persistence.
  *
  *   criticalStockAlertsEnabled false:
  *     cancel every possibly-armed critical alarm (this session's and any
@@ -102,11 +102,11 @@ export interface UseCriticalAlarmSchedulerOptions {
  *   are removed by the foreground hook).
  *
  * OWNERSHIP (important): this hook is the native-alarm EXECUTOR only.
- * It never ends a business episode and never clears the persistent
- * claim because a medication became Sufficient/frozen/disabled — that
- * transition is owned, synchronously, by useStockAlerts. The only claim
- * writes here are the schedule outcome for a SUFFICIENT med with a
- * future crossing: success → { claimed: true, alarmTime: T }, failure →
+ * Episode boundaries and claim interpretation belong to the shared
+ * Critical Stock policy. This executor never clears a persistent claim
+ * because a medication became Sufficient/frozen/disabled. Its only claim
+ * writes are schedule outcomes for a sufficient med with a future crossing:
+ * success → { claimed: true, alarmTime: T }, failure →
  * { claimed: false, alarmTime: null } (opportunity stays open).
  *
  * RECONCILIATION ("armed" is verified, never assumed): the persistent

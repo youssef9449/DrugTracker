@@ -26,33 +26,46 @@ public final class CriticalStockPlugin extends Plugin {
             return;
         }
 
-        CriticalStockAlarmAdapter.ScheduleResult result =
-                new CriticalStockAlarmAdapter(getContext()).schedule(
-                        medicationId,
-                        medicationName,
-                        triggerAt,
-                        unit,
-                        notificationTitle,
-                        notificationBody,
-                        null);
+        app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
+            try {
+                CriticalStockAlarmAdapter.ScheduleResult result =
+                        new CriticalStockAlarmAdapter(getContext()).schedule(
+                                medicationId,
+                                medicationName,
+                                triggerAt,
+                                unit,
+                                notificationTitle,
+                                notificationBody,
+                                null);
 
-        JSObject ret = new JSObject();
-        ret.put("ok", result.ok);
-        if (result.error != null) ret.put("error", result.error);
-        call.resolve(ret);
+                JSObject ret = new JSObject();
+                ret.put("ok", result.ok);
+                if (result.error != null) ret.put("error", result.error);
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("critical_stock_schedule_failed");
+            }
+        });
     }
 
     @PluginMethod
     public void cancel(PluginCall call) {
         String medicationId = call.getString("medicationId");
-        CriticalStockAlarmAdapter.CancelResult result =
-                new CriticalStockAlarmAdapter(getContext()).cancel(medicationId);
 
-        JSObject ret = new JSObject();
-        ret.put("ok", result.isOk());
-        ret.put("status", result.status.name());
-        if (result.error != null) ret.put("error", result.error);
-        call.resolve(ret);
+        app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
+            try {
+                CriticalStockAlarmAdapter.CancelResult result =
+                        new CriticalStockAlarmAdapter(getContext()).cancel(medicationId);
+
+                JSObject ret = new JSObject();
+                ret.put("ok", result.isOk());
+                ret.put("status", result.status.name());
+                if (result.error != null) ret.put("error", result.error);
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("critical_stock_cancel_failed");
+            }
+        });
     }
 
     @PluginMethod

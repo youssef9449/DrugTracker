@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import type { Medication, PharmacySettings } from '../types';
 import { usePharmacyShoppingSelection } from './usePharmacyShoppingSelection';
+import { usePharmacyShoppingWhatsApp } from './usePharmacyShoppingWhatsApp';
 import { calculateMedicationOrderQuantity, type OrderItem } from '../utils/whatsapp';
 import {
   getShoppingAvailableUnits, getShoppingUnitSize,

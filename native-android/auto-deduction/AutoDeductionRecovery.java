@@ -30,7 +30,8 @@ final class AutoDeductionRecovery {
                 String treatmentEndDateOverride);
         FireResult recoverMissedOccurrence(
                 String medicationId, String doseId, String calendarDate,
-                long scheduledAt, double amount, long generation);
+                long scheduledAt, double amount, long generation,
+                String treatmentEndDate, String fallbackTimeHhmm);
         boolean removeScheduleMetadataIfVersion(String prefKey, String expectedVersion);
         ScheduleResult scheduleNextOccurrenceIfSnapshotOwnsPast(
                 String medicationId, String doseId, String fromDate, String timeHhmm,
@@ -61,8 +62,7 @@ final class AutoDeductionRecovery {
         ScheduleResult scheduleOccurrenceLocked(
                 String prefKey,
                 AutoDeductionPersistenceModels.ScheduleRecord record,
-                String requiredVersion,
-                Long requiredRecurrenceGeneration);
+                String requiredVersion);
         boolean compactTerminalState();
     }
 

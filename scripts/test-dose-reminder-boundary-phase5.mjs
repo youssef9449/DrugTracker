@@ -16,6 +16,7 @@ const productionDoseFiles = [
   'src/hooks/useDoseReminders.ts',
   'src/hooks/useNativeActionHandlers.ts',
   'src/hooks/useDoseReminderScheduler.ts',
+  'src/utils/doseReminderReconciliation.ts',
   'src/utils/doseReminderNative.ts',
   'src/utils/doseReminderScheduling.ts',
   'src/utils/notifications/doseReminderNotifications.ts',

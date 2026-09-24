@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { CriticalNotificationClaim, Medication } from '@/types';
 import {
   evaluateCriticalStockPolicy,
@@ -87,6 +87,18 @@ describe('evaluateCriticalStockPolicy', () => {
     expect(decision.desiredDelivery).toBe('scheduled');
   });
 
+  it('allows foreground delivery when a future scheduled claim exists for an active episode', () => {
+    const scheduledAt = NOW + 60 * 60 * 1000;
+    const decision = decide(makeMed({ currentPills: 0 }), {
+      claimed: true,
+      alarmTime: scheduledAt,
+    });
+
+    expect(decision.foregroundEligible).toBe(true);
+    expect(decision.desiredDelivery).toBe('foreground');
+    expect(decision.shouldClearClaim).toBe(false);
+  });
+
   it('recognizes only the exact future projection as the current scheduled claim', () => {
     const base = decide(makeMed({ currentPills: 30 }));
     expect(base.criticalDateMs).not.toBeNull();
@@ -138,7 +150,6 @@ describe('evaluateCriticalStockPolicy', () => {
   });
 
   it('preserves multi-dose crossing semantics through the shared policy', () => {
-    vi.useFakeTimers();
     const decision = decide(
       makeMed({
         currentPills: 11,
@@ -154,6 +165,5 @@ describe('evaluateCriticalStockPolicy', () => {
     expect(decision.daysLeft).toBe(3);
     expect(decision.isCriticalEpisode).toBe(true);
     expect(decision.desiredDelivery).toBe('foreground');
-    vi.useRealTimers();
   });
 });

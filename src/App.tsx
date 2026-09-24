@@ -55,31 +55,39 @@ export default function App() {
   });
 
 
+  const {
+    handleConfirmRefill,
+    handleUndoRefill,
+    handleToggleAutoDeduct,
+    handleToggleGlobalAutoDeduct,
+    handleConfirmAutoDeductPrompt,
+    handleSaveMedication,
+    handleDeleteMedication,
+    handleTakeDoseFromAlarm,
+    handleSnoozeFromAlarm,
+    handleConsumeDose,
+    handleCardRestoreDose,
+    handleSelectDoseFromModal,
+    handleToggleCriticalStockAlerts,
+    handleToggleMedicationReminder,
+    handleToggleMedicationCriticalStockAlerts,
+    handleSavePharmacySettings,
+    handleSavePharmacy,
+    handleDeletePharmacy,
+    handleSaveUserContact,
+    handleDeleteUserContact,
+    handleSaveUserAddress,
+    handleDeleteUserAddress,
+    userContacts,
+    userAddresses,
+    handleToggleNotifications,
+    handleSendTestNotification,
+    handleOpenExactAlarmSettings,
   } = useAppRuntime({
     state: runtimeState,
     ui: { selectDoseMode, settingsModalMode },
     uiActions: { setSelectDoseMed, setSelectDoseMode, setEditingMedication },
     services: { showToast, dismissAlarm, snoozeAlarm, openAlarm },
-  });
-
-  useAppBackOverlays({
-    registerBackOverlay,
-    alarmingMedication,
-    dismissAlarm,
-    selectDoseMed,
-    setSelectDoseMed,
-    setSelectDoseMode,
-    historyMedication,
-    setHistoryMedication,
-    isAutoDeductPromptOpen,
-    handleConfirmAutoDeductPrompt,
-    isAddModalOpen,
-    setIsAddModalOpen,
-    setEditingMedication,
-    refillMedication,
-    setRefillMedication,
-    isSettingsModalOpen,
-    setIsSettingsModalOpen,
   });
 
   useAppBackOverlays({

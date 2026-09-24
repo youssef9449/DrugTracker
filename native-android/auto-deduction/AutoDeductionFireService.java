@@ -6,10 +6,32 @@ import app.drugtracker.autodeduction.AutoDeductionScheduler.FireResult;
 
 /** Focused Auto-Deduction responsibility collaborator: AutoDeductionFireService. */
 final class AutoDeductionFireService {
-    private final AutoDeductionScheduler scheduler;
+    interface Host {
+        boolean isOccurrenceCancelledKey(String occurrenceKey);
+        AutoDeductionSchedulingAdapter schedulingAdapter();
+        long getRecurrenceGenerationLocked(String medicationId, String doseId);
+        AutoDeductionEventStore eventStore();
+        boolean persistSuccessorObligation(
+                String medicationId, String doseId, String calendarDate,
+                String timeHhmm, double amount, String treatmentEndDate,
+                String operationVersion, long recurrenceGeneration);
+        boolean recordIndependentFireRetryEvidenceLocked(
+                String medicationId, String doseId, String calendarDate,
+                long scheduledAt, double amount, String timeHhmm,
+                String treatmentEndDate, long generation, String operationVersion,
+                int nextRetryCount);
+        Context appContext();
+        boolean markSuccessorObligationStockApplied(
+                String medicationId, String doseId, String calendarDate);
+        boolean clearIndependentFireRetryEvidenceLocked(String occurrenceKey);
+        boolean isRecurrenceGenerationAuthorizedLocked(
+                String medicationId, String doseId, long expectedGeneration);
+    }
 
-    AutoDeductionFireService(AutoDeductionScheduler scheduler) {
-        this.scheduler = scheduler;
+    private final Host host;
+
+    AutoDeductionFireService(Host host) {
+        this.host = host;
     }
 
 public FireResult fireOccurrenceIfNotCancelled(
@@ -31,14 +53,14 @@ public FireResult fireOccurrenceIfNotCancelled(
         final String key = AutoDeductionContract.occurrenceKey(medicationId, doseId, calendarDate);
         synchronized (AutoDeductionScheduler.class) {
             // Re-entrant: isOccurrenceCancelledKey also synchronizes on AutoDeductionScheduler.class.
-            if (scheduler.isOccurrenceCancelledKey(key)) {
+            if (host.isOccurrenceCancelledKey(key)) {
                 Log.i("AutoDeductionScheduler", "fire linearization: CANCELLED wins for " + key);
                 return FireResult.cancelled();
             }
             // delivery must own the *current* schedule row.
             final String prefKey = key;
             final AutoDeductionPersistenceModels.ScheduleRecord schedule =
-                    scheduler.schedulingAdapter().getScheduleRecord(prefKey);
+                    host.schedulingAdapter().getScheduleRecord(prefKey);
             if (schedule == null) {
                 Log.i("AutoDeductionScheduler", "fire linearization: STALE (no active schedule metadata) for " + key);
                 return FireResult.cancelled();
@@ -53,7 +75,7 @@ public FireResult fireOccurrenceIfNotCancelled(
                 return FireResult.cancelled();
             }
             String activeVersion = schedule.operationVersion;
-            long activeGen = scheduler.getRecurrenceGenerationLocked(medicationId, doseId);
+            long activeGen = host.getRecurrenceGenerationLocked(medicationId, doseId);
             if (deliveryOperationVersion == null || deliveryOperationVersion.isEmpty()
                     || deliveryRecurrenceGeneration <= 0L) {
                 Log.i("AutoDeductionScheduler",
@@ -66,7 +88,7 @@ public FireResult fireOccurrenceIfNotCancelled(
                         "fire linearization: STALE ownership tokens for " + key);
                 return FireResult.cancelled();
             }
-            AutoDeductionEventStore store = scheduler.eventStore();
+            AutoDeductionEventStore store = host.eventStore();
             AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
                     medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
             FireResult result = FireResult.fromInsert(ir);
@@ -77,7 +99,7 @@ public FireResult fireOccurrenceIfNotCancelled(
                 // obligation is the crash-recovery journal: if the process dies
                 // anywhere after FIRED, recovery can idempotently re-apply stock
                 // and then install the successor.
-                boolean obligationSaved = scheduler.persistSuccessorObligation(
+                boolean obligationSaved = host.persistSuccessorObligation(
                         medicationId,
                         doseId,
                         calendarDate,
@@ -87,7 +109,7 @@ public FireResult fireOccurrenceIfNotCancelled(
                         deliveryOperationVersion,
                         deliveryRecurrenceGeneration);
                 if (!obligationSaved) {
-                    scheduler.recordIndependentFireRetryEvidenceLocked(
+                    host.recordIndependentFireRetryEvidenceLocked(
                             medicationId, doseId, calendarDate, scheduledAtEpochMs,
                             amount, obligationTime, obligationEndDate,
                              deliveryRecurrenceGeneration,
@@ -97,12 +119,12 @@ public FireResult fireOccurrenceIfNotCancelled(
                     return new FireResult(FireResult.Status.FAILED, false);
                 }
                 AutoDeductionStockStore.AutoApplyResult stockResult =
-                        new AutoDeductionStockStore(scheduler.appContext()).applyAutoDeductionForRecovery(
+                        new AutoDeductionStockStore(host.appContext()).applyAutoDeductionForRecovery(
                                 medicationId, doseId, calendarDate, amount);
                 if (!stockResult.ok) {
                     Log.e("AutoDeductionScheduler", "fire linearization: Native stock apply failed for "
                             + key + " — " + stockResult.error);
-                    scheduler.recordIndependentFireRetryEvidenceLocked(
+                    host.recordIndependentFireRetryEvidenceLocked(
                             medicationId, doseId, calendarDate, scheduledAtEpochMs,
                             amount, obligationTime, obligationEndDate,
                              deliveryRecurrenceGeneration,
@@ -112,9 +134,9 @@ public FireResult fireOccurrenceIfNotCancelled(
                 // Native stock is now durable. Mark that stage in the obligation.
                 // A crash before this write is still safe because stock application
                 // is occurrence-idempotent on recovery.
-                if (!scheduler.markSuccessorObligationStockApplied(
+                if (!host.markSuccessorObligationStockApplied(
                         medicationId, doseId, calendarDate)) {
-                    scheduler.recordIndependentFireRetryEvidenceLocked(
+                    host.recordIndependentFireRetryEvidenceLocked(
                             medicationId, doseId, calendarDate, scheduledAtEpochMs,
                             amount, obligationTime, obligationEndDate,
                              deliveryRecurrenceGeneration,
@@ -123,7 +145,7 @@ public FireResult fireOccurrenceIfNotCancelled(
                             "fire linearization: successor obligation stock state commit failed for " + key);
                     return new FireResult(FireResult.Status.FAILED, false);
                 }
-                scheduler.clearIndependentFireRetryEvidenceLocked(key);
+                host.clearIndependentFireRetryEvidenceLocked(key);
             } else if (result.status == FireResult.Status.FAILED
                     && !result.pendingRecorded) {
                 // FIRED persistence itself failed without an independent pending
@@ -132,7 +154,7 @@ public FireResult fireOccurrenceIfNotCancelled(
                 String timeHhmm = schedule.timeHhmm;
                 String operationVersion = deliveryOperationVersion;
                 long gen = deliveryRecurrenceGeneration;
-                scheduler.recordIndependentFireRetryEvidenceLocked(
+                host.recordIndependentFireRetryEvidenceLocked(
                         medicationId, doseId, calendarDate, scheduledAtEpochMs,
                         amount, timeHhmm, schedule.treatmentEndDate,
                          gen, operationVersion, /*nextRetryCount=*/1);
@@ -188,18 +210,18 @@ public FireResult recoverMissedOccurrence(
         final String key = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
         synchronized (AutoDeductionScheduler.class) {
-            if (scheduler.isOccurrenceCancelledKey(key)) {
+            if (host.isOccurrenceCancelledKey(key)) {
                 Log.i("AutoDeductionScheduler", "recoverMissed: CANCELLED occurrence " + key);
                 return FireResult.cancelled();
             }
-            if (!scheduler.isRecurrenceGenerationAuthorizedLocked(
+            if (!host.isRecurrenceGenerationAuthorizedLocked(
                     medicationId, doseId, expectedRecurrenceGeneration)) {
                 Log.i("AutoDeductionScheduler", "recoverMissed: generation not authorized for " + key
                         + " expectedGen=" + expectedRecurrenceGeneration);
                 return FireResult.cancelled();
             }
 
-            AutoDeductionEventStore store = scheduler.eventStore();
+            AutoDeductionEventStore store = host.eventStore();
             AutoDeductionEventStore.InsertFiredResult ir = store.insertFiredIfAbsent(
                     medicationId, doseId, calendarDate, scheduledAtEpochMs, amount);
             FireResult result = FireResult.fromInsert(ir);
@@ -208,7 +230,7 @@ public FireResult recoverMissedOccurrence(
             }
 
             AutoDeductionPersistenceModels.ScheduleRecord schedule =
-                    scheduler.schedulingAdapter().getScheduleRecord(key);
+                    host.schedulingAdapter().getScheduleRecord(key);
             String obligationTime = schedule == null ? fallbackTimeHhmm : schedule.timeHhmm;
             if (!AutoDeductionContract.isValidTimeHhmm(obligationTime)) {
                 return new FireResult(FireResult.Status.FAILED, false);
@@ -224,7 +246,7 @@ public FireResult recoverMissedOccurrence(
             // Native stock execution. An empty operationVersion explicitly denotes
             // an overdue catch-up occurrence whose consumed schedule row no longer
             // exists; recurrenceGeneration remains the ownership guard.
-            if (!scheduler.persistSuccessorObligation(
+            if (!host.persistSuccessorObligation(
                     medicationId,
                     doseId,
                     calendarDate,
@@ -239,7 +261,7 @@ public FireResult recoverMissedOccurrence(
             }
 
             AutoDeductionStockStore.AutoApplyResult stockResult =
-                    new AutoDeductionStockStore(scheduler.appContext()).applyAutoDeductionForRecovery(
+                    new AutoDeductionStockStore(host.appContext()).applyAutoDeductionForRecovery(
                             medicationId, doseId, calendarDate, amount);
             if (!stockResult.ok) {
                 Log.e("AutoDeductionScheduler", "recoverMissed: Native stock apply failed for " + key
@@ -247,14 +269,14 @@ public FireResult recoverMissedOccurrence(
                 return new FireResult(FireResult.Status.FAILED, false);
             }
 
-            if (!scheduler.markSuccessorObligationStockApplied(
+            if (!host.markSuccessorObligationStockApplied(
                     medicationId, doseId, calendarDate)) {
                 Log.e("AutoDeductionScheduler",
                         "recoverMissed: successor obligation stock state commit failed for " + key);
                 return new FireResult(FireResult.Status.FAILED, false);
             }
 
-            scheduler.clearIndependentFireRetryEvidenceLocked(key);
+            host.clearIndependentFireRetryEvidenceLocked(key);
             return result;
         }
     }
@@ -272,14 +294,14 @@ public FireResult recoverMissedOccurrence(
         final String key = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
         synchronized (AutoDeductionScheduler.class) {
-            if (!scheduler.isRecurrenceGenerationAuthorizedLocked(
+            if (!host.isRecurrenceGenerationAuthorizedLocked(
                     medicationId, doseId, generation)) {
                 return FireResult.cancelled();
             }
             if (!AutoDeductionContract.isValidTimeHhmm(fallbackTimeHhmm)) {
                 return new FireResult(FireResult.Status.FAILED, false);
             }
-            if (!scheduler.schedulingAdapter().clearCancellationTombstone(key)) {
+            if (!host.schedulingAdapter().clearCancellationTombstone(key)) {
                 return new FireResult(FireResult.Status.FAILED, false);
             }
             return recoverMissedOccurrence(

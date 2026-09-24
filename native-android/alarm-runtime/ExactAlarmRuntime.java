@@ -465,13 +465,23 @@ public final class ExactAlarmRuntime {
                 return ScheduleResult.fail("schedule_failed");
             }
 
-            // Only after AlarmManager accepted the new schedule may an older
-            // cancellation tombstone be physically removed. If this cleanup fails,
-            // ordering still makes the newer schedule authoritative; if install
-            // fails, the older tombstone remains intact.
-            store.clearCancellationIfSupersededLocked(
-                    request.storageKey,
-                    operationVersion);
+            // A fresh feature-owned schedule is an explicit new desired state,
+            // so it legitimately supersedes any prior cancellation tombstone once
+            // AlarmManager has accepted the new alarm. Restore/re-arm requests carry
+            // expectedExistingOperationVersion and must still respect a newer
+            // cancellation, handled by the ownership checks above.
+            if (request.expectedExistingOperationVersion == null
+                    || request.expectedExistingOperationVersion.isEmpty()) {
+                if (!store.removeCancellationTombstoneLocked(request.storageKey)
+                        && store.hasCancellationTombstoneLocked(request.storageKey)) {
+                    Log.w(TAG, "failed to clear superseded tombstone: "
+                            + request.storageKey);
+                }
+            } else {
+                store.clearCancellationIfSupersededLocked(
+                        request.storageKey,
+                        operationVersion);
+            }
 
             return ScheduleResult.success(
                     request.identityUri,

@@ -14,6 +14,8 @@ import {
   MedicationCardHeader,
   MedicationCardStatusBadges,
   MedicationCardDoseActions,
+  MedicationCardStockSummary,
+  MedicationCardProgress,
 } from './medicationCardParts';
 
 type StatusInfo = ReturnType<typeof calculateMedicationStatus>;
@@ -397,38 +399,24 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
           />
         </div>
       </div>
-      <div className="mt-1.5 p-1 bg-slate-50 rounded-xl border border-slate-100 grid grid-cols-2 gap-1 text-[9px] min-w-0">
-        <div className="flex min-w-0 items-baseline gap-0.5">
-          <span className="text-[8px] text-slate-500">المتبقي:</span>
-          <span className={`font-mono font-extrabold text-[11px] leading-none ${currentPills === 0 ? 'text-red-600' : 'text-slate-900'}`}>
-            {currentPills}
-          </span>
-          <span className="text-[8px] text-slate-500 truncate">{medication.unit || 'قرص'}</span>
-        </div>
-        <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
-          <div className="flex shrink-0 items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-mono text-teal-800 font-bold" title={`الجرعة: ${medication.dailyDose}/يوم`}>
-            <Clock className="w-2 h-2 text-teal-600" />
-            <span>{medication.dailyDose}/ي</span>
-          </div>
-          <div className="flex min-w-0 max-w-full items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 text-slate-600" title={`النفاذ: ${formatDepletionDate(depletion.dateStr, depletion.daysLeft, currentPills)}`}>
-            <Calendar className="w-2 h-2 text-slate-400 shrink-0" />
-            <span className="truncate">{shortDepletionLabel(depletion, isOut)}</span>
-          </div>
-        </div>
-      </div>
-      <div
-        className="mt-1 w-full h-1 bg-slate-200/70 rounded-full overflow-hidden"
+      <MedicationCardStockSummary
+        currentPills={currentPills}
+        unit={medication.unit || 'قرص'}
+        dailyDose={medication.dailyDose}
+        depletionLabel={shortDepletionLabel(depletion, isOut)}
+        depletionTitle={`النفاذ: ${formatDepletionDate(depletion.dateStr, depletion.daysLeft, currentPills)}`}
+        density="compact"
+      />
+      <MedicationCardProgress
+        percentLeft={percentLeft}
+        progressColor={progressColor}
+        density="compact"
         title={
           isTemporaryCourse
             ? `كورس علاجي (${medication.durationDays} يوم): متبقي ${statusInfo.daysLeft} يوماً (${percentLeft}%)`
             : `دواء مزمن (مقياس شهري): متبقي ${statusInfo.daysLeft} يوماً (${percentLeft}%)`
         }
-      >
-        <div
-          className={`h-full rounded-full transition-all duration-300 ${progressColor}`}
-          style={{ width: `${percentLeft}%` }}
-        />
-      </div>
+      />
     </div>
   );
 };
@@ -499,61 +487,26 @@ export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) =
           />
         </div>
       </div>
-      <div className="mt-2 p-1.5 px-2 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-2 text-[11px] flex-wrap">
-        <div className="flex items-center gap-1 min-w-0">
-          <span className="text-[10px] text-slate-500 font-medium">المتبقي:</span>
-          <span
-            className={`font-extrabold font-mono text-xs ${
-              currentPills === 0
-                ? 'text-red-600'
-                : currentPills <= medication.dailyDose * 2
-                ? 'text-rose-600'
-                : 'text-slate-800'
-            }`}
-          >
-            {currentPills}
-          </span>
-          <span className="text-[10px] text-slate-600 font-medium">
-            {medication.unit || 'قرص'}
-          </span>
-          {nonSolidPackageDesc && (
-            <span className="text-[9px] text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded-full border border-teal-100 font-medium truncate">
-              ({nonSolidPackageDesc})
-            </span>
-          )}
-          {stripsDesc && (
-            <span className="text-[9px] text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded-full border border-teal-100 font-medium truncate">
-              ({stripsDesc})
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
-          <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-medium">
-            <Clock className="w-2.5 h-2.5 text-teal-600" />
-            <span className="text-slate-400">الجرعة:</span>
-            <span className="font-mono font-bold text-teal-800">{medication.dailyDose}</span>
-            <span className="text-slate-400">/يوم</span>
-          </div>
-          <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-medium min-w-0">
-            <Calendar className="w-2.5 h-2.5 text-slate-400 shrink-0" />
-            <span className="text-slate-400 shrink-0">النفاذ:</span>
-            <span className="font-bold text-slate-800 truncate max-w-[90px]">{shortDepletionLabel(depletion, isOut)}</span>
-          </div>
-        </div>
-      </div>
-      <div
-        className="mt-2 w-full h-1 bg-slate-200/70 rounded-full overflow-hidden"
+      <MedicationCardStockSummary
+        currentPills={currentPills}
+        unit={medication.unit || 'قرص'}
+        dailyDose={medication.dailyDose}
+        depletionLabel={shortDepletionLabel(depletion, isOut)}
+        depletionTitle={`النفاذ: ${formatDepletionDate(depletion.dateStr, depletion.daysLeft, currentPills)}`}
+        density="detailed"
+        nonSolidPackageDesc={nonSolidPackageDesc}
+        stripsDesc={stripsDesc}
+      />
+      <MedicationCardProgress
+        percentLeft={percentLeft}
+        progressColor={progressColor}
+        density="detailed"
         title={
           isTemporaryCourse
             ? `كورس علاجي (${medication.durationDays} يوم): متبقي ${statusInfo.daysLeft} يوماً (${percentLeft}%)`
             : `دواء مزمن (مقياس شهري): متبقي ${statusInfo.daysLeft} يوماً (${percentLeft}%)`
         }
-      >
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${progressColor}`}
-          style={{ width: `${percentLeft}%` }}
-        />
-      </div>
+      />
     </div>
   );
 };

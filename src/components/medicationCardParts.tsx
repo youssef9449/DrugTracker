@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { Layers, Box, PauseCircle, Bell, BellOff, AlertTriangle, AlertCircle, CheckCircle, CheckCircle2, Clock, ListChecks, RotateCcw } from 'lucide-react';
+import { Layers, Box, PauseCircle, Bell, BellOff, AlertTriangle, AlertCircle, CheckCircle, CheckCircle2, Clock, ListChecks, RotateCcw, Calendar } from 'lucide-react';
 import type { ConsumptionLog, Medication, MedicationStatusInfo } from '../types';
 import { getCardDoseToggleTarget } from '../utils/doseSchedule';
 import { getHistoricalRestoreDisplayAmount } from '../utils/medActions';
@@ -402,3 +402,117 @@ export const MedicationCardDoseActions: FC<MedicationCardDoseActionsProps> = ({
 
   return null;
 };
+
+
+export interface MedicationCardStockSummaryProps {
+  currentPills: number;
+  unit: string;
+  dailyDose: number;
+  depletionLabel: string;
+  depletionTitle: string;
+  density: 'compact' | 'detailed';
+  nonSolidPackageDesc?: string | null;
+  stripsDesc?: string | null;
+}
+
+/** Shared remaining/dose/depletion summary for compact & detailed cards. */
+export const MedicationCardStockSummary: FC<MedicationCardStockSummaryProps> = ({
+  currentPills,
+  unit,
+  dailyDose,
+  depletionLabel,
+  depletionTitle,
+  density,
+  nonSolidPackageDesc,
+  stripsDesc,
+}) => {
+  if (density === 'compact') {
+    return (
+      <div className="mt-1.5 p-1 bg-slate-50 rounded-xl border border-slate-100 grid grid-cols-2 gap-1 text-[9px] min-w-0">
+        <div className="flex min-w-0 items-baseline gap-0.5">
+          <span className="text-[8px] text-slate-500">المتبقي:</span>
+          <span className={`font-mono font-extrabold text-[11px] leading-none ${currentPills === 0 ? 'text-red-600' : 'text-slate-900'}`}>
+            {currentPills}
+          </span>
+          <span className="text-[8px] text-slate-500 truncate">{unit || 'قرص'}</span>
+        </div>
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
+          <div className="flex shrink-0 items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-mono text-teal-800 font-bold" title={`الجرعة: ${dailyDose}/يوم`}>
+            <Clock className="w-2 h-2 text-teal-600" />
+            <span>{dailyDose}/ي</span>
+          </div>
+          <div className="flex min-w-0 max-w-full items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 text-slate-600" title={depletionTitle}>
+            <Calendar className="w-2 h-2 text-slate-400 shrink-0" />
+            <span className="truncate">{depletionLabel}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-2 p-1.5 px-2 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-2 text-[11px] flex-wrap">
+      <div className="flex items-center gap-1 min-w-0">
+        <span className="text-[10px] text-slate-500 font-medium">المتبقي:</span>
+        <span
+          className={`font-extrabold font-mono text-xs ${
+            currentPills === 0
+              ? 'text-red-600'
+              : currentPills <= dailyDose * 2
+              ? 'text-rose-600'
+              : 'text-slate-800'
+          }`}
+        >
+          {currentPills}
+        </span>
+        <span className="text-[10px] text-slate-600 font-medium">{unit || 'قرص'}</span>
+        {nonSolidPackageDesc && (
+          <span className="text-[9px] text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded-full border border-teal-100 font-medium truncate">
+            ({nonSolidPackageDesc})
+          </span>
+        )}
+        {stripsDesc && (
+          <span className="text-[9px] text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded-full border border-teal-100 font-medium truncate">
+            ({stripsDesc})
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
+        <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-medium">
+          <Clock className="w-2.5 h-2.5 text-teal-600" />
+          <span className="text-slate-400">الجرعة:</span>
+          <span className="font-mono font-bold text-teal-800">{dailyDose}</span>
+          <span className="text-slate-400">/يوم</span>
+        </div>
+        <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-medium min-w-0" title={depletionTitle}>
+          <Calendar className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+          <span className="text-slate-400 shrink-0">النفاذ:</span>
+          <span className="font-bold text-slate-800 truncate max-w-[90px]">{depletionLabel}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export interface MedicationCardProgressProps {
+  percentLeft: number;
+  progressColor: string;
+  title: string;
+  density: 'compact' | 'detailed';
+}
+
+export const MedicationCardProgress: FC<MedicationCardProgressProps> = ({
+  percentLeft,
+  progressColor,
+  title,
+  density,
+}) => (
+  <div
+    className={`${density === 'compact' ? 'mt-1' : 'mt-2'} w-full h-1 bg-slate-200/70 rounded-full overflow-hidden`}
+    title={title}
+  >
+    <div
+      className={`h-full rounded-full ${density === 'compact' ? 'transition-all duration-300' : 'transition-all duration-500'} ${progressColor}`}
+      style={{ width: \`${percentLeft}%\` }}
+    />
+  </div>
+);

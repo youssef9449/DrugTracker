@@ -57,18 +57,117 @@ function isIOS(): boolean {
 
 /**
  * iOS LocalNotifications still requires a numeric platform handle.
- * The handle is an implementation detail derived from the full logical
- * namespace + identity. It is not a feature identity, category registry,
- * numeric range allocator, collision registry, or collision-probing state.
+ * The handle is resolved through a DURABLE collision-free mapping (#486):
+ * logical namespace+identity keys are allocated sequential ids in the
+ * platform-valid range (1..2147483646) from a persisted counter, so two
+ * different active logical notifications can never resolve to the same
+ * platform id. Mappings expire with their occurrence (past-due entries are
+ * pruned before allocation) to bound storage; an exhausted range fails safe
+ * (null → schedule refused) instead of colliding.
  */
-function iosPlatformNotificationId(namespace: string, identity: string): number {
-  const value = namespace + '\u001f' + identity;
-  let hash = 2166136261;
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
+const IOS_ID_MAP_KEY = 'drugtracker_ios_notification_id_map_v1';
+const IOS_ID_MAX = 2147483646;
+
+interface IosIdMapEntry {
+  id: number;
+  /** Epoch ms after which the mapping is no longer needed (occurrence due). */
+  expireAt: number;
+}
+
+interface IosIdMap {
+  nextId: number;
+  byLogicalKey: Record<string, IosIdMapEntry>;
+}
+
+function readIosIdMap(): IosIdMap | null {
+  try {
+    const raw = localStorage.getItem(IOS_ID_MAP_KEY);
+    if (raw == null) return { nextId: 1, byLogicalKey: {} };
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const candidate = parsed as Partial<IosIdMap>;
+    if (
+      typeof candidate.nextId !== 'number' ||
+      !Number.isFinite(candidate.nextId) ||
+      !candidate.byLogicalKey ||
+      typeof candidate.byLogicalKey !== 'object'
+    ) {
+      return null;
+    }
+    return candidate as IosIdMap;
+  } catch {
+    return null;
   }
-  return (hash >>> 0) % 2147483646 + 1;
+}
+
+function writeIosIdMap(map: IosIdMap): boolean {
+  try {
+    localStorage.setItem(IOS_ID_MAP_KEY, JSON.stringify(map));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function logicalIosKey(namespace: string, identity: string): string {
+  return namespace + '\u001f' + identity;
+}
+
+/**
+ * Resolve (or allocate) the platform id for a logical notification key.
+ * Returns null when allocation is impossible (corrupt map, exhausted range)
+ * — callers must fail the schedule instead of colliding.
+ */
+function resolveIosPlatformNotificationId(
+  namespace: string,
+  identity: string,
+  fireAtEpochMs: number
+): number | null {
+  const key = logicalIosKey(namespace, identity);
+  const map = readIosIdMap();
+  if (map === null) {
+    // Corrupt durable mapping: fail safe rather than reusing a possibly
+    // live id (#486). A repair (clearing the key) is a user-visible action.
+    return null;
+  }
+  const now = Date.now();
+  // Expired mappings are pruned to bound storage; expired occurrences can no
+  // longer be cancelled meaningfully.
+  for (const [logicalKey, entry] of Object.entries(map.byLogicalKey)) {
+    if (entry.expireAt <= now) delete map.byLogicalKey[logicalKey];
+  }
+  const existing = map.byLogicalKey[key];
+  if (existing) {
+    existing.expireAt = Math.max(existing.expireAt, fireAtEpochMs + 60_000);
+    writeIosIdMap(map);
+    return existing.id;
+  }
+  if (map.nextId > IOS_ID_MAX) {
+    return null;
+  }
+  const allocated = map.nextId;
+  map.nextId = allocated + 1;
+  map.byLogicalKey[key] = { id: allocated, expireAt: fireAtEpochMs + 60_000 };
+  if (!writeIosIdMap(map)) {
+    // Mapping persistence failed: the id may be re-allocated on the next
+    // attempt after a reload — refuse now instead of colliding.
+    return null;
+  }
+  return allocated;
+}
+
+/**
+ * Look up an EXISTING platform id for cancellation/pending lookups without
+ * allocating. Returns null when no durable mapping exists (nothing was
+ * scheduled for this logical key from this runtime).
+ */
+function lookupIosPlatformNotificationId(
+  namespace: string,
+  identity: string
+): number | null {
+  const map = readIosIdMap();
+  if (map === null) return null;
+  return map.byLogicalKey[logicalIosKey(namespace, identity)]?.id ?? null;
 }
 
 export function isAndroidNotificationRuntime(): boolean {
@@ -87,9 +186,20 @@ export async function scheduleNotification(
     try {
       const permission = await LocalNotifications.checkPermissions();
       if (permission.display !== 'granted') return false;
+      const platformId = resolveIosPlatformNotificationId(
+        options.namespace,
+        options.identity,
+        (options.at ?? new Date(Date.now() + 500)).getTime()
+      );
+      if (platformId === null) {
+        // Collision-safe ID allocation failed — refuse to schedule rather
+        // than risk one logical notification overwriting another (#486).
+        console.warn('[notification-runtime] iOS platform ID allocation failed');
+        return false;
+      }
       await LocalNotifications.schedule({
         notifications: [{
-          id: iosPlatformNotificationId(options.namespace, options.identity),
+          id: platformId,
           title: options.title,
           body: options.body,
           schedule: {
@@ -191,8 +301,14 @@ export async function cancelNotification(
   if (isAndroidNotificationRuntime()) return (await cancelNativeNotification(namespace, identity)).ok;
   if (isIOS()) {
     try {
+      const platformId = lookupIosPlatformNotificationId(namespace, identity);
+      if (platformId === null) {
+        // No durable mapping → nothing was scheduled for this logical key.
+        // Cancellation is an idempotent no-op.
+        return true;
+      }
       await LocalNotifications.cancel({
-        notifications: [{ id: iosPlatformNotificationId(namespace, identity) }],
+        notifications: [{ id: platformId }],
       });
       return true;
     } catch (error) {
@@ -216,21 +332,33 @@ export async function getPendingNotificationResult(
   identity: string
 ): Promise<NotificationPendingResult> {
   if (!isIOS()) {
-    try {
-      const { getWebScheduledNotification } = await import('./notifications/webNotifications');
-      const entry = getWebScheduledNotification(namespace, identity);
+    // #519/#495: pure, failure-preserving Web read. Storage failure is
+    // surfaced as an explicit boundary failure — never as "no pending".
+    const { readWebScheduledNotification, reconcileWebScheduledNotification } =
+      await import('./notifications/webNotifications');
+    const read = readWebScheduledNotification(namespace, identity);
+    if (read.status !== 'ok') {
+      console.warn(`[notification-runtime] web pending lookup failed: ${read.reason}`);
       return {
-        ok: true,
-        pending: entry ? { schedule: { at: entry.fireAt } } : null,
+        ok: false,
+        error: read.reason,
+        errorCode: classifyNativeError(read.reason, 'platform_failure'),
       };
-    } catch {
+    }
+    const entry = read.value;
+    if (!entry) return { ok: true, pending: null };
+    if (entry.fireAt <= Date.now()) {
+      // Terminal state for a past-due record; reconciliation owns cleanup.
+      reconcileWebScheduledNotification(namespace, identity);
       return { ok: true, pending: null };
     }
+    return { ok: true, pending: { schedule: { at: entry.fireAt } } };
   }
   try {
     const pending = await LocalNotifications.getPending();
-    const id = iosPlatformNotificationId(namespace, identity);
-    const entry = pending.notifications.find((notification) => notification.id === id);
+    const platformId = lookupIosPlatformNotificationId(namespace, identity);
+    if (platformId === null) return { ok: true, pending: null };
+    const entry = pending.notifications.find((notification) => notification.id === platformId);
     if (!entry) return { ok: true, pending: null };
     return {
       ok: true,

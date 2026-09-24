@@ -38,7 +38,7 @@ boolean scheduleFireRetry(
         final String key = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
         final String prefKey = key;
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             if (scheduler.isOccurrenceCancelledKey(key)) {
                 return false;
             }
@@ -170,7 +170,7 @@ void clearIndependentFireRetryEvidenceAfterStock(
         if (medicationId == null || doseId == null || calendarDate == null) return;
         String key = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             clearIndependentFireRetryEvidenceLocked(key);
         }
     }
@@ -188,7 +188,7 @@ public FireResult recoverFireFromIndependentEvidence(
 
         final String key = AutoDeductionContract.occurrenceKey(
                 medicationId, doseId, calendarDate);
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             AutoDeductionPersistenceModels.RetryEvidenceRecord evidence =
                     evidenceStore.get(medicationId, doseId, calendarDate);
             if (evidence == null) {

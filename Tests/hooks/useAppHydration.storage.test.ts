@@ -2,9 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { NOTIFICATIONS_KEY } from '@/constants/storageKeys';
 
+const permissionMocks = vi.hoisted(() => ({
+  get: vi.fn(),
+  request: vi.fn(),
+}));
+
 vi.mock('@/utils/notifications/notificationPermissions', () => ({
-  getNotificationPermission: vi.fn(() => Promise.resolve('unsupported')),
-  requestNotificationPermission: vi.fn(() => Promise.resolve(false)),
+  getNotificationPermission: permissionMocks.get,
+  requestNotificationPermission: permissionMocks.request,
 }));
 vi.mock('@/utils/exactAlarm', () => ({
   getExactAlarmPermission: vi.fn(() => Promise.resolve(true)),
@@ -25,7 +30,10 @@ vi.mock('@/utils/autoDeductionNativeStock', () => ({
 }));
 
 import { useAppHydration } from '@/hooks/useAppHydration';
-import { applyNotificationPermissionResultIfUnset } from '@/utils/appHydrationPhases';
+import {
+  applyNotificationPermissionResultIfUnset,
+  initializeAppPermissions,
+} from '@/utils/appHydrationPhases';
 
 function makeSetters() {
   return {
@@ -47,6 +55,8 @@ function makeSetters() {
 
 beforeEach(() => {
   localStorage.clear();
+  permissionMocks.get.mockResolvedValue('unsupported');
+  permissionMocks.request.mockResolvedValue(false);
 });
 
 afterEach(() => {
@@ -127,5 +137,29 @@ describe('notification permission result application', () => {
     } finally {
       getItem.mockRestore();
     }
+  });
+
+  it('waits for a first-open OS decision before permission initialization resolves', async () => {
+    permissionMocks.get.mockResolvedValue('default');
+    let resolveRequest!: (granted: boolean) => void;
+    permissionMocks.request.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        resolveRequest = resolve;
+      })
+    );
+
+    const setNotificationsEnabled = vi.fn();
+    const initialization = initializeAppPermissions({
+      setNotificationsEnabled,
+      setExactAlarmPermission: vi.fn(),
+    });
+
+    await Promise.resolve();
+    expect(setNotificationsEnabled).not.toHaveBeenCalled();
+
+    resolveRequest(true);
+    await initialization;
+
+    expect(setNotificationsEnabled).toHaveBeenCalledWith(true);
   });
 });

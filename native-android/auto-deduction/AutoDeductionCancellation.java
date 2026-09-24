@@ -77,8 +77,6 @@ public CancelResult cancelOccurrence(
                 || !AutoDeductionContract.isValidCalendarDate(calendarDate)) {
             return CancelResult.fail("invalid_args");
         }
-        String key = AutoDeductionContract.occurrenceKey(
-                medicationId, doseId, calendarDate);
         synchronized (scheduler.scheduleLock()) {
             AutoDeductionSchedulingAdapter.CancelResult result =
                     scheduler.schedulingAdapter().cancelOccurrence(

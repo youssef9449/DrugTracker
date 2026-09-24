@@ -21,7 +21,6 @@ export {
 
 export {
   shouldDismissAlarmAfterManualTake,
-  resolveConsumeDoseId,
 } from './manualStockMutationConsumeRestore';
 
 export {

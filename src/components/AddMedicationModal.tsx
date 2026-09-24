@@ -33,7 +33,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     showStockHelper, setShowStockHelper, helperBoxes, helperStrips, helperLoose,
     setHelperBoxes, setHelperStrips, setHelperLoose, helperTotal, error,
     reminderEnabled, setReminderEnabled, autoDeductEnabled, setAutoDeductEnabled,
-    isChronic, setIsChronic, durationDaysStr, setDurationDaysStr, treatmentStartDateStr,
+    isChronic, setIsChronic, durationDaysStr, setDurationDaysStr,
     setTreatmentStartDateStr, previewDays, handleUnitChange, handleStripsChange,
     handlePillsPerStripChange, applyStockHelper, handleSubmit,
   } = useAddMedicationForm({ isOpen, onSave, initialData, defaultAutoDeductEnabled });

@@ -3,7 +3,7 @@ import type { Medication, PharmacySettings } from '../types';
 import { calculateMedicationStatus } from '../utils/medicationStatus';
 import { cleanPhoneNumber, generatePharmacyOrderMessage, calculateMedicationOrderQuantity, buildWhatsAppUrl, type OrderItem } from '../utils/whatsapp';
 import {
-  getShoppingAvailableUnits, getShoppingDefaultUnits, getShoppingUnitSize,
+  getShoppingAvailableUnits, getShoppingUnitSize,
   shoppingRequestedPills, getMedicationPeriod as resolveMedicationPeriod,
   getDurationDays as resolveDurationDays, getQuantityMode as resolveQuantityMode,
   getSelectedUnits as resolveSelectedUnits, getUnitQuantity as resolveUnitQuantity,

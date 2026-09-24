@@ -61,17 +61,15 @@ export interface PersistedAppHydrationState {
 }
 
 /**
- * Phase 1: load all persisted application state and establish the initial
- * first-run/preference state before any asynchronous capability work starts.
+ * Phase 1: load persisted application state and establish the initial
+ * first-run/preference state before asynchronous capability work starts.
  */
 export function loadPersistedAppState(
   setters: Pick<
     AppHydrationPhaseSetters,
-    | 'setMedications'
     | 'setLogs'
     | 'setPharmacySettings'
     | 'setIsFirstRun'
-    | 'setIsAutoDeductPromptOpen'
     | 'setSoundEnabled'
     | 'setNotificationsEnabled'
     | 'setCriticalStockAlertsEnabled'
@@ -270,8 +268,8 @@ export async function initializeAppPermissions(
 
 /**
  * Phase 2b: initialize the native runtime and verify notification channels.
- * This remains separate from permission lookup, but the coordinator starts
- * both phases concurrently to preserve the existing startup ordering.
+ * This is separate from permission lookup, but the coordinator starts both
+ * phases concurrently to preserve the existing startup ordering.
  */
 export async function initializeNativeRuntime(
   setNotificationsEnabled: Dispatch<SetStateAction<boolean>>

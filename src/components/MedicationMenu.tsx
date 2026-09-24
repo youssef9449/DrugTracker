@@ -15,6 +15,7 @@ import {
 import { Medication } from '../types';
 import './MedicationCardMaterial.css';
 import { MedicationNotificationStatusBadge } from './medicationCardParts';
+import { MedicationDeleteConfirmDialog } from './MedicationDeleteConfirmDialog';
 
 export interface MedicationMenuProps {
   medication: Medication;
@@ -246,72 +247,14 @@ export function MedicationOverflowMenu({
       )
     : null;
 
-  const deleteDialog = deleteConfirmOpen && typeof document !== 'undefined'
-    ? createPortal(
-        <div
-          className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-[2px]"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setDeleteConfirmOpen(false);
-          }}
-        >
-          <div
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby={`delete-medication-title-${medication.id}`}
-            aria-describedby={`delete-medication-description-${medication.id}`}
-            dir="rtl"
-            className="w-full max-w-sm overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-xl"
-          >
-            <div className="flex items-start gap-3 p-5 pb-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-rose-50 text-rose-600">
-                <Trash2 className="h-5 w-5" aria-hidden="true" />
-              </div>
-              <div className="min-w-0 flex-1 pt-1">
-                <h3
-                  id={`delete-medication-title-${medication.id}`}
-                  className="text-base font-bold text-slate-900"
-                >
-                  حذف الدواء؟
-                </h3>
-                <p
-                  id={`delete-medication-description-${medication.id}`}
-                  className="mt-1 text-xs leading-relaxed text-slate-600"
-                >
-                  هل أنت متأكد من حذف <span className="font-semibold text-slate-800">{medication.name}</span>؟ لن يمكن التراجع عن هذا الإجراء وسيتم مسح سجل الجرعات المرتبط به.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmOpen(false)}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 cursor-pointer"
-                aria-label="إغلاق"
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2 border-t border-slate-100 bg-slate-50/70 p-3 px-4">
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmOpen(false)}
-                className="h-10 flex-1 rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 cursor-pointer"
-              >
-                إلغاء
-              </button>
-              <button
-                type="button"
-                onClick={confirmDelete}
-                className="h-10 flex-1 rounded-full bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 active:bg-rose-800 shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 cursor-pointer"
-              >
-                حذف الدواء
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )
-    : null;
+  const deleteDialog = (
+    <MedicationDeleteConfirmDialog
+      medication={medication}
+      open={deleteConfirmOpen}
+      onCancel={() => setDeleteConfirmOpen(false)}
+      onConfirm={confirmDelete}
+    />
+  );
 
   return (
     <>

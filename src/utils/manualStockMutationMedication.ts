@@ -1,15 +1,21 @@
 import type { ConsumptionLog, Medication } from '../types';
 import { runManualStockTransaction, commitWithManualEnvelope } from './manualStockTransaction';
-import {
-  type GatedManualConsumeResult, type GatedManualRestoreResult,
-  type GatedAddMedicationResult, type GatedRefillResult,
-  type GatedAutoDeductToggleResult, type GatedGlobalAutoDeductToggleResult,
-  type GatedDeleteMedicationResult, type GatedMedicationUpdateResult,
+import type {
+  GatedAddMedicationResult,
+  GatedDeleteMedicationResult,
+  GatedMedicationUpdateResult,
 } from './manualStockMutationTypes';
 import { autoDeductionDefinitionChanged } from './autoDeductionDefinition';
 import { doseReminderDefinitionChanged } from './doseReminderDefinitions';
 import { pruneDoseConsumption } from './pruneDoseConsumption';
-import { invalidateMedicationRecurrences, invalidateMedicationDoseReminders, restoreInvalidatedRecurrences, restoreInvalidatedDoseReminders } from './manualStockMutationShared';
+import {
+  invalidateMedicationRecurrences,
+  invalidateMedicationDoseReminders,
+  restoreInvalidatedRecurrences,
+  restoreInvalidatedDoseReminders,
+  type RecurrenceInvalidationResult,
+  type DoseReminderInvalidationResult,
+} from './manualStockMutationShared';
 import { loadDurableGlobalAutoDeductEnabled } from './autoDeductionStockGate';
 
 export function runGatedAddMedication(opts: {

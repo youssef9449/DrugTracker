@@ -441,12 +441,9 @@ public class FireRetryScheduleTest {
         assertEquals(0, rr.restored);
     }
 
-    /** Access package-private SCHEDULE_LOCK via same package. */
-    private static Object getScheduleLock() throws Exception {
-        java.lang.reflect.Field f =
-                AutoDeductionScheduler.class.getDeclaredField("SCHEDULE_LOCK");
-        f.setAccessible(true);
-        return f.get(null);
+    /** Shared Auto serialization monitor used by production collaborators. */
+    private static Object getScheduleLock() {
+        return AutoDeductionScheduler.class;
     }
 
     @Test

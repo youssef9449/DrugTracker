@@ -228,7 +228,9 @@ public FireResult recoverFireFromIndependentEvidence(
                 clearIndependentFireRetryEvidenceLocked(key);
                 return FireResult.cancelled();
             }
-            if (current == null && evidence.recurrenceGeneration != activeGeneration) {
+            if (current == null
+                    && activeGeneration > 0L
+                    && evidence.recurrenceGeneration != activeGeneration) {
                 clearIndependentFireRetryEvidenceLocked(key);
                 return FireResult.cancelled();
             }

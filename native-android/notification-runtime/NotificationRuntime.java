@@ -208,7 +208,7 @@ public final class NotificationRuntime {
         for (RetryCandidate candidate : candidates) {
             Request request = readRetryRequest(candidate.key);
             if (request == null) {
-                removeRetryKey(candidate.key, null);
+                removeRetryKey(candidate.key, candidate.retryToken);
                 continue;
             }
             PostResult result = postWithoutPersistingRetry(request);

@@ -46,6 +46,11 @@ export function usePharmacyShoppingWhatsApp({
   const selectedWhatsappAddressIds = settings.selectedWhatsappAddressIds ?? whatsappAddresses.map((item) => item.id);
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
 
+  useEffect(() => {
+    if (!isSendModalOpen || !onRegisterBackHandler) return;
+    return onRegisterBackHandler('shopping-send-order', () => setIsSendModalOpen(false), 100);
+  }, [isSendModalOpen, onRegisterBackHandler]);
+
   const orderItemsForMessage = useMemo((): OrderItem[] => {
     if (activeOrderItems.length > 0) return activeOrderItems;
     return medications.map((med) => {

@@ -31,7 +31,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     stripsPerBox, setStripsPerBox, pillsPerStrip, noStrips, setNoStrips,
     packageSize, packageSizeStr, setPackageSize, setPackageSizeStr,
     showStockHelper, setShowStockHelper, helperBoxes, helperStrips, helperLoose,
-    setHelperBoxes, setHelperStrips, setHelperLoose, helperTotal, error,
+    setHelperBoxes, setHelperStrips, setHelperLoose, helperTotal, error, setError,
     reminderEnabled, setReminderEnabled, autoDeductEnabled, setAutoDeductEnabled,
     isChronic, setIsChronic, durationDaysStr, setDurationDaysStr,
     setTreatmentStartDateStr, previewDays, handleUnitChange, handleStripsChange,

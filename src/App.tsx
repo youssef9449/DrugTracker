@@ -1,10 +1,3 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import {
-  Medication,
-  ConsumptionLog,
-  PharmacySettings,
-  DEFAULT_PHARMACY_SETTINGS,
-} from './types';
 import { AppHeader } from './components/AppHeader';
 import { AppTabContent } from './components/AppTabContent';
 import { AndroidBottomNav } from './components/AndroidBottomNav';
@@ -18,107 +11,47 @@ import { SelectDoseModal } from './components/SelectDoseModal';
 import { MedicationHistoryModal } from './components/MedicationHistoryModal';
 import { AutoDeductPromptModal } from './components/AutoDeductPromptModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
-import { OrderItem } from './utils/whatsapp';
-import type { ExactAlarmPermission } from './utils/exactAlarm';
 import type { MedicationSortField, MedicationSortDirection } from './utils/medicationSorting';
-import { TOAST_DURATION_MS } from './utils/time';
 import { TOAST_MESSAGES } from './constants/uiStrings';
 import { playSuccessChime } from './utils/sound';
 
 import { useDoseReminders } from './hooks/useDoseReminders';
+import { useAppRuntimeState } from './hooks/useAppRuntimeState';
+import { useAppUiState } from './hooks/useAppUiState';
+import { useAppBackOverlays } from './hooks/useAppBackOverlays';
 import { useAppRuntime } from './hooks/useAppRuntime';
 import { useAppBackNavigation } from './hooks/useAppBackNavigation';
 import { useDerivedMedications } from './hooks/useDerivedMedications';
-import {
-  cleanupNativeListeners,
-} from './native';
-import { getInitialTab } from './lib/initialTab';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
   const { navigateToTab, selectTab, registerBackOverlay } = useAppBackNavigation(activeTab, setActiveTab);
 
-  // Start from empty in-memory state and hydrate persisted application data
-  // after mount. Runtime schedulers and alerts are gated on `hydrated` so
-  // they never act on pre-hydration state.
-  const [medications, setMedications] = useState<Medication[]>([]);
-  const [logs, setLogs] = useState<ConsumptionLog[]>([]);
-  const [pharmacySettings, setPharmacySettings] =
-    useState<PharmacySettings>(DEFAULT_PHARMACY_SETTINGS);
-  const [hydrated, setHydrated] = useState(false);
-  // First-run detection: when no saved meds exist in localStorage, the
-  // seed data is a demo — don't fire auto-deductions, notifications, or
-  // alarms for it. Set during hydration.
-  const [isFirstRun, setIsFirstRun] = useState(false);
-  const [isAutoDeductPromptOpen, setIsAutoDeductPromptOpen] = useState(false);
-  /** Stable ref so Android Back can invoke the same first-run decision path. */
-  const handleConfirmAutoDeductPromptRef = useRef<(enable: boolean) => void>(() => {});
+  const runtimeState = useAppRuntimeState();
+  const uiState = useAppUiState();
 
-  const [filter, setFilter] = useState<'all' | 'alerts' | 'sufficient'>('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [settingsModalMode, setSettingsModalMode] = useState<'all' | 'pharmacy'>('all');
-  const [activeOrderItems, setActiveOrderItems] = useState<OrderItem[] | undefined>();
-  const [editingMedication, setEditingMedication] = useState<Medication | null>(null);
-  const [refillMedication, setRefillMedication] = useState<Medication | null>(null);
+  const {
+    activeTab, setActiveTab, filter, setFilter, searchQuery, setSearchQuery,
+    isAddModalOpen, setIsAddModalOpen, isSettingsModalOpen, setIsSettingsModalOpen,
+    settingsModalMode, setSettingsModalMode, activeOrderItems, setActiveOrderItems,
+    editingMedication, setEditingMedication, refillMedication, setRefillMedication,
+    selectDoseMed, setSelectDoseMed, selectDoseMode, setSelectDoseMode,
+    historyMedication, setHistoryMedication, isPhoneFrame, setIsPhoneFrame,
+    medicationSortField, setMedicationSortField, medicationSortDirection, setMedicationSortDirection,
+    toast, showToast,
+  } = uiState;
 
-  // Same deterministic-first pattern: defaults loaded on mount.
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
-  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
-  // Critical-stock alerts (the urgent "حرج" notifications) — default
-  // false so stock alerts do not show active on first start regardless of state.
-  // The toggle in AppHeader lets the user turn it on.
-  const [criticalStockAlertsEnabled, setCriticalStockAlertsEnabled] = useState<boolean>(false);
-  // Exact-alarm permission state (Android 12+). null means the native
-  // permission check has not completed yet. When false, dose-reminder
-  // scheduling is BLOCKED — inexact alarms are unacceptable for medication
-  // reminders. The user grants this via Android settings (the plugin's
-  // The native ExactAlarmRuntime bridge opens the exact-alarm settings screen. On web /
-  // Android < 12 this is always true.
-  const [exactAlarmPermission, setExactAlarmPermission] = useState<ExactAlarmPermission | null>(null);
-  // Bumped on every app resume (appStateChange) so the critical-alarm
-  // scheduler re-runs and reconciles its matching claims against the
-  // platform's actual pending notifications — the user may have just
-  // granted/denied SCHEDULE_EXACT_ALARM, or the native alarm may have
-  // been dropped while the app was backgrounded. See
-  // useCriticalAlarmScheduler's RECONCILIATION section.
-  const [criticalAlarmResumeTick, setCriticalAlarmResumeTick] = useState(0);
-  // Bumped on every app resume (appStateChange) so the dose-reminder
-  // scheduler re-runs its CONSUMPTION SUPPRESSION: an already-consumed
-  // dose occurrence (per-dose markers for medId + doseId on today) can
-  // never produce today's reminder, even if a previous suppression
-  // attempt failed while the process was backgrounded/killed.
-  // Medication-level lastConsumedDate is not the source of truth here.
-  // Mirrors criticalAlarmResumeTick.
-  const [doseAlarmResumeTick, setDoseAlarmResumeTick] = useState(0);
-  // Bumped on EVERY app state transition (foreground ↔ background) so the
-  // dose-reminder scheduler re-runs and re-arms all pending reminders on
-  // the correct channel: silent foreground channel when the app is open,
-  // system-sound background channel when the app is backgrounded/killed.
-  const [doseLifecycleTick, setDoseLifecycleTick] = useState(0);
-
-  const [globalAutoDeductEnabled, setGlobalAutoDeductEnabled] = useState<boolean>(true);
-  // Translate business policy into the neutral Dose Reminder capability.
-  const allowManualTakeActionByMedicationId = useMemo(() => {
-    const result = new Map<string, boolean>();
-    for (const medication of medications) {
-      result.set(medication.id, medication.autoDeductEnabled === false);
-    }
-    return result;
-  }, [medications]);
-
-
-  const [isPhoneFrame, setIsPhoneFrame] = useState(true);
-  // Font size toggle: 'normal' (default) or 'large'. Persisted to
-  // localStorage and applied as a CSS class on the phone-frame.
-  const [fontScale, setFontScale] = useState<'normal' | 'large'>('normal');
-  // Compact card view for "All Medications" tab
-  const [isCompactView, setIsCompactView] = useState<boolean>(false);
-  const [medicationSortField, setMedicationSortField] = useState<MedicationSortField>('name');
-  const [medicationSortDirection, setMedicationSortDirection] = useState<MedicationSortDirection>('asc');
-  const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
-
+  const {
+    medications, logs, pharmacySettings, hydrated, isFirstRun, isAutoDeductPromptOpen,
+    soundEnabled, notificationsEnabled, criticalStockAlertsEnabled, exactAlarmPermission,
+    criticalAlarmResumeTick, doseAlarmResumeTick, doseLifecycleTick, globalAutoDeductEnabled,
+    fontScale, isCompactView, allowManualTakeActionByMedicationId,
+    setMedications, setLogs, setPharmacySettings, setHydrated, setIsFirstRun,
+    setIsAutoDeductPromptOpen, setSoundEnabled, setNotificationsEnabled,
+    setCriticalStockAlertsEnabled, setExactAlarmPermission, setGlobalAutoDeductEnabled,
+    setFontScale, setIsCompactView, setDoseLifecycleTick, setCriticalAlarmResumeTick,
+    setDoseAlarmResumeTick,
+  } = runtimeState;
   const { alarmingMedication, alarmingDoseId, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
     allowManualTakeActionByMedicationId,
@@ -241,50 +174,32 @@ export default function App() {
     handleSendTestNotification,
     handleOpenExactAlarmSettings,
   } = useAppRuntime({
-    medications,
-    logs,
-    pharmacySettings,
-    hydrated,
-    isFirstRun,
-    soundEnabled,
-    fontScale,
-    isCompactView,
-    notificationsEnabled,
-    criticalStockAlertsEnabled,
-    exactAlarmPermission,
-    criticalAlarmResumeTick,
-    doseAlarmResumeTick,
-    doseLifecycleTick,
-    globalAutoDeductEnabled,
-    selectDoseMode,
-    settingsModalMode,
-    allowManualTakeActionByMedicationId,
-    setMedications,
-    setLogs,
-    setPharmacySettings,
-    setHydrated,
-    setIsFirstRun,
-    setIsAutoDeductPromptOpen,
-    setSoundEnabled,
-    setNotificationsEnabled,
-    setCriticalStockAlertsEnabled,
-    setExactAlarmPermission,
-    setGlobalAutoDeductEnabled,
-    setFontScale,
-    setIsCompactView,
-    setSelectDoseMed,
-    setSelectDoseMode,
-    setEditingMedication,
-    setDoseLifecycleTick,
-    setCriticalAlarmResumeTick,
-    setDoseAlarmResumeTick,
-    showToast,
-    dismissAlarm,
-    snoozeAlarm,
-    openAlarm,
+    state: runtimeState,
+    ui: { selectDoseMode, settingsModalMode },
+    uiActions: { setSelectDoseMed, setSelectDoseMode, setEditingMedication },
+    services: { showToast, dismissAlarm, snoozeAlarm, openAlarm },
   });
 
-  handleConfirmAutoDeductPromptRef.current = handleConfirmAutoDeductPrompt;
+  useAppBackOverlays({
+    registerBackOverlay,
+    alarmingMedication,
+    dismissAlarm,
+    selectDoseMed,
+    setSelectDoseMed,
+    setSelectDoseMode,
+    historyMedication,
+    setHistoryMedication,
+    isAutoDeductPromptOpen,
+    handleConfirmAutoDeductPrompt,
+    isAddModalOpen,
+    setIsAddModalOpen,
+    setEditingMedication,
+    refillMedication,
+    setRefillMedication,
+    isSettingsModalOpen,
+    setIsSettingsModalOpen,
+  });
+
   // Consume-pill feature: manually consume a selected explicit dose from the card.
   // Subtracts that dose's schedule amount from currentPills; marks the dose occurrence as consumed
 

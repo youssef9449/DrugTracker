@@ -43,7 +43,6 @@ export function useMedicationNotificationHandlers(deps: MedicationHandlersDeps, 
         } else if (result.outcome === 'persist_failed' || result.outcome === 'native_list_failed') {
           showToast(STORAGE_ERRORS.generic);
         }
-          }
         },
         () => {
           showToast(STORAGE_ERRORS.generic);

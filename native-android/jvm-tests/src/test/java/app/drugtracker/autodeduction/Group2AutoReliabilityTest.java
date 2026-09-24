@@ -249,7 +249,7 @@ public class Group2AutoReliabilityTest {
                         new AutoDeductionStockStore.StockSeed(med, 100.0))).ok);
 
         AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             assertTrue(scheduler.recordIndependentFireRetryEvidenceLocked(
                     med, dose, date, epoch(date, time), 2.0, time, "",
                     generation, "retry-old-version", 1));
@@ -291,7 +291,7 @@ public class Group2AutoReliabilityTest {
                         new AutoDeductionStockStore.StockSeed(med, 100.0))).ok);
 
         AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             assertTrue(scheduler.recordIndependentFireRetryEvidenceLocked(
                     med, dose, date, epoch(date, time), 2.0, time, "",
                     generation, "retry-disable-version", 1));
@@ -576,7 +576,7 @@ public class Group2AutoReliabilityTest {
         String date = localDateOffset(-10);
         AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
 
-        synchronized (scheduler.scheduleLock()) {
+        synchronized (AutoDeductionScheduler.class) {
             assertTrue(scheduler.recordIndependentFireRetryEvidenceLocked(
                     med,
                     dose,

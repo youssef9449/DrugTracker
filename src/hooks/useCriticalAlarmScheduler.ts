@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { Medication } from '../types';
-import { calculateMedicationStatus } from '../utils/medicationStatus';
-import { getTodayDateString, getCriticalAlarmDate, dailyScheduleAmount } from '../utils/dateCalculations';
+import { getTodayDateString, dailyScheduleAmount } from '../utils/dateCalculations';
+import { evaluateCriticalStockPolicy } from '../utils/criticalStockPolicy';
 import {
   scheduleCriticalAlarm,
   cancelCriticalAlarm,
@@ -54,11 +54,10 @@ export interface UseCriticalAlarmSchedulerOptions {
  * even if the app is killed; system lifecycle recovery is handled by
  * DrugTrackerAlarmSystemReceiver → ExactAlarmLifecycle.
  *
- * The persistent claim ({@link CriticalNotificationClaim}) is the
- * business source of truth; this hook is just the EXECUTOR that arms and
- * cancels the native alarm and records the claim after a successful
- * schedule. It never decides whether the user has been notified for an
- * active critical episode — that is the foreground hook's job.
+ * {@link evaluateCriticalStockPolicy} is the business decision source of
+ * truth; this hook is only the EXECUTOR that arms/cancels the native alarm
+ * and persists successful schedule outcomes. The foreground hook consumes
+ * the same policy for immediate delivery.
  *
  * Decision table (per med, per effect run):
  *
@@ -86,8 +85,9 @@ export interface UseCriticalAlarmSchedulerOptions {
  *   dailyDose <= 0):
  *     cancel any alarm this session armed — nothing will cross the
  *     threshold without user action. The claim is NOT touched here:
- *     ending the business episode (clearing the claim) is the foreground
- *     hook's synchronous job (useStockAlerts).
+ *     the policy identifies whether the claim is stale; the foreground
+ *     coordinator applies that decision because it is the delivery path
+ *     responsible for foreground persistence.
  *
  *   criticalStockAlertsEnabled false:
  *     cancel every possibly-armed critical alarm (this session's and any
@@ -102,11 +102,11 @@ export interface UseCriticalAlarmSchedulerOptions {
  *   are removed by the foreground hook).
  *
  * OWNERSHIP (important): this hook is the native-alarm EXECUTOR only.
- * It never ends a business episode and never clears the persistent
- * claim because a medication became Sufficient/frozen/disabled — that
- * transition is owned, synchronously, by useStockAlerts. The only claim
- * writes here are the schedule outcome for a SUFFICIENT med with a
- * future crossing: success → { claimed: true, alarmTime: T }, failure →
+ * Episode boundaries and claim interpretation belong to the shared
+ * Critical Stock policy. This executor never clears a persistent claim
+ * because a medication became Sufficient/frozen/disabled. Its only claim
+ * writes are schedule outcomes for a sufficient med with a future crossing:
+ * success → { claimed: true, alarmTime: T }, failure →
  * { claimed: false, alarmTime: null } (opportunity stays open).
  *
  * RECONCILIATION ("armed" is verified, never assumed): the persistent
@@ -341,6 +341,7 @@ export function useCriticalAlarmScheduler({
     }
 
     const today = getTodayDateString();
+    const nowMs = Date.now();
     const stillScheduled = new Set<string>();
     const claimsNow = loadCriticalNotificationClaims();
 
@@ -388,16 +389,19 @@ export function useCriticalAlarmScheduler({
         if (scheduled) await cancelCriticalAlarm(medId);
         return;
       }
-      const { status: currentStatus } = calculateMedicationStatus(currentMed);
-      if (currentStatus === 'critical' || currentStatus === 'out_of_stock') {
-        // The medication crossed while we awaited — the foreground
-        // hook now owns the episode's notification. Cancel the alarm
-        // this operation armed and write nothing.
-        if (scheduled) await cancelCriticalAlarm(medId);
-        return;
-      }
-      if (getCriticalAlarmDate(currentMed, getTodayDateString()) !== chainCriticalDateMs) {
-        // The projection moved — a newer run will arm the right alarm.
+      const currentDecision = evaluateCriticalStockPolicy({
+        medication: currentMed,
+        criticalStockAlertsEnabled,
+        todayStr: getTodayDateString(),
+        nowMs: Date.now(),
+      });
+      if (
+        !currentDecision.scheduledDeliveryDesired ||
+        currentDecision.criticalDateMs !== chainCriticalDateMs
+      ) {
+        // The episode/projection changed while the bridge was in flight.
+        // Cancel the alarm this operation armed and let the current policy
+        // owner reconcile the newer state.
         if (scheduled) await cancelCriticalAlarm(medId);
         return;
       }
@@ -437,19 +441,16 @@ export function useCriticalAlarmScheduler({
 
     for (const med of medicationsRef.current) {
       const gen = bumpCriticalAlarmGeneration(med.id);
-      const { status } = calculateMedicationStatus(med);
-      const isCriticalish = status === 'critical' || status === 'out_of_stock';
-      const criticalDateMs = getCriticalAlarmDate(med, today);
-      const medicationCriticalAlertsEnabled =
-        med.criticalStockAlertsEnabled === true;
+      const claim = getCriticalNotificationClaim(claimsNow, med.id);
+      const decision = evaluateCriticalStockPolicy({
+        medication: med,
+        criticalStockAlertsEnabled,
+        claim,
+        todayStr: today,
+        nowMs,
+      });
 
-      if (!medicationCriticalAlertsEnabled) {
-        // Local opt-out: do not arm a new critical alarm for this medication.
-        // The stale native-alarm cleanup below cancels any previous schedule.
-        continue;
-      }
-
-      if (isCriticalish || criticalDateMs === null) {
+      if (!decision.scheduledDeliveryDesired) {
         // Already critical → the foreground owns the episode's
         // notification; never schedule, never write claims.
         // Sufficient but frozen (no auto deduction / no dose) → nothing
@@ -471,18 +472,22 @@ export function useCriticalAlarmScheduler({
       // Sufficient with a future projected crossing at criticalDateMs.
       stillScheduled.add(med.id);
 
-      const claim = getCriticalNotificationClaim(claimsNow, med.id);
+      const criticalDateMs = decision.criticalDateMs;
+      if (criticalDateMs === null) {
+        continue;
+      }
+
       const medId = med.id;
       const medName = med.name;
       const unit = med.unit || 'قرص';
 
-      if (claim?.claimed && claim.alarmTime === null) {
+      if (decision.scheduledDeliveryBlockedByForeground) {
         // Foreground Critical Stock delivery owns this opportunity while the
         // send is in flight. Never arm a competing future fallback.
         continue;
       }
 
-      if (claim?.claimed && claim.alarmTime === criticalDateMs) {
+      if (decision.matchingScheduledClaim) {
         // The claim says the alarm is armed exactly here. A claim is
         // business dedup state — it does NOT prove the native alarm
         // still exists (Android can drop previously-scheduled alarms:

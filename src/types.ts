@@ -115,9 +115,9 @@ export interface MedicationDose {
 //     passing, auto-deduction, manual consumption, refills-while-
 //     critical, app restarts and moving projections never start a new
 //     one).
-//   - Critical → Sufficient ends it (useStockAlerts clears the claim
-//     synchronously on that render → a later critical episode gets a
-//     fresh notification opportunity).
+//   - Critical → Sufficient ends it. The Critical Stock policy identifies
+//     the episode boundary; the foreground coordinator persists the cleared
+//     claim so a later critical episode gets a fresh notification opportunity.
 // `claimed === true` means the episode's single notification
 // opportunity has been consumed:
 //   - `alarmTime: number` — a native one-shot alarm was successfully

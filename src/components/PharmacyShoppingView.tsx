@@ -2,6 +2,7 @@ import { type FC } from 'react';
 import { MessageCircle } from 'lucide-react';
 import type { Medication, PharmacySettings } from '../types';
 import { calculateMedicationStatus } from '../utils/medicationStatus';
+import { describeOrderQuantityBreakdown } from '../utils/whatsapp';
 import { PharmacyShoppingSendModal } from './PharmacyShoppingSendModal';
 import { PharmacyShoppingMedicationRow } from './PharmacyShoppingMedicationRow';
 import { usePharmacyShoppingModel } from '../hooks/usePharmacyShoppingModel';

@@ -48,6 +48,7 @@ public final class ExactAlarmPlugin extends Plugin {
             JSObject ret = new JSObject();
             ret.put("opened", false);
             ret.put("error", "open_settings_failed");
+            ret.put("code", "open_settings_failed");
             call.resolve(ret);
         }
     }

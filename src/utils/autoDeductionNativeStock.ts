@@ -1,5 +1,6 @@
 import type { Medication } from '../types';
-import { classifyNativeError, toNativeBoundaryError, type NativeErrorCode } from './nativeErrors';
+import { classifyNativeError,
+  nativeFailureErrorCode, toNativeBoundaryError, type NativeErrorCode } from './nativeErrors';
 import { AutoDeduction, isNativeAndroid } from './autoDeductionNativePlugin';
 import type {
   ApplyAutoDeductionStockResult,
@@ -40,7 +41,7 @@ export async function initializeAutoDeductionStock(
       return {
         ok: false,
         error: result?.error || 'stock_init_failed',
-        errorCode: classifyNativeError(result?.error || 'stock_init_failed'),
+        errorCode: nativeFailureErrorCode(result, 'stock_init_failed'),
         medications,
       };
     }
@@ -171,7 +172,7 @@ export async function applyForegroundAutoStockDeltas(
       ? result
       : {
           ...result,
-          errorCode: classifyNativeError(result.error || 'foreground_stock_failed'),
+          errorCode: nativeFailureErrorCode(result, 'foreground_stock_failed'),
         };
   } catch (e) {
     return {

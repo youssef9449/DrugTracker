@@ -1,6 +1,9 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
-import { classifyNativeError, toNativeBoundaryError, type NativeBoundaryFailure } from './nativeErrors';
+import {
+  classifyNativeError,
+  nativeFailureErrorCode,
+  toNativeBoundaryError, type NativeBoundaryFailure } from './nativeErrors';
 
 export interface NotificationRuntimePostOptions {
   namespace: string;
@@ -34,8 +37,8 @@ interface NotificationRuntimePlugin {
       actionTitle?: string;
       actionForeground?: boolean;
     }
-  ): Promise<{ ok: boolean; error?: string }>;
-  cancel(options: { namespace: string; identity: string }): Promise<{ ok: boolean; error?: string }>;
+  ): Promise<{ ok: boolean; error?: string; code?: string }>;
+  cancel(options: { namespace: string; identity: string }): Promise<{ ok: boolean; error?: string; code?: string }>;
   checkPermission(): Promise<{ enabled: boolean }>;
   checkChannel(options: { channelId: string }): Promise<{ enabled: boolean }>;
   retryPersistedNotificationDeliveries(): Promise<{ retried: number }>;
@@ -251,10 +254,11 @@ export async function postNativeNotification(
     });
     if (result?.ok === true) return { ok: true };
     const message = result?.error || 'notification_post_failed';
+    const errorCode = nativeFailureErrorCode(result, 'notification_post_failed');
     return {
       ok: false,
       error: message,
-      errorCode: classifyNativeError(message),
+      errorCode,
     };
   } catch (error) {
     const boundaryError = toNativeBoundaryError(error, 'platform_failure');
@@ -278,10 +282,11 @@ export async function cancelNativeNotification(
     const result = await NotificationRuntime.cancel({ namespace, identity });
     if (result?.ok === true) return { ok: true };
     const message = result?.error || 'notification_cancel_failed';
+    const errorCode = nativeFailureErrorCode(result, 'notification_cancel_failed');
     return {
       ok: false,
       error: message,
-      errorCode: classifyNativeError(message),
+      errorCode,
     };
   } catch (error) {
     const boundaryError = toNativeBoundaryError(error, 'platform_failure');

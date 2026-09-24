@@ -10,7 +10,9 @@ import {
 } from './doseReminderNative';
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
 import { cancelNotification, getPendingNotificationResult, scheduleNotification } from './notificationRuntime';
-import { classifyNativeError, type NativeBoundaryFailure } from './nativeErrors';
+import {
+  classifyNativeError,
+  nativeFailureErrorCode, type NativeBoundaryFailure } from './nativeErrors';
 import {
   scheduleWebNotification,
   listWebScheduledNotificationIdentities,

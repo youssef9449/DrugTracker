@@ -1,6 +1,6 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import {
-  classifyNativeError,
+  nativeFailureErrorCode,
   toNativeBoundaryError,
   type NativeBoundaryFailure,
 } from './nativeErrors';
@@ -67,7 +67,7 @@ export async function scheduleCriticalAlarmNative(
     return {
       ok: false,
       error: message,
-      errorCode: classifyNativeError(message),
+      errorCode: nativeFailureErrorCode(result, 'critical_schedule_failed'),
     };
   } catch (error) {
     const boundaryError = toNativeBoundaryError(error);
@@ -95,7 +95,7 @@ export async function cancelCriticalAlarmNative(
     return {
       ok: false,
       error: message,
-      errorCode: classifyNativeError(message),
+      errorCode: nativeFailureErrorCode(result, 'critical_cancel_failed'),
     };
   } catch (error) {
     const boundaryError = toNativeBoundaryError(error);

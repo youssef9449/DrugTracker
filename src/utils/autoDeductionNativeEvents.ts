@@ -1,5 +1,6 @@
 import type { PluginListenerHandle } from '@capacitor/core';
-import { classifyNativeError, toNativeBoundaryError, type NativeErrorCode } from './nativeErrors';
+import {
+  nativeFailureErrorCode, toNativeBoundaryError, type NativeErrorCode } from './nativeErrors';
 import { AutoDeduction, isNativeAndroid } from './autoDeductionNativePlugin';
 import type { AutoDeductionEvent, ExactAutoDeductionFiredEvent, MarkReconciledResult } from './autoDeductionNativeTypes';
 export type { MarkReconciledResult } from './autoDeductionNativeTypes';
@@ -31,7 +32,7 @@ export async function listFiredAutoDeductionEvents(): Promise<ListFiredEventsRes
         ok: false,
         events: [],
         error: (res && res.error) || 'list_fired_failed',
-        errorCode: classifyNativeError(res?.error || 'list_fired_failed'),
+        errorCode: nativeFailureErrorCode(res, 'list_fired_failed'),
       };
     }
     return { ok: true, events: res.events ?? [] };
@@ -79,7 +80,7 @@ export async function getOccurrenceSnapshot(
       return {
         ok: false,
         error: (res && res.error) || 'snapshot_failed',
-        errorCode: classifyNativeError(res?.error || 'snapshot_failed'),
+        errorCode: nativeFailureErrorCode(res, 'snapshot_failed'),
       };
     }
     const statusRaw = String(res.status || '').toUpperCase();
@@ -127,10 +128,11 @@ export async function markAutoDeductionEventReconciled(
     });
     if (result.ok) return result;
     const message = result.error || 'mark_reconciled_failed';
+      const errorCode = nativeFailureErrorCode(result, 'mark_reconciled_failed');
     return {
       ...result,
       error: message,
-      errorCode: classifyNativeError(message),
+      errorCode,
     };
   } catch (e) {
     const boundaryError = toNativeBoundaryError(e, 'persistence_failed');

@@ -122,6 +122,7 @@ public final class NotificationRuntimePlugin extends Plugin {
         ret.put("ok", result.accepted);
         if (result.error != null) {
             ret.put("error", result.error);
+            ret.put("code", result.error);
         }
         call.resolve(ret);
     }
@@ -136,6 +137,7 @@ public final class NotificationRuntimePlugin extends Plugin {
         ret.put("ok", result.accepted);
         if (result.error != null) {
             ret.put("error", result.error);
+            ret.put("code", result.error);
         }
         call.resolve(ret);
     }

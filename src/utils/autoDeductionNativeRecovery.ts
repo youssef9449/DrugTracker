@@ -1,4 +1,7 @@
-import { toNativeBoundaryError, classifyNativeError } from './nativeErrors';
+import {
+  nativeFailureErrorCode,
+  toNativeBoundaryError,
+} from './nativeErrors';
 import { AutoDeduction, isNativeAndroid } from './autoDeductionNativePlugin';
 import type { ListScheduledOccurrencesResult, RestoreFutureSchedulesResult } from './autoDeductionNativeTypes';
 
@@ -14,7 +17,7 @@ export async function restoreFutureAutoDeductionSchedules(): Promise<RestoreFutu
       restored: Number(res?.restored) || 0,
       failed: Number(res?.failed) || 0,
       error: res?.error,
-      ...(ok ? {} : { errorCode: classifyNativeError(res?.error || 'restore_failed') }),
+      ...(ok ? {} : { errorCode: nativeFailureErrorCode(res, 'restore_failed') }),
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'restore_failed';

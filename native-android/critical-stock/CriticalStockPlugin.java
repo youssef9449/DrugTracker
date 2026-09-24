@@ -40,7 +40,7 @@ public final class CriticalStockPlugin extends Plugin {
 
                 JSObject ret = new JSObject();
                 ret.put("ok", result.ok);
-                if (result.error != null) ret.put("error", result.error);
+                if (result.error != null) ret.put("error", result.error); ret.put("code", result.error);
                 call.resolve(ret);
             } catch (Exception e) {
                 call.reject("critical_stock_schedule_failed");
@@ -60,7 +60,7 @@ public final class CriticalStockPlugin extends Plugin {
                 JSObject ret = new JSObject();
                 ret.put("ok", result.isOk());
                 ret.put("status", result.status.name());
-                if (result.error != null) ret.put("error", result.error);
+                if (result.error != null) ret.put("error", result.error); ret.put("code", result.error);
                 call.resolve(ret);
             } catch (Exception e) {
                 call.reject("critical_stock_cancel_failed");

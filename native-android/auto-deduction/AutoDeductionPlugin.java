@@ -171,6 +171,8 @@ public class AutoDeductionPlugin extends Plugin {
                 ret.put("ok", false);
                 ret.put("status", "FAILED");
                 ret.put("error", e.getMessage() != null ? e.getMessage() : "recovery_failed");
+
+                ret.put("code", "recovery_failed");
                 call.resolve(ret);
             }
         });
@@ -252,6 +254,7 @@ public class AutoDeductionPlugin extends Plugin {
                 ret.put("failed", result.failed);
                 if (result.error != null) {
                     ret.put("error", result.error);
+                    ret.put("code", result.error);
                 }
                 call.resolve(ret);
             } catch (Exception e) {
@@ -261,6 +264,8 @@ public class AutoDeductionPlugin extends Plugin {
                 ret.put("restored", 0);
                 ret.put("failed", 0);
                 ret.put("error", e.getMessage() != null ? e.getMessage() : "restore_failed");
+
+                ret.put("code", "restore_failed");
                 call.resolve(ret);
             }
         });

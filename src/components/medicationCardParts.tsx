@@ -1,6 +1,10 @@
 import type { FC } from 'react';
-import { Layers, Box, PauseCircle, Bell, BellOff, AlertTriangle } from 'lucide-react';
-import { Medication } from '../types';
+import { Layers, Box, PauseCircle, Bell, BellOff, AlertTriangle, AlertCircle, CheckCircle, CheckCircle2, Clock, ListChecks, RotateCcw, Calendar, ShoppingCart } from 'lucide-react';
+import type { ConsumptionLog, Medication, MedicationStatusInfo } from '../types';
+import { getCardDoseToggleTarget } from '../utils/doseSchedule';
+import { getHistoricalRestoreDisplayAmount } from '../utils/medActions';
+import { getTodayDateString } from '../utils/dateCalculations';
+import { MedicationOverflowMenu } from './MedicationMenu';
 import { AUTO_DEDUCT_PAUSED_NOTE } from '../lib/styles';
 /**
  * Shared presentational sub-components for MedicationCard.
@@ -184,4 +188,365 @@ export const UndoRefillBanner: FC<UndoRefillBannerProps> = ({
       تراجع عن التعبئة
     </button>
   </div>
+);
+
+type Density = 'compact' | 'detailed';
+
+const densityText: Record<Density, string> = {
+  compact: 'text-[8px]',
+  detailed: 'text-[9px]',
+};
+const densityIcon: Record<Density, string> = {
+  compact: 'w-2 h-2',
+  detailed: 'w-2.5 h-2.5',
+};
+const densityBtn: Record<Density, string> = {
+  compact: 'w-5 h-5',
+  detailed: 'w-6 h-6',
+};
+const densityBtnIcon: Record<Density, string> = {
+  compact: 'w-3 h-3',
+  detailed: 'w-3.5 h-3.5',
+};
+
+export interface MedicationCardHeaderProps {
+  medication: Medication;
+  density: Density;
+  onEdit: (medication: Medication) => void;
+  onDelete: (id: string) => void;
+  onOpenHistory?: (medication: Medication) => void;
+  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
+}
+
+/** Shared name + overflow menu row for compact/detailed cards. */
+export const MedicationCardHeader: FC<MedicationCardHeaderProps> = ({
+  medication,
+  density,
+  onEdit,
+  onDelete,
+  onOpenHistory,
+  onRegisterBackHandler,
+}) => (
+  <div className={`flex items-center justify-between ${density === 'compact' ? 'gap-1.5 mb-1' : 'gap-2 mb-1'} min-w-0`}>
+    <h3
+      className={`${density === 'compact' ? 'text-[11px]' : 'text-xs'} font-bold text-slate-900 leading-tight tracking-tight truncate min-w-0 flex-1`}
+      title={medication.name}
+    >
+      {medication.name}
+    </h3>
+    <MedicationOverflowMenu
+      medication={medication}
+      onEdit={onEdit}
+      onDelete={onDelete}
+      onOpenHistory={onOpenHistory}
+      onRegisterBackHandler={onRegisterBackHandler}
+      size={density === 'compact' ? 'xs' : 'sm'}
+    />
+  </div>
+);
+
+export interface MedicationCardStatusBadgesProps {
+  medication: Medication;
+  statusInfo: MedicationStatusInfo;
+  tagBadge: string;
+  density: Density;
+}
+
+/** Shared category + chronic/course + stock-status badges. */
+export const MedicationCardStatusBadges: FC<MedicationCardStatusBadgesProps> = ({
+  medication,
+  statusInfo,
+  tagBadge,
+  density,
+}) => {
+  const isOut = statusInfo.status === 'out_of_stock';
+  const isCrit = statusInfo.status === 'critical';
+  const t = densityText[density];
+  const icon = densityIcon[density];
+  return (
+    <div className={`flex items-center ${density === 'compact' ? 'gap-1 mb-1' : 'gap-1.5 mt-1'} flex-wrap min-w-0`}>
+      {medication.category && (
+        <span className={`${t} font-medium px-1.5 ${density === 'compact' ? 'py-0.2' : 'py-0.5'} rounded-full shrink-0 ${tagBadge}`}>
+          {medication.category}
+        </span>
+      )}
+      {medication.isChronic === false && medication.durationDays ? (
+        <span className={`${t} font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-blue-50 text-blue-800 border border-blue-200`}>
+          كورس {medication.durationDays} يوم
+        </span>
+      ) : medication.isChronic === true ? (
+        <span className={`${t} font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-slate-100 text-slate-600 border border-slate-200`}>
+          مزمن
+        </span>
+      ) : null}
+      {isOut ? (
+        <span className={`${t} font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0 ${density === 'compact' ? 'w-fit' : ''}`}>
+          <AlertCircle className={icon} />
+          <span>نفد</span>
+        </span>
+      ) : isCrit ? (
+        <span className={`${t} font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 flex items-center gap-0.5 shrink-0 ${density === 'compact' ? 'w-fit' : ''}`}>
+          <Clock className={icon} />
+          <span>حرج ({statusInfo.daysLeft}ي)</span>
+        </span>
+      ) : (
+        <span className={`${t} font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 flex items-center gap-0.5 shrink-0 ${density === 'compact' ? 'w-fit' : ''}`}>
+          <CheckCircle2 className={icon} />
+          <span>آمن ({statusInfo.daysLeft}ي)</span>
+        </span>
+      )}
+    </div>
+  );
+};
+
+export interface MedicationCardDoseActionsProps {
+  medication: Medication;
+  isAutoActive: boolean;
+  currentPills: number;
+  logs?: ConsumptionLog[];
+  density: Density;
+  onConsumeDose?: (medicationId: string, doseId?: string) => void;
+  onRestoreDose?: (medicationId: string, doseId?: string) => void;
+}
+
+/**
+ * Shared Take / Restore / multi-dose manage actions.
+ * Single implementation of dose-action semantics for compact and detailed views.
+ */
+export const MedicationCardDoseActions: FC<MedicationCardDoseActionsProps> = ({
+  medication,
+  isAutoActive,
+  currentPills,
+  logs = [],
+  density,
+  onConsumeDose,
+  onRestoreDose,
+}) => {
+  const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
+  const todayStr = getTodayDateString();
+  const manualRestoreAmount = getHistoricalRestoreDisplayAmount(
+    logs,
+    medication.id,
+    doseToggle.doseId,
+    todayStr
+  );
+  const takeAmount = doseToggle.amount;
+  const btn = densityBtn[density];
+  const btnIcon = densityBtnIcon[density];
+
+  if (
+    Array.isArray(medication.doseSchedule) &&
+    medication.doseSchedule.length > 1 &&
+    onConsumeDose
+  ) {
+    return (
+      <button
+        type="button"
+        onClick={() => onConsumeDose(medication.id, undefined)}
+        title="إدارة الجرعات"
+        aria-label="إدارة الجرعات"
+        data-testid={`manage-doses-${medication.id}`}
+        className={`${btn} flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95 cursor-pointer`}
+      >
+        <ListChecks className={btnIcon} strokeWidth={2.25} aria-hidden />
+      </button>
+    );
+  }
+
+  if (
+    (onConsumeDose || onRestoreDose) &&
+    doseToggle.canRestore &&
+    onRestoreDose &&
+    manualRestoreAmount != null
+  ) {
+    return (
+      <button
+        type="button"
+        onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
+        title={`استرجاع الجرعة (+${manualRestoreAmount})`}
+        aria-label={`استرجاع الجرعة (+${manualRestoreAmount})`}
+        className={`${btn} flex items-center justify-center rounded-full bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95 cursor-pointer`}
+        data-testid={`restore-dose-${medication.id}`}
+      >
+        <RotateCcw className={btnIcon} strokeWidth={2.25} aria-hidden />
+      </button>
+    );
+  }
+
+  if (!isAutoActive && doseToggle.canTake && onConsumeDose) {
+    return (
+      <button
+        type="button"
+        onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
+        disabled={currentPills <= 0 || takeAmount <= 0}
+        title={`تناول جرعة (-${takeAmount})`}
+        aria-label={`تناول جرعة (-${takeAmount})`}
+        className={`${btn} flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95 cursor-pointer`}
+        data-testid={`take-dose-${medication.id}`}
+      >
+        <ListChecks className={btnIcon} strokeWidth={2.25} aria-hidden />
+      </button>
+    );
+  }
+
+  if (!isAutoActive && (onConsumeDose || onRestoreDose)) {
+    return (
+      <span
+        title="تم تناول جرعة اليوم"
+        className={`${btn} flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700`}
+      >
+        <CheckCircle className={btnIcon} />
+      </span>
+    );
+  }
+
+  return null;
+};
+
+
+export interface MedicationCardStockSummaryProps {
+  currentPills: number;
+  unit: string;
+  dailyDose: number;
+  depletionLabel: string;
+  depletionTitle: string;
+  density: 'compact' | 'detailed';
+  nonSolidPackageDesc?: string | null;
+  stripsDesc?: string | null;
+}
+
+/** Shared remaining/dose/depletion summary for compact & detailed cards. */
+export const MedicationCardStockSummary: FC<MedicationCardStockSummaryProps> = ({
+  currentPills,
+  unit,
+  dailyDose,
+  depletionLabel,
+  depletionTitle,
+  density,
+  nonSolidPackageDesc,
+  stripsDesc,
+}) => {
+  if (density === 'compact') {
+    return (
+      <div className="mt-1.5 p-1 bg-slate-50 rounded-xl border border-slate-100 grid grid-cols-2 gap-1 text-[9px] min-w-0">
+        <div className="flex min-w-0 items-baseline gap-0.5">
+          <span className="text-[8px] text-slate-500">المتبقي:</span>
+          <span className={`font-mono font-extrabold text-[11px] leading-none ${currentPills === 0 ? 'text-red-600' : 'text-slate-900'}`}>
+            {currentPills}
+          </span>
+          <span className="text-[8px] text-slate-500 truncate">{unit || 'قرص'}</span>
+        </div>
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
+          <div className="flex shrink-0 items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-mono text-teal-800 font-bold" title={`الجرعة: ${dailyDose}/يوم`}>
+            <Clock className="w-2 h-2 text-teal-600" />
+            <span>{dailyDose}/ي</span>
+          </div>
+          <div className="flex min-w-0 max-w-full items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 text-slate-600" title={depletionTitle}>
+            <Calendar className="w-2 h-2 text-slate-400 shrink-0" />
+            <span className="truncate">{depletionLabel}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-2 p-1.5 px-2 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-2 text-[11px] flex-wrap">
+      <div className="flex items-center gap-1 min-w-0">
+        <span className="text-[10px] text-slate-500 font-medium">المتبقي:</span>
+        <span
+          className={`font-extrabold font-mono text-xs ${
+            currentPills === 0
+              ? 'text-red-600'
+              : currentPills <= dailyDose * 2
+              ? 'text-rose-600'
+              : 'text-slate-800'
+          }`}
+        >
+          {currentPills}
+        </span>
+        <span className="text-[10px] text-slate-600 font-medium">{unit || 'قرص'}</span>
+        {nonSolidPackageDesc && (
+          <span className="text-[9px] text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded-full border border-teal-100 font-medium truncate">
+            ({nonSolidPackageDesc})
+          </span>
+        )}
+        {stripsDesc && (
+          <span className="text-[9px] text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded-full border border-teal-100 font-medium truncate">
+            ({stripsDesc})
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
+        <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-medium">
+          <Clock className="w-2.5 h-2.5 text-teal-600" />
+          <span className="text-slate-400">الجرعة:</span>
+          <span className="font-mono font-bold text-teal-800">{dailyDose}</span>
+          <span className="text-slate-400">/يوم</span>
+        </div>
+        <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-medium min-w-0" title={depletionTitle}>
+          <Calendar className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+          <span className="text-slate-400 shrink-0">النفاذ:</span>
+          <span className="font-bold text-slate-800 truncate max-w-[90px]">{depletionLabel}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export interface MedicationCardProgressProps {
+  percentLeft: number;
+  progressColor: string;
+  title: string;
+  density: 'compact' | 'detailed';
+}
+
+export const MedicationCardProgress: FC<MedicationCardProgressProps> = ({
+  percentLeft,
+  progressColor,
+  title,
+  density,
+}) => (
+  <div
+    className={`${density === 'compact' ? 'mt-1' : 'mt-2'} w-full h-1 bg-slate-200/70 rounded-full overflow-hidden`}
+    title={title}
+  >
+    <div
+      className={`h-full rounded-full ${density === 'compact' ? 'transition-all duration-300' : 'transition-all duration-500'} ${progressColor}`}
+      style={{ width: `${percentLeft}%` }}
+    />
+  </div>
+);
+
+
+export interface MedicationCardRefillButtonProps {
+  medicationId: string;
+  medicationName: string;
+  density: 'compact' | 'detailed';
+  onOpenRefill: () => void;
+  className?: string;
+}
+
+/** Shared refill control for compact and detailed medication cards. */
+export const MedicationCardRefillButton: FC<MedicationCardRefillButtonProps> = ({
+  medicationId,
+  medicationName,
+  density,
+  onOpenRefill,
+  className = '',
+}) => (
+  <button
+    type="button"
+    onClick={onOpenRefill}
+    className={
+      className ||
+      (density === 'compact'
+        ? 'inline-flex h-7 items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2 text-[10px] font-semibold text-teal-800 hover:bg-teal-100 active:scale-95 transition cursor-pointer'
+        : 'inline-flex h-8 items-center gap-1.5 rounded-full border border-teal-200 bg-teal-50 px-2.5 text-[11px] font-semibold text-teal-800 hover:bg-teal-100 active:scale-95 transition cursor-pointer')
+    }
+    aria-label={`إعادة تعبئة ${medicationName}`}
+    data-testid={`medication-refill-${medicationId}`}
+  >
+    <ShoppingCart className={density === 'compact' ? 'w-3.5 h-3.5 text-teal-700' : 'w-4 h-4 text-teal-700'} />
+    <span>تعبئة</span>
+  </button>
 );

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import type { Medication, PharmacySettings } from '../types';
 import { usePharmacyShoppingSelection } from './usePharmacyShoppingSelection';
 import { usePharmacyShoppingWhatsApp } from './usePharmacyShoppingWhatsApp';
@@ -46,8 +46,11 @@ export function usePharmacyShoppingModel({
   const [orderUnits, setOrderUnits] = useState<Record<string, OrderUnit[]>>({});
   const getMedicationPeriod = (med: Medication): MedicationPeriod =>
     resolveMedicationPeriod(medicationPeriods, med, settings.defaultDurationDays);
-  const getDurationDays = (med: Medication): number =>
-    resolveDurationDays(medicationPeriods, med, settings.defaultDurationDays);
+  const getDurationDays = useCallback(
+    (med: Medication): number =>
+      resolveDurationDays(medicationPeriods, med, settings.defaultDurationDays),
+    [medicationPeriods, settings.defaultDurationDays]
+  );
   const getQuantityMode = (med: Medication): QuantityMode =>
     resolveQuantityMode(quantityModes, med);
   const getSelectedUnits = (med: Medication): OrderUnit[] =>
@@ -129,8 +132,11 @@ export function usePharmacyShoppingModel({
       },
     }));
   };
-  const getOrderBreakdown = (med: Medication, suggestedPills: number): { unit: OrderUnit; quantity: number }[] =>
-    resolveOrderBreakdown(customOrderQuantities, orderUnits, quantityModes, med, suggestedPills);
+  const getOrderBreakdown = useCallback(
+    (med: Medication, suggestedPills: number): { unit: OrderUnit; quantity: number }[] =>
+      resolveOrderBreakdown(customOrderQuantities, orderUnits, quantityModes, med, suggestedPills),
+    [customOrderQuantities, orderUnits, quantityModes]
+  );
   const getAvailableUnits = (med: Medication): OrderUnit[] => getShoppingAvailableUnits(med);
 
   const handleMedicationPeriodChange = (medId: string, field: keyof MedicationPeriod, value: string) => {
@@ -188,7 +194,7 @@ export function usePharmacyShoppingModel({
           orderBreakdown: getOrderBreakdown(med, suggestedPills),
         };
       });
-  }, [displayList, selectedMedIds, medicationPeriods, quantityModes, customOrderQuantities, orderUnits, settings.defaultDurationDays]);
+  }, [displayList, selectedMedIds, medicationPeriods, quantityModes, customOrderQuantities, orderUnits, settings.defaultDurationDays, getDurationDays, getOrderBreakdown]);
   const {
     pharmacies,
     selectedPharmacy,

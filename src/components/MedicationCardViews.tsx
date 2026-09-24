@@ -1,16 +1,22 @@
 import type { FC } from 'react';
 import type { Medication, ConsumptionLog } from '../types';
 import { calculateMedicationStatus } from '../utils/medicationStatus';
-import { getHistoricalRestoreDisplayAmount } from '../utils/medActions';
 import { pluralizeArabic } from '../lib/arabicPlural';
-import { getTodayDateString } from '../utils/dateCalculations';
 import { DAYS_PER_MONTH } from '../utils/time';
 import { formatDepletionDate } from '../utils/medicationPresentation';
-import { getCardDoseToggleTarget } from '../utils/doseSchedule';
-import { Pill, Plus, Calendar, AlertCircle, CheckCircle2, CheckCircle, RotateCcw, ShoppingCart, Clock, ListChecks } from 'lucide-react';
+import { Plus, Calendar, CheckCircle2, ShoppingCart } from 'lucide-react';
 import { MedicationMenu, MedicationOverflowMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
-import { StripsBadge, PackageSizeBadge, AutoDeductPausedNote } from './medicationCardParts';
+import {
+  StripsBadge,
+  PackageSizeBadge,
+  AutoDeductPausedNote,
+  MedicationCardHeader,
+  MedicationCardStatusBadges,
+  MedicationCardDoseActions,
+  MedicationCardStockSummary,
+  MedicationCardProgress,
+} from './medicationCardParts';
 
 type StatusInfo = ReturnType<typeof calculateMedicationStatus>;
 type Depletion = ReturnType<typeof import('../utils/dateCalculations').getDepletionDate>;
@@ -28,7 +34,7 @@ export interface MedicationCardViewProps {
   nonSolidPackageDesc: string | null;
   tag: Tag;
   percentLeft: number;
-  getProgressColor: () => string;
+  progressColor: string;
   onOpenRefill: (medication: Medication) => void;
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
@@ -54,19 +60,36 @@ function shortDepletionLabel(depletion: { dateStr: string; daysLeft: number }, i
 }
 
 export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => {
-  const { medication, isAutoActive, statusInfo, depletion, isSolid, hasStrips, currentPills, stripsDesc, tag, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onNavigateToShopping, onOpenHistory, onRegisterBackHandler } = props;
+  const {
+    medication,
+    isAutoActive,
+    statusInfo,
+    depletion,
+    isSolid,
+    hasStrips,
+    currentPills,
+    stripsDesc,
+    tag,
+    onOpenRefill,
+    onEdit,
+    onDelete,
+    onToggleAutoDeduct,
+    onNavigateToShopping,
+    onOpenHistory,
+    onRegisterBackHandler,
+  } = props;
   const isOut = statusInfo.status === 'out_of_stock';
   const isCrit = statusInfo.status === 'critical';
   return (
     <div
       id={`med-card-${medication.id}`}
-      className={`rounded-2xl border p-4 shadow-xs transition relative overflow-hidden ${
-        isOut
-          ? 'bg-red-50/40 border-red-200'
-          : isCrit
-          ? 'bg-rose-50/40 border-rose-200'
-          : 'bg-amber-50/30 border-amber-200'
-      }`}
+      className={
+        `bg-white rounded-2xl border border-slate-200 p-2.5 shadow-sm `
+        + `hover:shadow-md transition-shadow duration-200 relative overflow-hidden `
+        + `border-r-[3px] ${tag.border} ${
+          isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : ''
+        }`
+      }
     >
       {/* Row 1: Name + Top-Left Overflow Menu */}
       <div className="flex items-center justify-between gap-2 mb-1.5 min-w-0">
@@ -86,13 +109,13 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
       <div className="flex items-center justify-between gap-2 min-w-0">
         <div className="flex items-center gap-1.5 text-xs text-slate-500 flex-wrap min-w-0">
           <span
-            className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-              isOut
-                ? 'bg-red-600 text-white'
-                : isCrit
-                ? 'bg-rose-600 text-white'
-                : 'bg-amber-600 text-white'
-            }`}
+            className={
+              `bg-white rounded-2xl border border-slate-200 p-2.5 shadow-sm `
+              + `hover:shadow-md transition-shadow duration-200 relative overflow-hidden `
+              + `border-r-[3px] ${tag.border} ${
+                isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : ''
+              }`
+            }
           >
             {isOut
               ? 'نفد المخزون بالكامل'
@@ -116,17 +139,22 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
           ) : null}
           <span>معدل الخصم: {medication.dailyDose} {medication.unit}/يوم</span>
           {hasStrips && (
-            <StripsBadge medication={medication} className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded shrink-0" />
+            <StripsBadge medication={medication} className={
+              'text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 '
+              + 'py-0.5 rounded shrink-0'
+            } />
           )}
           {!isSolid && medication.packageSize && medication.packageSize > 0 && (
-            <PackageSizeBadge medication={medication} className="text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 py-0.5 rounded shrink-0" />
+            <PackageSizeBadge medication={medication} className={
+              'text-[10px] text-teal-800 bg-white/90 border border-teal-200 px-1.5 '
+              + 'py-0.5 rounded shrink-0'
+            } />
           )}
         </div>
         {/* Quick Menu (extracted — see MedicationMenu.tsx) */}
         <MedicationMenu
           medication={medication}
           isAutoActive={isAutoActive}
-          onOpenRefill={onOpenRefill}
           onEdit={onEdit}
           onDelete={onDelete}
           onToggleAutoDeduct={onToggleAutoDeduct}
@@ -179,13 +207,16 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
         medication={medication}
         containerClass="bg-white/90 border-amber-200 mt-2"
         textClass="text-amber-950"
-        badgeClass="text-amber-900 bg-amber-100"
       />
       {/* Quick Action: Immediate Refill + Shopping List CTA */}
       <div className="mt-3 flex items-center gap-2">
         <button
           onClick={() => onOpenRefill(medication)}
-          className="flex-1 h-9 px-4 rounded-full bg-teal-700 hover:bg-teal-800 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 shadow-2xs cursor-pointer"
+          className={
+            'flex-1 h-9 px-4 rounded-full bg-teal-700 hover:bg-teal-800 text-white '
+            + 'font-semibold text-xs flex items-center justify-center gap-1.5 '
+            + 'transition active:scale-98 shadow-2xs cursor-pointer'
+          }
         >
           <Plus className="w-4 h-4" />
           <span>تعبئة رصيد</span>
@@ -193,7 +224,11 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
         {onNavigateToShopping && (
           <button
             onClick={onNavigateToShopping}
-            className="h-9 px-4 rounded-full bg-white hover:bg-slate-50 text-teal-800 border border-teal-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition active:scale-98 cursor-pointer shrink-0"
+            className={
+              'h-9 px-4 rounded-full bg-white hover:bg-slate-50 text-teal-800 border '
+              + 'border-teal-300 font-semibold text-xs flex items-center justify-center '
+              + 'gap-1.5 transition active:scale-98 cursor-pointer shrink-0'
+            }
             title="تجهيز طلب الشراء في الواتساب"
           >
             <ShoppingCart className="w-3.5 h-3.5 text-teal-700" />
@@ -209,7 +244,22 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
 };
 
 export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props) => {
-  const { medication, isAutoActive, statusInfo, depletion, isSolid, hasStrips, currentPills, stripsDesc, tag, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onOpenHistory, onRegisterBackHandler } = props;
+  const {
+    medication,
+    isAutoActive,
+    statusInfo,
+    depletion,
+    isSolid,
+    hasStrips,
+    currentPills,
+    stripsDesc,
+    tag,
+    onEdit,
+    onDelete,
+    onToggleAutoDeduct,
+    onOpenHistory,
+    onRegisterBackHandler,
+  } = props;
   const safeDays = statusInfo.daysLeft;
   const monthlyUsage = medication.dailyDose * DAYS_PER_MONTH;
   return (
@@ -244,10 +294,16 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
             </span>
           )}
           {hasStrips && (
-            <StripsBadge medication={medication} className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/50 shrink-0" />
+            <StripsBadge medication={medication} className={
+              'text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border '
+              + 'border-emerald-200/50 shrink-0'
+            } />
           )}
           {!isSolid && medication.packageSize && medication.packageSize > 0 && (
-            <PackageSizeBadge medication={medication} className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/50 shrink-0" />
+            <PackageSizeBadge medication={medication} className={
+              'text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border '
+              + 'border-emerald-200/50 shrink-0'
+            } />
           )}
           {medication.notes && (
             <span className="text-[11px] text-slate-400 truncate max-w-[180px]">
@@ -259,7 +315,6 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
         <MedicationMenu
           medication={medication}
           isAutoActive={isAutoActive}
-          onOpenRefill={onOpenRefill}
           onEdit={onEdit}
           onDelete={onDelete}
           onToggleAutoDeduct={onToggleAutoDeduct}
@@ -323,7 +378,6 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
         medication={medication}
         containerClass="bg-emerald-50/70 border-emerald-200/80 mt-2"
         textClass="text-emerald-950"
-        badgeClass="text-emerald-900 bg-emerald-100"
       />
       {/* Auto-deduct paused note */}
       {!isAutoActive && <AutoDeductPausedNote />}
@@ -332,148 +386,66 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
 };
 
 export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) => {
-  const { medication, isAutoActive, statusInfo, depletion, currentPills, tag, percentLeft, getProgressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
+  const {
+    medication, isAutoActive, statusInfo, depletion, currentPills, tag, percentLeft,
+    progressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct,
+    onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts,
+    onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler,
+  } = props;
   const isOut = statusInfo.status === 'out_of_stock';
   const isCrit = statusInfo.status === 'critical';
-  const isWarn = statusInfo.status === 'warning';
   const isTemporaryCourse = medication.isChronic === false;
-  const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
-  const todayStr = getTodayDateString();
-  const manualRestoreAmount = getHistoricalRestoreDisplayAmount(logs, medication.id, doseToggle.doseId, todayStr);
-  const takeAmount = doseToggle.amount;
   return (
     <div
       id={`med-card-${medication.id}`}
-      className={`bg-white rounded-2xl border border-slate-200 p-2 shadow-sm hover:shadow-md transition-shadow duration-200 relative overflow-hidden border-r-[3px] ${tag.border} ${
-        isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : isWarn ? 'bg-amber-50/10' : ''
-      }`}
+      className={
+        `bg-white rounded-2xl border border-slate-200 p-2 shadow-sm `
+        + `hover:shadow-md transition-shadow duration-200 relative overflow-hidden `
+        + `border-r-[3px] ${tag.border} ${
+          isOut ? 'bg-red-50/25' : isCrit ? 'bg-rose-50/20' : ''
+        }`
+      }
     >
-      {/* Row 1: name + Top-Left Overflow Menu */}
-      <div className="flex items-center justify-between gap-1.5 mb-1 min-w-0">
-        <h3 className="block flex-1 min-w-0 text-[11px] font-bold text-slate-900 leading-tight tracking-tight truncate" title={medication.name}>
-          {medication.name}
-        </h3>
-        <MedicationOverflowMenu
-          medication={medication}
-          onEdit={onEdit}
-          onDelete={onDelete}
-          onOpenHistory={onOpenHistory}
-          onRegisterBackHandler={onRegisterBackHandler}
-          size="xs"
-        />
-      </div>
-      {/* Row 2: Category + Auto-Deduct Status + Stock Status (independent of name and actions) */}
-      <div className="flex items-center gap-1 flex-wrap min-w-0 mb-1">
-        {medication.category && (
-          <span className={`text-[8px] font-medium px-1.5 py-0.2 rounded-full shrink-0 ${tag.badge}`}>
-            {medication.category}
-          </span>
-        )}
-        {medication.isChronic === false && medication.durationDays ? (
-          <span className="text-[8px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-blue-50 text-blue-800 border border-blue-200">
-            كورس {medication.durationDays} يوم
-          </span>
-        ) : medication.isChronic === true ? (
-          <span className="text-[8px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-slate-100 text-slate-600 border border-slate-200">
-            مزمن
-          </span>
-        ) : null}
-        {isOut ? (
-          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0 w-fit">
-            <AlertCircle className="w-2 h-2" />
-            <span>نفد</span>
-          </span>
-        ) : isCrit ? (
-          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 flex items-center gap-0.5 shrink-0 w-fit">
-            <Clock className="w-2 h-2" />
-            <span>حرج ({statusInfo.daysLeft}ي)</span>
-          </span>
-        ) : isWarn ? (
-          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 flex items-center gap-0.5 shrink-0 w-fit">
-            <Clock className="w-2 h-2" />
-            <span>تنبيه ({statusInfo.daysLeft}ي)</span>
-          </span>
-        ) : (
-          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 flex items-center gap-0.5 shrink-0 w-fit">
-            <CheckCircle2 className="w-2 h-2" />
-            <span>آمن ({statusInfo.daysLeft}ي)</span>
-          </span>
-        )}
-      </div>
-      {/* Actions row (independent of Category/Status) */}
+      <MedicationCardHeader
+        medication={medication}
+        density="compact"
+        onEdit={onEdit}
+        onDelete={onDelete}
+        onOpenHistory={onOpenHistory}
+        onRegisterBackHandler={onRegisterBackHandler}
+      />
+      <MedicationCardStatusBadges
+        medication={medication}
+        statusInfo={statusInfo}
+        tagBadge={tag.badge}
+        density="compact"
+      />
       <div className="w-full min-w-0 flex flex-wrap items-center justify-end gap-1">
-          {Array.isArray(medication.doseSchedule) &&
-          medication.doseSchedule.length > 1 &&
-          onConsumeDose ? (
-            <button
-              type="button"
-              onClick={() => onConsumeDose(medication.id, undefined)}
-              title="إدارة الجرعات"
-              aria-label="إدارة الجرعات"
-              data-testid={`manage-doses-${medication.id}`}
-              className="w-5 h-5 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95 cursor-pointer"
-            >
-              <ListChecks className="w-3 h-3" strokeWidth={2.25} aria-hidden />
-            </button>
-          ) : (onConsumeDose || onRestoreDose) ? (
-            doseToggle.canRestore &&
-            onRestoreDose &&
-            manualRestoreAmount != null ? (
-              <button
-                type="button"
-                onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
-                title={
-                  manualRestoreAmount != null
-                    ? `استرجاع الجرعة (+${manualRestoreAmount})`
-                    : 'استرجاع الجرعة'
-                }
-                aria-label={
-                  manualRestoreAmount != null
-                    ? `استرجاع الجرعة (+${manualRestoreAmount})`
-                    : 'استرجاع الجرعة'
-                }
-                className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95 cursor-pointer"
-                data-testid={`restore-dose-${medication.id}`}
-              >
-                <RotateCcw className="w-3 h-3" strokeWidth={2.25} aria-hidden />
-              </button>
-            ) : !isAutoActive && doseToggle.canTake && onConsumeDose ? (
-              <button
-                type="button"
-                onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
-                disabled={currentPills <= 0 || takeAmount <= 0}
-                title={`تناول جرعة (-${takeAmount})`}
-                aria-label={`تناول جرعة (-${takeAmount})`}
-                className={`w-5 h-5 flex items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 active:scale-95 cursor-pointer ${
-                  currentPills <= 0 || takeAmount <= 0
-                    ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
-                    : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                }`}
-              >
-                <Pill className="w-3 h-3 rotate-45" aria-hidden />
-              </button>
-            ) : !isAutoActive ? (
-              <span
-                title="تم تناول جرعة اليوم"
-                className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
-              >
-                <CheckCircle className="w-3 h-3" />
-              </span>
-            ) : null
-          ) : null}
-          <div className="flex items-center gap-1 shrink-0">
+        <MedicationCardDoseActions
+          medication={medication}
+          isAutoActive={isAutoActive}
+          currentPills={currentPills}
+          logs={logs}
+          density="compact"
+          onConsumeDose={onConsumeDose}
+          onRestoreDose={onRestoreDose}
+        />
+        <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
             onClick={() => onOpenRefill(medication)}
             title="تعبئة"
-            className="w-5 h-5 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors active:scale-95 cursor-pointer"
+            className={
+              'w-5 h-5 flex items-center justify-center rounded-full bg-teal-100 '
+              + 'text-teal-800 hover:bg-teal-200 transition-colors active:scale-95 '
+              + 'cursor-pointer'
+            }
           >
             <Plus className="w-3 h-3" />
           </button>
           <MedicationMenu
             medication={medication}
             isAutoActive={isAutoActive}
-            onOpenRefill={onOpenRefill}
             onEdit={onEdit}
             onDelete={onDelete}
             onToggleAutoDeduct={onToggleAutoDeduct}
@@ -482,195 +454,92 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
             onOpenHistory={onOpenHistory}
             onRegisterBackHandler={onRegisterBackHandler}
           />
-          </div>
-      </div>
-      {/* Row 3: stock · dose · depletion — surface container */}
-      <div className="mt-1.5 p-1 bg-slate-50 rounded-xl border border-slate-100 grid grid-cols-2 gap-1 text-[9px] min-w-0">
-        <div className="flex min-w-0 items-baseline gap-0.5">
-          <span className="text-[8px] text-slate-500">المتبقي:</span>
-          <span className={`font-mono font-extrabold text-[11px] leading-none ${currentPills === 0 ? 'text-red-600' : 'text-slate-900'}`}>
-            {currentPills}
-          </span>
-          <span className="text-[8px] text-slate-500 truncate">{medication.unit || 'قرص'}</span>
-        </div>
-        <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
-          <div className="flex shrink-0 items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-mono text-teal-800 font-bold" title={`الجرعة: ${medication.dailyDose}/يوم`}>
-            <Clock className="w-2 h-2 text-teal-600" />
-            <span>{medication.dailyDose}/ي</span>
-          </div>
-          <div className="flex min-w-0 max-w-full items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 text-slate-600" title={`النفاذ: ${formatDepletionDate(depletion.dateStr, depletion.daysLeft, currentPills)}`}>
-            <Calendar className="w-2 h-2 text-slate-400 shrink-0" />
-            <span className="truncate">{shortDepletionLabel(depletion, isOut)}</span>
-          </div>
         </div>
       </div>
-      {/* Row 3: progress only */}
-      <div
-        className="mt-1 w-full h-1 bg-slate-200/70 rounded-full overflow-hidden"
+      <MedicationCardStockSummary
+        currentPills={currentPills}
+        unit={medication.unit || 'قرص'}
+        dailyDose={medication.dailyDose}
+        depletionLabel={shortDepletionLabel(depletion, isOut)}
+        depletionTitle={`النفاذ: ${formatDepletionDate(depletion.dateStr, depletion.daysLeft, currentPills)}`}
+        density="compact"
+      />
+      <MedicationCardProgress
+        percentLeft={percentLeft}
+        progressColor={progressColor}
+        density="compact"
         title={
           isTemporaryCourse
             ? `كورس علاجي (${medication.durationDays} يوم): متبقي ${statusInfo.daysLeft} يوماً (${percentLeft}%)`
             : `دواء مزمن (مقياس شهري): متبقي ${statusInfo.daysLeft} يوماً (${percentLeft}%)`
         }
-      >
-        <div
-          className={`h-full rounded-full transition-all duration-300 ${getProgressColor()}`}
-          style={{ width: `${percentLeft}%` }}
-        />
-      </div>
+      />
     </div>
   );
 };
 
 export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) => {
-  const { medication, isAutoActive, statusInfo, depletion, currentPills, stripsDesc, nonSolidPackageDesc, tag, percentLeft, getProgressColor, onOpenRefill, onEdit, onDelete, onToggleAutoDeduct, onToggleMedicationReminder, onToggleMedicationCriticalStockAlerts, onConsumeDose, onRestoreDose, onOpenHistory, logs, onRegisterBackHandler } = props;
+  const {
+    medication, isAutoActive, statusInfo, depletion, currentPills, stripsDesc,
+    nonSolidPackageDesc, tag, percentLeft, progressColor, onOpenRefill, onEdit,
+    onDelete, onToggleAutoDeduct, onToggleMedicationReminder,
+    onToggleMedicationCriticalStockAlerts, onConsumeDose, onRestoreDose,
+    onOpenHistory, logs, onRegisterBackHandler,
+  } = props;
   const isOut = statusInfo.status === 'out_of_stock';
   const isCrit = statusInfo.status === 'critical';
-  const isWarn = statusInfo.status === 'warning';
   const isTemporaryCourse = medication.isChronic === false;
-  const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
-  const todayStr = getTodayDateString();
-  const manualRestoreAmount = getHistoricalRestoreDisplayAmount(logs, medication.id, doseToggle.doseId, todayStr);
-  const takeAmount = doseToggle.amount;
   return (
     <div
       id={`med-card-${medication.id}`}
-      className={`bg-white rounded-2xl border border-slate-200 p-2.5 shadow-sm hover:shadow-md transition-shadow duration-200 relative overflow-hidden border-r-[3px] ${tag.border} ${
-        isOut
-          ? 'bg-red-50/20'
-          : isCrit
-          ? 'bg-rose-50/20'
-          : isWarn
-          ? 'bg-amber-50/15'
-          : ''
-      }`}
+      className={
+        `bg-white rounded-2xl border border-slate-200 p-2.5 shadow-sm `
+        + `hover:shadow-md transition-shadow duration-200 relative overflow-hidden `
+        + `border-r-[3px] ${tag.border} ${
+          isOut ? 'bg-red-50/20' : isCrit ? 'bg-rose-50/20' : ''
+        }`
+      }
     >
-      {/* Row 1: Name + Top-Left Overflow Menu */}
-      <div className="flex items-center justify-between gap-2 mb-1 min-w-0">
-        <h3 className="text-xs font-bold text-slate-900 leading-tight tracking-tight truncate min-w-0 flex-1" title={medication.name}>
-          {medication.name}
-        </h3>
-        <MedicationOverflowMenu
-          medication={medication}
-          onEdit={onEdit}
-          onDelete={onDelete}
-          onOpenHistory={onOpenHistory}
-          onRegisterBackHandler={onRegisterBackHandler}
-          size="sm"
-        />
-      </div>
-      {/* Row 2: Category + Auto-Deduct Status + Stock Status (independent of name and actions) */}
-      <div className="flex items-center gap-1.5 flex-wrap min-w-0 mt-1">
-        {medication.category && (
-          <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${tag.badge}`}>
-            {medication.category}
-          </span>
-        )}
-        {medication.isChronic === false && medication.durationDays ? (
-          <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-blue-50 text-blue-800 border border-blue-200">
-            كورس {medication.durationDays} يوم
-          </span>
-        ) : medication.isChronic === true ? (
-          <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-slate-100 text-slate-600 border border-slate-200">
-            مزمن
-          </span>
-        ) : null}
-        {isOut ? (
-          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 flex items-center gap-0.5 shrink-0">
-            <AlertCircle className="w-2.5 h-2.5" />
-            <span>نفد</span>
-          </span>
-        ) : isCrit ? (
-          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 flex items-center gap-0.5 shrink-0">
-            <Clock className="w-2.5 h-2.5" />
-            <span>حرج ({statusInfo.daysLeft}ي)</span>
-          </span>
-        ) : isWarn ? (
-          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 flex items-center gap-0.5 shrink-0">
-            <Clock className="w-2.5 h-2.5" />
-            <span>تنبيه ({statusInfo.daysLeft}ي)</span>
-          </span>
-        ) : (
-          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 flex items-center gap-0.5 shrink-0">
-            <CheckCircle2 className="w-2.5 h-2.5" />
-            <span>آمن ({statusInfo.daysLeft}ي)</span>
-          </span>
-        )}
-      </div>
-      {/* Actions row (independent of Category/Status) */}
+      <MedicationCardHeader
+        medication={medication}
+        density="detailed"
+        onEdit={onEdit}
+        onDelete={onDelete}
+        onOpenHistory={onOpenHistory}
+        onRegisterBackHandler={onRegisterBackHandler}
+      />
+      <MedicationCardStatusBadges
+        medication={medication}
+        statusInfo={statusInfo}
+        tagBadge={tag.badge}
+        density="detailed"
+      />
       <div className="w-full min-w-0 flex flex-wrap items-center justify-end gap-1 mt-1">
-          {Array.isArray(medication.doseSchedule) &&
-          medication.doseSchedule.length > 1 &&
-          onConsumeDose ? (
-            <button
-              type="button"
-              onClick={() => onConsumeDose(medication.id, undefined)}
-              title="إدارة الجرعات"
-              aria-label="إدارة الجرعات"
-              data-testid={`manage-doses-${medication.id}`}
-              className="w-6 h-6 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95 cursor-pointer"
-            >
-              <ListChecks className="w-3.5 h-3.5" strokeWidth={2.25} aria-hidden />
-            </button>
-          ) : (onConsumeDose || onRestoreDose) ? (
-            doseToggle.canRestore &&
-            onRestoreDose &&
-            manualRestoreAmount != null ? (
-              <button
-                type="button"
-                onClick={() => onRestoreDose(medication.id, doseToggle.doseId)}
-                title={
-                  manualRestoreAmount != null
-                    ? `استرجاع الجرعة (+${manualRestoreAmount})`
-                    : 'استرجاع الجرعة'
-                }
-                aria-label={
-                  manualRestoreAmount != null
-                    ? `استرجاع الجرعة (+${manualRestoreAmount})`
-                    : 'استرجاع الجرعة'
-                }
-                className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-900 hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95 cursor-pointer"
-                data-testid={`restore-dose-${medication.id}`}
-              >
-                <RotateCcw className="w-3.5 h-3.5" strokeWidth={2.25} aria-hidden />
-              </button>
-            ) : !isAutoActive && doseToggle.canTake && onConsumeDose ? (
-              <button
-                type="button"
-                onClick={() => onConsumeDose(medication.id, doseToggle.doseId)}
-                disabled={currentPills <= 0 || takeAmount <= 0}
-                title={`تناول جرعة (-${takeAmount})`}
-                aria-label={`تناول جرعة (-${takeAmount})`}
-                className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 focus-visible:ring-offset-1 active:scale-95 cursor-pointer ${
-                  currentPills <= 0 || takeAmount <= 0
-                    ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
-                    : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                }`}
-              >
-                <Pill className="w-3.5 h-3.5 rotate-45" aria-hidden />
-              </button>
-            ) : !isAutoActive ? (
-              <span
-                title="تم تناول جرعة اليوم"
-                className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
-              >
-                <CheckCircle className="w-3.5 h-3.5" />
-              </span>
-            ) : null
-          ) : null}
-          <div className="flex items-center gap-1 shrink-0">
+        <MedicationCardDoseActions
+          medication={medication}
+          isAutoActive={isAutoActive}
+          currentPills={currentPills}
+          logs={logs}
+          density="detailed"
+          onConsumeDose={onConsumeDose}
+          onRestoreDose={onRestoreDose}
+        />
+        <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
             onClick={() => onOpenRefill(medication)}
             title="تعبئة رصيد"
-            className="w-6 h-6 flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors active:scale-95 cursor-pointer"
+            className={
+              'w-6 h-6 flex items-center justify-center rounded-full bg-teal-100 '
+              + 'text-teal-800 hover:bg-teal-200 transition-colors active:scale-95 '
+              + 'cursor-pointer'
+            }
           >
             <Plus className="w-3.5 h-3.5" />
           </button>
           <MedicationMenu
             medication={medication}
             isAutoActive={isAutoActive}
-            onOpenRefill={onOpenRefill}
             onEdit={onEdit}
             onDelete={onDelete}
             onToggleAutoDeduct={onToggleAutoDeduct}
@@ -680,66 +549,28 @@ export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) =
             onRegisterBackHandler={onRegisterBackHandler}
             size="sm"
           />
-          </div>
-      </div>
-      {/* Second line: Crucial details — surface container */}
-      <div className="mt-2 p-1.5 px-2 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-2 text-[11px] flex-wrap">
-        <div className="flex items-center gap-1 min-w-0">
-          <span className="text-[10px] text-slate-500 font-medium">المتبقي:</span>
-          <span
-            className={`font-extrabold font-mono text-xs ${
-              currentPills === 0
-                ? 'text-red-600'
-                : currentPills <= medication.dailyDose * 2
-                ? 'text-rose-600'
-                : 'text-slate-800'
-            }`}
-          >
-            {currentPills}
-          </span>
-          <span className="text-[10px] text-slate-600 font-medium">
-            {medication.unit || 'قرص'}
-          </span>
-          {nonSolidPackageDesc && (
-            <span className="text-[9px] text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded-full border border-teal-100 font-medium truncate">
-              ({nonSolidPackageDesc})
-            </span>
-          )}
-          {stripsDesc && (
-            <span className="text-[9px] text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded-full border border-teal-100 font-medium truncate">
-              ({stripsDesc})
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
-          <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-medium">
-            <Clock className="w-2.5 h-2.5 text-teal-600" />
-            <span className="text-slate-400">الجرعة:</span>
-            <span className="font-mono font-bold text-teal-800">{medication.dailyDose}</span>
-            <span className="text-slate-400">/يوم</span>
-          </div>
-          <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-medium min-w-0">
-            <Calendar className="w-2.5 h-2.5 text-slate-400 shrink-0" />
-            <span className="text-slate-400 shrink-0">النفاذ:</span>
-            <span className="font-bold text-slate-800 truncate max-w-[90px]">{shortDepletionLabel(depletion, isOut)}</span>
-          </div>
         </div>
       </div>
-      {/* Mini Visual Stock Progress Bar */}
-      <div
-        className="mt-2 w-full h-1 bg-slate-200/70 rounded-full overflow-hidden"
+      <MedicationCardStockSummary
+        currentPills={currentPills}
+        unit={medication.unit || 'قرص'}
+        dailyDose={medication.dailyDose}
+        depletionLabel={shortDepletionLabel(depletion, isOut)}
+        depletionTitle={`النفاذ: ${formatDepletionDate(depletion.dateStr, depletion.daysLeft, currentPills)}`}
+        density="detailed"
+        nonSolidPackageDesc={nonSolidPackageDesc}
+        stripsDesc={stripsDesc}
+      />
+      <MedicationCardProgress
+        percentLeft={percentLeft}
+        progressColor={progressColor}
+        density="detailed"
         title={
           isTemporaryCourse
             ? `كورس علاجي (${medication.durationDays} يوم): متبقي ${statusInfo.daysLeft} يوماً (${percentLeft}%)`
             : `دواء مزمن (مقياس شهري): متبقي ${statusInfo.daysLeft} يوماً (${percentLeft}%)`
         }
-      >
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${getProgressColor()}`}
-          style={{ width: `${percentLeft}%` }}
-        />
-      </div>
+      />
     </div>
   );
 };
-

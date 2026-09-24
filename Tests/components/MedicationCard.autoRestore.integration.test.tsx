@@ -8,6 +8,7 @@
  * - manual Take/Restore when auto inactive
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readPersistedMedications } from '../helpers/persistedMedications';
 import { render, screen, cleanup, waitFor, fireEvent, within } from '@testing-library/react';
 
 vi.mock('@/native', () => ({
@@ -60,9 +61,6 @@ const COMPACT_VIEW_KEY = 'android_med_tracker_compact_view_v1';
 const TEST_DATE = '2024-09-10';
 const MED_ID = 'med-auto-restore';
 
-function readMeds(): Medication[] {
-  return JSON.parse(localStorage.getItem(STORAGE_MEDS_KEY) || '[]');
-}
 
 
 /** Single-dose med with optional durable evidence via overrides. */
@@ -157,11 +155,11 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
     expect(screen.getByTestId(`restore-dose-${MED_ID}`)).toBeInTheDocument();
     expect(screen.queryAllByTitle(/تناول جرعة/)).toHaveLength(0);
 
-    const pillsBefore = readMeds()[0].currentPills;
+    const pillsBefore = readPersistedMedications()[0].currentPills;
     await clickRestore();
 
     await waitFor(() => {
-      const m = readMeds()[0];
+      const m = readPersistedMedications()[0];
       expect(m.currentPills).toBe(pillsBefore + 2);
       expect(isDoseConsumedOnDate(m, 's1', getTodayDateString())).toBe(false);
     });
@@ -184,11 +182,11 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
     expect(screen.getByTestId(`restore-dose-${MED_ID}`)).toBeInTheDocument();
 
-    const pillsBefore = readMeds()[0].currentPills;
+    const pillsBefore = readPersistedMedications()[0].currentPills;
     await clickRestore();
 
     await waitFor(() => {
-      expect(readMeds()[0].currentPills).toBe(pillsBefore + 2);
+      expect(readPersistedMedications()[0].currentPills).toBe(pillsBefore + 2);
     });
   });
 
@@ -204,7 +202,7 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
 
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
     expect(screen.queryByTestId(`restore-dose-${MED_ID}`)).toBeNull();
-    expect(readMeds()[0].currentPills).toBe(20);
+    expect(readPersistedMedications()[0].currentPills).toBe(20);
   });
 });
 
@@ -249,11 +247,11 @@ describe('MedicationCard Manual Take → Restore (auto OFF)', () => {
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
 
     const takeBtn = screen.getByTitle(/تناول جرعة/);
-    const pillsBefore = readMeds()[0].currentPills;
+    const pillsBefore = readPersistedMedications()[0].currentPills;
     fireEvent.click(takeBtn);
 
     await waitFor(() => {
-      const m = readMeds()[0];
+      const m = readPersistedMedications()[0];
       expect(isDoseConsumedOnDate(m, 's1', getTodayDateString())).toBe(true);
       expect(m.currentPills).toBe(pillsBefore - 2);
     });
@@ -263,7 +261,7 @@ describe('MedicationCard Manual Take → Restore (auto OFF)', () => {
     fireEvent.click(restoreBtn);
 
     await waitFor(() => {
-      const m = readMeds()[0];
+      const m = readPersistedMedications()[0];
       expect(isDoseConsumedOnDate(m, 's1', getTodayDateString())).toBe(false);
       expect(isDoseSkippedOnDate(m, 's1', getTodayDateString())).toBe(true);
       expect(m.currentPills).toBe(pillsBefore);

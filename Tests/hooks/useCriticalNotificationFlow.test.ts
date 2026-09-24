@@ -63,6 +63,7 @@ vi.mock('../utils/notificationTestFacade', async () => {
 });
 
 import { sendCriticalStockAlert } from '../utils/notificationTestFacade';
+import { readCriticalClaims as readClaims } from '../helpers/criticalStockClaims';
 
 const sendMock = vi.mocked(sendCriticalStockAlert);
 const scheduleMock = vi.mocked(mocks.schedule);
@@ -105,10 +106,6 @@ function useBothHooks(props: {
     exactAlarmPermission: 'unsupported',
     resumeTick: props.resumeTick ?? 0,
   });
-}
-
-function readClaims(): Record<string, { claimed: boolean; alarmTime: number | null }> {
-  return JSON.parse(localStorage.getItem(CRITICAL_CLAIMS_STORAGE_KEY) || '{}');
 }
 
 const flush = async (): Promise<void> => {

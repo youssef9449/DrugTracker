@@ -15,9 +15,6 @@ interface ReminderBadgeProps {
   medication: Medication;
   containerClass: string;
   textClass: string;
-  badgeClass?: string;
-  buttonClass?: string;
-  onTriggerAlarm?: (medication: Medication) => void;
 }
 
 export function ReminderBadge({

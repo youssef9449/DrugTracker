@@ -3,6 +3,7 @@
  * MedicationCard Take↔Restore toggle — same doseId lifecycle via real App.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readPersistedMedications } from '../helpers/persistedMedications';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 
 vi.mock('@/native', () => ({
@@ -90,11 +91,6 @@ function makeMulti(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
-function readMeds(): Medication[] {
-  const raw = localStorage.getItem(STORAGE_MEDS_KEY);
-  if (!raw) return [];
-  return JSON.parse(raw) as Medication[];
-}
 
 function readLogs(): ConsumptionLog[] {
   const raw = localStorage.getItem(STORAGE_LOGS_KEY);
@@ -124,7 +120,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
 
     fireEvent.click(screen.getByTitle(/تناول جرعة \(-2\)/));
     await waitFor(() => {
-      const med = readMeds().find((m) => m.id === 'med-single')!;
+      const med = readPersistedMedications().find((m) => m.id === 'med-single')!;
       expect(med.currentPills).toBe(18);
       expect(med.doseConsumptionHistory?.s1).toBe(getTodayDateString());
     });
@@ -136,7 +132,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     fireEvent.click(screen.getByTitle(/استرجاع الجرعة \(\+2\)/));
 
     await waitFor(() => {
-      const med = readMeds().find((m) => m.id === 'med-single')!;
+      const med = readPersistedMedications().find((m) => m.id === 'med-single')!;
       expect(med.currentPills).toBe(20);
       const restoreLog = readLogs().find((l) => l.type === 'skipped_day');
       expect(restoreLog?.amount).toBe(2);
@@ -211,7 +207,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     expect(takeD1Btn).toBeTruthy();
     fireEvent.click(takeD1Btn!);
     await waitFor(() => {
-      const med = readMeds().find((m) => m.id === 'med-multi')!;
+      const med = readPersistedMedications().find((m) => m.id === 'med-multi')!;
       expect(med.doseConsumptionHistory?.d1).toBe(today);
       expect(med.currentPills).toBe(19);
     });
@@ -231,7 +227,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     fireEvent.click(restoreD1Btn!);
 
     await waitFor(() => {
-      const med = readMeds().find((m) => m.id === 'med-multi')!;
+      const med = readPersistedMedications().find((m) => m.id === 'med-multi')!;
       expect(med.currentPills).toBe(20);
       const restoreLog = readLogs().find((l) => l.type === 'skipped_day');
       expect(restoreLog?.doseId).toBe('d1');
@@ -241,7 +237,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     });
 
     // After restore lifecycle, next-dose resolution can still identify d1 as next
-    const med = readMeds().find((m) => m.id === 'med-multi')!;
+    const med = readPersistedMedications().find((m) => m.id === 'med-multi')!;
     expect(getNextScheduledDose(med, new Date('2024-09-10T06:00:00'))?.id).toBe('d1');
   });
 

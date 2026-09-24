@@ -9,18 +9,16 @@ import { TOAST_MESSAGES } from '@/constants/uiStrings';
 const notifMocks = vi.hoisted(() => ({
   getPermission: vi.fn(),
   requestPermission: vi.fn(),
+  ensureCapability: vi.fn(),
 }));
 
-vi.mock('../utils/notificationTestFacade', async () => {
-  const actual = await vi.importActual<typeof import('../utils/notificationTestFacade')>(
-    '../utils/notificationTestFacade'
-  );
-  return {
-    ...actual,
-    getNotificationPermission: notifMocks.getPermission,
-    requestNotificationPermission: notifMocks.requestPermission,
-  };
-});
+vi.mock('@/hooks/ensureNotificationCapability', () => ({
+  ensureNotificationCapability: notifMocks.ensureCapability,
+}));
+
+vi.mock('../../src/hooks/ensureNotificationCapability', () => ({
+  ensureNotificationCapability: notifMocks.ensureCapability,
+}));
 
 const mockSettings: PharmacySettings = {
   defaultDurationDays: 30,
@@ -35,6 +33,7 @@ const mockSettings: PharmacySettings = {
 describe('AppSettingsModal — Notification Controls', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    notifMocks.ensureCapability.mockResolvedValue({ status: 'granted', allowed: true });
     notifMocks.getPermission.mockResolvedValue('granted');
     notifMocks.requestPermission.mockResolvedValue(true);
   });
@@ -125,6 +124,7 @@ describe('AppSettingsModal — Notification Controls', () => {
 describe('AppSettingsModal — permission guard on toggle ON', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    notifMocks.ensureCapability.mockResolvedValue({ status: 'granted', allowed: true });
     notifMocks.getPermission.mockResolvedValue('granted');
     notifMocks.requestPermission.mockResolvedValue(true);
   });
@@ -155,6 +155,7 @@ describe('AppSettingsModal — permission guard on toggle ON', () => {
   });
 
   it('notifications OFF→ON with permission denied stays OFF and toasts', async () => {
+    notifMocks.ensureCapability.mockResolvedValue({ status: 'denied', allowed: false });
     notifMocks.getPermission.mockResolvedValue('denied');
     const showToast = vi.fn();
     render(
@@ -182,6 +183,7 @@ describe('AppSettingsModal — permission guard on toggle ON', () => {
   });
 
   it('notifications OFF→ON with permission error stays OFF and toasts', async () => {
+    notifMocks.ensureCapability.mockResolvedValue({ status: 'error', allowed: false, error: new Error('boom') });
     notifMocks.getPermission.mockRejectedValue(new Error('boom'));
     const showToast = vi.fn();
     render(
@@ -233,6 +235,7 @@ describe('AppSettingsModal — permission guard on toggle ON', () => {
   });
 
   it('critical OFF→ON with permission denied stays OFF and toasts', async () => {
+    notifMocks.ensureCapability.mockResolvedValue({ status: 'denied', allowed: false });
     notifMocks.getPermission.mockResolvedValue('denied');
     const showToast = vi.fn();
     render(
@@ -260,6 +263,7 @@ describe('AppSettingsModal — permission guard on toggle ON', () => {
   });
 
   it('critical OFF→ON with permission error stays OFF and toasts', async () => {
+    notifMocks.ensureCapability.mockResolvedValue({ status: 'error', allowed: false, error: new Error('fail') });
     notifMocks.getPermission.mockRejectedValue(new Error('fail'));
     const showToast = vi.fn();
     render(
@@ -287,6 +291,7 @@ describe('AppSettingsModal — permission guard on toggle ON', () => {
   });
 
   it('permission failure then Save does not commit notificationsEnabled true', async () => {
+    notifMocks.ensureCapability.mockResolvedValue({ status: 'denied', allowed: false });
     notifMocks.getPermission.mockResolvedValue('denied');
     const onApplyAppPreferences = vi.fn();
     const showToast = vi.fn();
@@ -327,6 +332,7 @@ describe('AppSettingsModal — permission guard on toggle ON', () => {
 describe('AppSettingsModal — draft-only until Save', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    notifMocks.ensureCapability.mockResolvedValue({ status: 'granted', allowed: true });
     notifMocks.getPermission.mockResolvedValue('granted');
     notifMocks.requestPermission.mockResolvedValue(true);
   });

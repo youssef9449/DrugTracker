@@ -11,6 +11,7 @@
  * Logs-tab / ConsumptionLogView restore UI stays intentionally removed.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readPersistedMedications } from './helpers/persistedMedications';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 
 vi.mock('@/native', () => ({
@@ -57,9 +58,6 @@ const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
 const TEST_DATE = '2024-09-10';
 const MED_ID = 'med-restore';
 
-function readMeds(): Medication[] {
-  return JSON.parse(localStorage.getItem(STORAGE_MEDS_KEY) || '[]');
-}
 
 function readLogs(): ConsumptionLog[] {
   return JSON.parse(localStorage.getItem(STORAGE_LOGS_KEY) || '[]');
@@ -140,7 +138,7 @@ async function takeDoseViaCard(doseId: string): Promise<void> {
   expect(target).toBeTruthy();
   fireEvent.click(target!);
   await waitFor(() => {
-    expect(readMeds()[0].doseConsumptionHistory?.[doseId]).toBe(getTodayDateString());
+    expect(readPersistedMedications()[0].doseConsumptionHistory?.[doseId]).toBe(getTodayDateString());
   });
 }
 
@@ -194,7 +192,7 @@ describe('App — Take → Restore → Restore blocked (explicit doseId via card
     });
 
     await takeDoseViaCard('d1');
-    const pillsAfterTake = readMeds()[0].currentPills;
+    const pillsAfterTake = readPersistedMedications()[0].currentPills;
 
     await restoreDoseViaCardModal('d1');
     await waitFor(() => {
@@ -202,7 +200,7 @@ describe('App — Take → Restore → Restore blocked (explicit doseId via card
     });
 
     await waitFor(() => {
-      const med = readMeds()[0];
+      const med = readPersistedMedications()[0];
       expect(med.doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
       expect(med.doseConsumptionHistory?.d1).toBeUndefined();
       expect(med.doseSkippedHistory?.d2).toBeUndefined();
@@ -233,7 +231,7 @@ describe('App — Take → Restore → Restore blocked (explicit doseId via card
     }
 
     await waitFor(() => {
-      const med = readMeds()[0];
+      const med = readPersistedMedications()[0];
       expect(med.doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
       expect(readLogs().filter((l) => l.type === 'skipped_day' && l.doseId === 'd1')).toHaveLength(
         1
@@ -274,7 +272,7 @@ describe('App — Take → Restore → Restore blocked (explicit doseId via card
 
     await waitFor(() => {
       expect(readLogs().filter((l) => l.type === 'skipped_day' && l.doseId === 'd1')).toHaveLength(1);
-      expect(readMeds()[0].doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
+      expect(readPersistedMedications()[0].doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
     });
   });
 });
@@ -318,7 +316,7 @@ describe('App — independent multi-dose Restore via SelectDoseModal', () => {
     fireEvent.click(d2Btn!);
 
     await waitFor(() => {
-      const med = readMeds()[0];
+      const med = readPersistedMedications()[0];
       // d1 untouched
       expect(med.doseConsumptionHistory?.d1).toBe(TEST_DATE);
       expect(readLogs().filter((l) => l.type === 'skipped_day' && l.doseId === 'd1')).toHaveLength(
@@ -349,7 +347,7 @@ describe('App — Take → Restore → Take → Restore for the SAME doseId (car
 
     await restoreDoseViaCardModal('d1');
     await waitFor(() => {
-      const med = readMeds()[0];
+      const med = readPersistedMedications()[0];
       expect(med.doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
       expect(med.doseConsumptionHistory?.d1).toBeUndefined();
       const restores = readLogs().filter(
@@ -365,7 +363,7 @@ describe('App — Take → Restore → Take → Restore for the SAME doseId (car
 
     await takeDoseViaCard('d1');
     await waitFor(() => {
-      const med = readMeds()[0];
+      const med = readPersistedMedications()[0];
       expect(med.doseConsumptionHistory?.d1).toBe(getTodayDateString());
       expect(med.doseSkippedHistory?.d1).toBeUndefined();
       const taken = readLogs().filter(
@@ -381,7 +379,7 @@ describe('App — Take → Restore → Take → Restore for the SAME doseId (car
 
     await restoreDoseViaCardModal('d1');
     await waitFor(() => {
-      const med = readMeds()[0];
+      const med = readPersistedMedications()[0];
       expect(med.doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
       expect(med.doseConsumptionHistory?.d1).toBeUndefined();
       const restores = readLogs().filter(

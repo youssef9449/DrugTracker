@@ -12,15 +12,22 @@ export function usePharmacyShoppingSelection({
   const urgentMeds = useMemo(() => {
     return medications.filter((m) => {
       const { status } = calculateMedicationStatus(m);
-      return status === 'out_of_stock' || status === 'critical' || status === 'warning';
+      return status === 'out_of_stock' || status === 'critical';
     });
   }, [medications]);
   const [showAllForPlanning, setShowAllForPlanning] = useState(false);
   const [removedFromShoppingIds, setRemovedFromShoppingIds] = useState<Set<string>>(new Set());
   const [deselectedIds, setDeselectedIds] = useState<Set<string>>(new Set());
   const effectiveShowAll = showAllForPlanning;
-  const displayList = (effectiveShowAll ? medications : urgentMeds)
-    .filter((medication) => !removedFromShoppingIds.has(medication.id));
+  // Stable identity so downstream order/message memos are not defeated by
+  // a fresh array on every parent render (#550 memoization boundary).
+  const displayList = useMemo(
+    () =>
+      (effectiveShowAll ? medications : urgentMeds).filter(
+        (medication) => !removedFromShoppingIds.has(medication.id)
+      ),
+    [effectiveShowAll, medications, urgentMeds, removedFromShoppingIds]
+  );
   const [selectedMedIds, setSelectedMedIds] = useState<Set<string>>(() => {
     return new Set(urgentMeds.map((m) => m.id));
   });

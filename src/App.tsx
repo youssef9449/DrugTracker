@@ -52,7 +52,7 @@ export default function App() {
   } = runtimeState;
 
   const { navigateToTab, selectTab, registerBackOverlay } = useAppBackNavigation(activeTab, setActiveTab);
-  const { alarmingMedication, alarmingDoseId, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
+  const { alarmingMedication, alarmingDoseId, openAlarm, dismissAlarm, snoozeAlarm } = useDoseReminders({
     medications,
     allowManualTakeActionByMedicationId,
   });
@@ -60,7 +60,6 @@ export default function App() {
 
   const {
     handleConfirmRefill,
-    handleUndoRefill,
     handleToggleAutoDeduct,
     handleToggleGlobalAutoDeduct,
     handleConfirmAutoDeductPrompt,
@@ -119,7 +118,6 @@ export default function App() {
 
   const {
     medicationsWithStatus,
-    lastRefillByMed,
     filteredMedications,
     alertsCount,
     sufficientCount,
@@ -179,51 +177,58 @@ export default function App() {
         />
 
         <AppTabContent
-          activeTab={activeTab}
-          filter={filter}
-          searchQuery={searchQuery}
-          medications={medications}
-          logs={logs}
-          pharmacySettings={pharmacySettings}
-          isCompactView={isCompactView}
-          medicationSortField={medicationSortField}
-          medicationSortDirection={medicationSortDirection}
-          soundEnabled={soundEnabled}
-          medicationsWithStatus={medicationsWithStatus}
-          filteredMedications={filteredMedications}
-          alertsCount={alertsCount}
-          sufficientCount={sufficientCount}
-          lastRefillByMed={lastRefillByMed}
-          userContacts={userContacts}
-          userAddresses={userAddresses}
-          showToast={showToast}
-          setFilter={setFilter}
-          setSearchQuery={setSearchQuery}
-          setMedicationSortField={setMedicationSortField}
-          setMedicationSortDirection={setMedicationSortDirection}
-          setIsCompactView={setIsCompactView}
-          setPharmacySettings={setPharmacySettings}
-          setEditingMedication={setEditingMedication}
-          setIsAddModalOpen={setIsAddModalOpen}
-          setRefillMedication={setRefillMedication}
-          setHistoryMedication={setHistoryMedication}
-          navigateToTab={navigateToTab}
-          registerBackOverlay={registerBackOverlay}
-          openAdd={openAdd}
-          handleDeleteMedication={handleDeleteMedication}
-          handleToggleAutoDeduct={handleToggleAutoDeduct}
-          handleToggleMedicationReminder={handleToggleMedicationReminder}
-          handleToggleMedicationCriticalStockAlerts={handleToggleMedicationCriticalStockAlerts}
-          handleConsumeDose={handleConsumeDose}
-          handleCardRestoreDose={handleCardRestoreDose}
-          handleUndoRefill={handleUndoRefill}
-          testAlarm={testAlarm}
-          handleSavePharmacy={handleSavePharmacy}
-          handleDeletePharmacy={handleDeletePharmacy}
-          handleSaveUserContact={handleSaveUserContact}
-          handleDeleteUserContact={handleDeleteUserContact}
-          handleSaveUserAddress={handleSaveUserAddress}
-          handleDeleteUserAddress={handleDeleteUserAddress}
+          stock={{
+            medications,
+            logs,
+            medicationsWithStatus,
+            filteredMedications,
+            alertsCount,
+            sufficientCount,
+            filter,
+            searchQuery,
+            isCompactView,
+            medicationSortField,
+            medicationSortDirection,
+            soundEnabled,
+          }}
+          stockActions={{
+            setFilter,
+            setSearchQuery,
+            setMedicationSortField,
+            setMedicationSortDirection,
+            setIsCompactView,
+            setEditingMedication,
+            setIsAddModalOpen,
+            setRefillMedication,
+            setHistoryMedication,
+            openAdd,
+            handleDeleteMedication,
+            handleToggleAutoDeduct,
+            handleToggleMedicationReminder,
+            handleToggleMedicationCriticalStockAlerts,
+            handleConsumeDose,
+            handleCardRestoreDose,
+          }}
+          pharmacy={{
+            pharmacySettings,
+            setPharmacySettings,
+            handleSavePharmacy,
+            handleDeletePharmacy,
+          }}
+          userData={{
+            userContacts,
+            userAddresses,
+            handleSaveUserContact,
+            handleDeleteUserContact,
+            handleSaveUserAddress,
+            handleDeleteUserAddress,
+          }}
+          navigation={{
+            activeTab,
+            navigateToTab,
+            registerBackOverlay,
+            showToast,
+          }}
         />
 
         {activeTab === 'stock' && <AndroidFab onClick={openAdd} />}

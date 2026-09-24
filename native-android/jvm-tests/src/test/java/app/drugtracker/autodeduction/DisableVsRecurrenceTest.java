@@ -25,6 +25,9 @@ public class DisableVsRecurrenceTest {
     @Before
     public void setUp() {
         Phase2TestSupport.clearAllDurableState();
+        Phase2TestSupport.seedAutoStock("med-a", 10.0);
+        Phase2TestSupport.seedAutoStock("med-b", 10.0);
+        Phase2TestSupport.seedAutoStock("med-c", 10.0);
         scheduler = new AutoDeductionScheduler(Phase2TestSupport.appContext());
     }
 

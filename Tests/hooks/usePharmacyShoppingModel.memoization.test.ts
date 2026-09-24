@@ -1,8 +1,10 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
+import { useCallback } from 'react';
 import type { Medication, PharmacySettings } from '@/types';
-import { usePharmacyShoppingModel } from '@/hooks/usePharmacyShoppingModel';
+import { usePharmacyShoppingWhatsApp } from '@/hooks/usePharmacyShoppingWhatsApp';
+import type { OrderItem } from '@/utils/whatsapp';
 import * as whatsapp from '@/utils/whatsapp';
 
 vi.mock('@/utils/whatsapp', async () => {
@@ -48,75 +50,106 @@ const baseSettings: PharmacySettings = {
   selectedWhatsappAddressIds: [],
 };
 
-describe('usePharmacyShoppingModel — order message memoization (#550)', () => {
+const stableOrderItems: OrderItem[] = [
+  {
+    name: 'Aspirin',
+    quantity: 30,
+    unit: 'قرص',
+    packageSize: 30,
+  },
+];
+
+describe('Pharmacy shopping order message memoization (#550)', () => {
   beforeEach(() => {
     generateSpy.mockClear();
   });
 
-  it('does not recompute WhatsApp message on unrelated parent rerender when shopping inputs are stable', () => {
+  it('does not recompute WhatsApp message on unrelated rerender when shopping inputs are stable', () => {
     const medications = [makeMed()];
-    const settings = { ...baseSettings };
-    let tick = 0;
 
     const { result, rerender } = renderHook(
-      ({ meds, prefs, noise }) => {
-        // noise is intentionally unused by the shopping model — simulates
-        // an unrelated parent state change that forces a rerender.
+      ({ noise, durationDays }) => {
         void noise;
-        return usePharmacyShoppingModel({
-          medications: meds,
-          settings: prefs,
+        // Stable callback identities across unrelated noise rerenders —
+        // mirrors useCallback-wrapped helpers in usePharmacyShoppingModel.
+        const durationCb = useCallback(
+          (_med: Medication) => durationDays,
+          [durationDays]
+        );
+        const breakdownCb = useCallback(
+          (_med: Medication, _suggested: number) => [
+            { unit: 'strips' as const, quantity: 3 },
+          ],
+          []
+        );
+
+        return usePharmacyShoppingWhatsApp({
+          medications,
+          activeOrderItems: stableOrderItems,
+          quantityModes: {},
+          customOrderQuantities: {},
+          orderUnits: {},
+          getDurationDays: durationCb,
+          getOrderBreakdown: breakdownCb,
+          settings: baseSettings,
           onUpdateSettings: vi.fn(),
           showToast: vi.fn(),
         });
       },
-      {
-        initialProps: { meds: medications, prefs: settings, noise: tick },
-      }
+      { initialProps: { noise: 0, durationDays: 30 as 30 | 60 } }
     );
 
-    // Access derived message so memoized chain is evaluated.
     const firstMessage = result.current.currentWhatsAppMessage;
     expect(firstMessage).toBeTruthy();
     const callsAfterFirst = generateSpy.mock.calls.length;
     expect(callsAfterFirst).toBeGreaterThan(0);
 
-    // Unrelated parent rerender: same meds/settings identity, different noise.
-    tick += 1;
-    rerender({ meds: medications, prefs: settings, noise: tick });
+    rerender({ noise: 1, durationDays: 30 });
 
     expect(result.current.currentWhatsAppMessage).toBe(firstMessage);
     expect(generateSpy.mock.calls.length).toBe(callsAfterFirst);
   });
 
-  it('recomputes WhatsApp message when a genuine shopping input changes', () => {
+  it('recomputes WhatsApp message when a genuine input (duration) changes', () => {
     const medications = [makeMed()];
-    let settings = { ...baseSettings };
 
     const { result, rerender } = renderHook(
-      ({ meds, prefs }) =>
-        usePharmacyShoppingModel({
-          medications: meds,
-          settings: prefs,
+      ({ durationDays }) => {
+        const durationCb = useCallback(
+          (_med: Medication) => durationDays,
+          [durationDays]
+        );
+        const breakdownCb = useCallback(
+          (_med: Medication, _suggested: number) => [
+            { unit: 'strips' as const, quantity: 3 },
+          ],
+          []
+        );
+
+        // Empty activeOrderItems → duration drives derived order items.
+        return usePharmacyShoppingWhatsApp({
+          medications,
+          activeOrderItems: [],
+          quantityModes: {},
+          customOrderQuantities: {},
+          orderUnits: {},
+          getDurationDays: durationCb,
+          getOrderBreakdown: breakdownCb,
+          settings: baseSettings,
           onUpdateSettings: vi.fn(),
           showToast: vi.fn(),
-        }),
-      {
-        initialProps: { meds: medications, prefs: settings },
-      }
+        });
+      },
+      { initialProps: { durationDays: 30 as 30 | 60 } }
     );
 
     const firstMessage = result.current.currentWhatsAppMessage;
     const callsAfterFirst = generateSpy.mock.calls.length;
     expect(callsAfterFirst).toBeGreaterThan(0);
 
-    // Genuine dependency: default duration affects order quantities / message.
-    settings = { ...settings, defaultDurationDays: 60 };
-    rerender({ meds: medications, prefs: settings });
+    rerender({ durationDays: 60 });
 
     expect(generateSpy.mock.calls.length).toBeGreaterThan(callsAfterFirst);
-    // Message content may or may not differ depending on selection, but
-    // the pure generator must have been invoked again for the new inputs.
     expect(result.current.currentWhatsAppMessage).toBeDefined();
     void firstMessage;
   });

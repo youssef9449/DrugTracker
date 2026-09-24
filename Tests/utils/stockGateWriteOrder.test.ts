@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => {
     persistLastAppliedMutationSeq: vi.fn(),
     loadString: vi.fn(),
     loadJson: vi.fn(),
+    readJsonOutcome: vi.fn(() => ({ status: 'missing' })),
+    loadValidatedJson: vi.fn((_key: string, _parse: unknown, fallback: unknown) => fallback),
   };
 });
 
@@ -27,7 +29,21 @@ vi.mock('../../src/utils/storage', () => ({
   persist: mocks.persist,
   loadJson: mocks.loadJson,
   loadString: mocks.loadString,
+  readJsonOutcome: mocks.readJsonOutcome,
+  loadValidatedJson: mocks.loadValidatedJson,
 }));
+
+vi.mock('../../src/utils/pruneDoseConsumption', () => ({
+  pruneConsumptionLogs: vi.fn((logs: unknown[]) => logs),
+  pruneDoseConsumption: vi.fn((m: unknown) => m),
+}));
+
+vi.mock('../../src/utils/dateCalculations', async () => {
+  const actual = await vi.importActual<typeof import('../../src/utils/dateCalculations')>(
+    '../../src/utils/dateCalculations'
+  );
+  return actual;
+});
 
 vi.mock('../../src/utils/stockMutationOrdering', async () => {
   const actual = await vi.importActual<typeof import('../../src/utils/stockMutationOrdering')>(

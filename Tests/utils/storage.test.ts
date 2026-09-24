@@ -2,43 +2,65 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   isValidConsumptionLogRecord,
   isValidMedicationRecord,
-  loadJson,
+  loadValidatedJson,
   loadString,
+  readJsonOutcome,
   readStorageItem,
   saveJson,
   saveString,
   persist,
+  type StorageJsonOutcome,
 } from '@/utils/storage';
 
 beforeEach(() => {
   localStorage.clear();
 });
 
-describe('loadJson', () => {
+describe('readJsonOutcome / loadValidatedJson (runtime-validated reads)', () => {
+  const passthrough = (raw: unknown) => raw as { a: number } | null;
+
   it('returns the parsed value when the key exists', () => {
     localStorage.setItem('k', JSON.stringify({ a: 1 }));
-    expect(loadJson('k', null)).toEqual({ a: 1 });
+    expect(readJsonOutcome('k', passthrough)).toEqual({ status: 'ok', value: { a: 1 } });
   });
 
-  it('returns the fallback when the key is absent', () => {
-    expect(loadJson('missing', { a: 1 })).toEqual({ a: 1 });
-    expect(loadJson('missing', null)).toBeNull();
-    expect(loadJson('missing', [])).toEqual([]);
+  it('reports missing when the key is absent', () => {
+    expect(readJsonOutcome('missing', passthrough)).toEqual({ status: 'missing' });
+    expect(loadValidatedJson('missing', passthrough, { a: 1 })).toEqual({ a: 1 });
   });
 
-  it('returns the fallback when parsing fails', () => {
+  it('reports invalid (not fallback-silently) when parsing fails', () => {
     localStorage.setItem('k', 'not-json{');
-    expect(loadJson('k', 'fallback')).toBe('fallback');
+    const outcome = readJsonOutcome('k', passthrough);
+    expect(outcome.status).toBe('invalid');
+    expect(loadValidatedJson('k', passthrough, 'fallback')).toBe('fallback');
   });
 
-  it('preserves array types', () => {
-    localStorage.setItem('arr', JSON.stringify([1, 2, 3]));
-    expect(loadJson<number[]>('arr', [])).toEqual([1, 2, 3]);
+  it('reports invalid when the runtime validator rejects the shape', () => {
+    localStorage.setItem('k', JSON.stringify({ wrong: 'shape' }));
+    const outcome = readJsonOutcome<{ a: number }>(
+      'k',
+      (raw) => (raw && typeof raw === 'object' && (raw as { a?: unknown }).a === 1 ? (raw as { a: number }) : null)
+    );
+    expect(outcome.status).toBe('invalid');
   });
 
-  it('stores null as a valid JSON value (distinguishes null from absent)', () => {
+  it('treats null as a valid JSON value distinct from missing', () => {
     localStorage.setItem('k', 'null');
-    expect(loadJson('k', 'fallback')).toBeNull();
+    const outcome = readJsonOutcome<string | null>('k', (raw) => raw as string | null);
+    expect(outcome).toEqual({ status: 'ok', value: null });
+  });
+
+  it('reports read_failed when storage itself throws', () => {
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('boom');
+    });
+    try {
+      const outcome: StorageJsonOutcome<unknown> = readJsonOutcome('k', passthrough);
+      expect(outcome.status).toBe('read_failed');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

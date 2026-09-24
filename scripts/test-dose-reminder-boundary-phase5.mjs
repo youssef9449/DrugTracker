@@ -38,6 +38,7 @@ for (const file of productionDoseFiles) {
 }
 
 const app = read('src/App.tsx');
+const appState = read('src/hooks/useAppRuntimeState.ts');
 const scheduler = read('src/hooks/useDoseReminderScheduler.ts');
 const controller = read('src/hooks/useDoseReminders.ts');
 const handlers = read('src/hooks/useNativeActionHandlers.ts');
@@ -48,9 +49,9 @@ const lifecycle = read('native-android/alarm-runtime/DoseReminderAlarmFeature.ja
 const runtime = read('native-android/alarm-runtime/ExactAlarmRuntime.java');
 
 assert(
-  app.includes('allowManualTakeActionByMedicationId') &&
-  app.includes('medication.autoDeductEnabled === false'),
-  'App/business layer must translate its own policy into the neutral capability'
+  appState.includes('allowManualTakeActionByMedicationId') &&
+  appState.includes('medication.autoDeductEnabled === false'),
+  'App runtime state must translate its own policy into the neutral capability'
 );
 assert(
   scheduler.includes('allowManualTakeActionByMedicationId') &&

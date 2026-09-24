@@ -7,6 +7,7 @@ import {
   buildWhatsAppUrl,
   type OrderItem,
 } from '../utils/whatsapp';
+import { shoppingRequestedPills } from '../utils/pharmacyShoppingCalculations';
 import type { CustomOrderQuantities, OrderUnit, QuantityMode } from '../utils/pharmacyShoppingCalculations';
 
 export interface UsePharmacyShoppingWhatsAppOptions {
@@ -16,6 +17,7 @@ export interface UsePharmacyShoppingWhatsAppOptions {
   customOrderQuantities: CustomOrderQuantities;
   orderUnits: Record<string, OrderUnit[]>;
   getDurationDays: (medication: Medication) => number;
+  getOrderBreakdown: (medication: Medication, suggestedPills: number) => { unit: OrderUnit; quantity: number }[];
   settings: PharmacySettings;
   onUpdateSettings: (settings: PharmacySettings) => void;
   showToast: (message: string) => void;
@@ -29,6 +31,7 @@ export function usePharmacyShoppingWhatsApp({
   customOrderQuantities,
   orderUnits,
   getDurationDays,
+  getOrderBreakdown,
   settings,
   onUpdateSettings,
   showToast,
@@ -65,7 +68,7 @@ export function usePharmacyShoppingWhatsApp({
         orderBreakdown: getOrderBreakdown(med, suggestedPills),
       };
     });
-  }, [activeOrderItems, medications, medicationPeriods, quantityModes, customOrderQuantities, orderUnits, settings.defaultDurationDays]);
+  }, [activeOrderItems, medications, quantityModes, customOrderQuantities, orderUnits, getDurationDays, getOrderBreakdown]);
   const currentWhatsAppMessage = useMemo(() => {
     return generatePharmacyOrderMessage(
       orderItemsForMessage,
@@ -126,5 +129,23 @@ export function usePharmacyShoppingWhatsApp({
     showToast('اختر الصيدلية ثم افتح واتساب لإرسال الطلب.');
   };
 
-
+  return {
+    pharmacies,
+    selectedPharmacy,
+    whatsappContacts,
+    whatsappAddresses,
+    selectedWhatsappContactIds,
+    selectedWhatsappAddressIds,
+    orderItemsForMessage,
+    currentWhatsAppMessage,
+    isSendModalOpen,
+    setIsSendModalOpen,
+    hasPharmacyPhone,
+    displayPhone,
+    selectedCount,
+    targetWaUrl,
+    handleSendToWhatsApp,
+    toggleWhatsappContact,
+    toggleWhatsappAddress,
+  };
 }

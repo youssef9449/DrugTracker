@@ -11,7 +11,11 @@ import {
 } from './notifications/notificationPermissions';
 import { getExactAlarmPermission, type ExactAlarmPermission } from './exactAlarm';
 import { initNativeBridge } from '../native';
-import { getNotificationChannelState, retryPersistedNotificationDeliveries } from './notificationRuntime';
+import {
+  ensureNotificationChannel,
+  getNotificationChannelState,
+  retryPersistedNotificationDeliveries,
+} from './notificationRuntime';
 import {
   DOSE_REMINDER_CHANNEL_ID,
   DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
@@ -294,6 +298,28 @@ export async function initializeNativeRuntime(
 ): Promise<void> {
   await initNativeBridge();
   void retryPersistedNotificationDeliveries();
+
+  // #503: bootstrap the required Dose Reminder channels BEFORE their
+  // existence is used as a scheduling gate. Notification Runtime owns
+  // channel creation; Dose Reminder owns its channel descriptors. On a
+  // clean install the channels are created deterministically here, so a
+  // valid persisted preference is never flipped to disabled merely because
+  // the channels did not exist yet. A genuinely disabled channel or an OS
+  // notification denial still reports 'disabled' after bootstrap.
+  await Promise.all([
+    ensureNotificationChannel({
+      channelId: DOSE_REMINDER_CHANNEL_ID,
+      channelName: DOSE_REMINDER_CHANNEL_ID,
+      channelImportance: 4,
+    }),
+    ensureNotificationChannel({
+      channelId: DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+      channelName: DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+      channelImportance: 2,
+    }),
+  ]).catch((err) => {
+    console.warn('[App] Dose Reminder channel bootstrap failed:', err);
+  });
 
   const [backgroundChannel, foregroundChannel] = await Promise.all([
     getNotificationChannelState(DOSE_REMINDER_CHANNEL_ID),

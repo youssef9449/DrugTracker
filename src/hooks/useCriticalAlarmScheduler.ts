@@ -115,108 +115,40 @@ export interface UseCriticalAlarmSchedulerOptions {
 /**
  * One-shot critical-alarm scheduling effect.
  *
- * For each SUFFICIENT medication whose projected critical date is in the
- * future, schedules a SINGLE one-shot exact alarm at that date through
- * CriticalStockAlarmAdapter → ExactAlarmRuntime. The alarm fires
- * even if the app is killed; system lifecycle recovery is handled by
- * DrugTrackerAlarmSystemReceiver → ExactAlarmLifecycle.
+ * Role split: {@link evaluateCriticalStockPolicy} is the business decision
+ * source of truth (episode boundaries, claim interpretation, delivery mode);
+ * this hook is ONLY the executor that arms/cancels the native alarm and
+ * persists schedule outcomes into claims. The foreground hook
+ * (useStockAlerts) consumes the same policy for immediate delivery.
  *
- * {@link evaluateCriticalStockPolicy} is the business decision source of
- * truth; this hook is only the EXECUTOR that arms/cancels the native alarm
- * and persists successful schedule outcomes. The foreground hook consumes
- * the same policy for immediate delivery.
+ * Local decision semantics (canonical cross-feature contract lives in
+ * docs/AUTO_DEDUCTION_ARCHITECTURE.md):
+ * - CRITICAL/out_of_stock: never schedule, never write claims; cancel any
+ *   alarm this session armed.
+ * - SUFFICIENT with future crossing T: verify a matching claim's native
+ *   alarm before trusting it; otherwise cancel + schedule; persist
+ *   { claimed: true, alarmTime: T } only after a verified successful
+ *   schedule; any failure writes { claimed: false, alarmTime: null } so the
+ *   foreground fallback stays available.
+ * - SUFFICIENT with no crossing: cancel this session's alarm; claim
+ *   lifecycle is the foreground hook's decision.
+ * - criticalStockAlertsEnabled false: cancel everything this session or a
+ *   previous session may have armed; no claim writes.
+ * - Deleted medications: alarms cancelled; claims removed by the foreground
+ *   hook.
  *
- * Decision table (per med, per effect run):
+ * Reconciliation: claims are business dedup state, NOT proof a native alarm
+ * exists — every matching claim is verified against the platform
+ * (verifyCriticalAlarmPending) and repaired (cancel + re-schedule) when
+ * unverifiable. Runs on cold start, every resume (resumeTick), and every
+ * alarm-relevant medication change (criticalSignature). Reconciliation never
+ * sends a notification and never creates a duplicate.
  *
- *   Med CRITICAL / out_of_stock:
- *     NEVER schedule (the foreground hook owns the active episode's
- *     notification), never write claims for it. Any alarm this session
- *     armed for the med (it was sufficient when armed) is cancelled.
- *
- *   Med SUFFICIENT with a future projected crossing at T:
- *     claim matches { claimed: true, alarmTime: T } → VERIFY the native
- *       alarm actually exists (verifyCriticalAlarmPending): verified →
- *       keep it, nothing to do; unverifiable/missing → the repair chain
- *       below re-arms it (cancel + schedule); success → the claim stays
- *       { claimed: true, alarmTime: T }, failure → { claimed: false,
- *       alarmTime: null } so the foreground fallback stays available.
- *     otherwise → cancel the previous alarm, schedule at T; on success
- *       persist { claimed: true, alarmTime: T } — ONLY after
- *       scheduleCriticalAlarm() resolves successfully (which now also
- *       requires the plugin's ScheduleResult to actually list the
- *       notification); on failure persist { claimed: false,
- *       alarmTime: null } so the foreground fallback stays available.
- *       A failed schedule NEVER suppresses the fallback.
- *
- *   Med SUFFICIENT with no future crossing (frozen: auto-deduct off, or
- *   dailyDose <= 0):
- *     cancel any alarm this session armed — nothing will cross the
- *     threshold without user action. The claim is NOT touched here:
- *     the policy identifies whether the claim is stale; the foreground
- *     coordinator applies that decision because it is the delivery path
- *     responsible for foreground persistence.
- *
- *   criticalStockAlertsEnabled false:
- *     cancel every possibly-armed critical alarm (this session's and any
- *     left over from a previous session, found via the claim map). No
- *     claim writes — the claim's business lifecycle belongs to
- *     useStockAlerts (a Sufficient med's claim is cleared there
- *     synchronously; re-enabling re-arms from a clean slate).
- *     Dose-reminder preference (notificationsEnabled) does not gate
- *     critical alarms.
- *
- *   Deleted medications: their alarms are cancelled (their claim entries
- *   are removed by the foreground hook).
- *
- * OWNERSHIP (important): this hook is the native-alarm EXECUTOR only.
- * Episode boundaries and claim interpretation belong to the shared
- * Critical Stock policy. This executor never clears a persistent claim
- * because a medication became Sufficient/frozen/disabled. Its only claim
- * writes are schedule outcomes for a sufficient med with a future crossing:
- * success → { claimed: true, alarmTime: T }, failure →
- * { claimed: false, alarmTime: null } (opportunity stays open).
- *
- * RECONCILIATION ("armed" is verified, never assumed): the persistent
- * claim is business DEDUP state — it does NOT prove the native alarm
- * still exists. Android can drop previously-scheduled alarms
- * (SCHEDULE_EXACT_ALARM revoked, force-stop, OEM task killers, the
- * scheduled notification otherwise removed), so a matching claim is
- * verified against the platform (verifyCriticalAlarmPending:
- * display permission + exact-alarm setting + the plugin's pending
- * list — see that function for the exact guarantees and their
- * documented platform limits). Verified → keep (no re-arm, no
- * duplicate). Unverifiable or missing → cancel + re-schedule; a
- * successful repair re-establishes the evidence, a failed repair opens
- * the claim so the foreground fallback remains available. Reconciliation
- * runs on every effect run: cold start (initial mount), every resume
- * (resumeTick — returning from the exact-alarm settings screen re-arms
- * what the OS dropped), and every alarm-relevant medication change.
- * Reconciliation NEVER sends a user-facing notification and NEVER
- * creates a duplicate: it only cancels/schedules native alarms under
- * the one stable id and writes the same two claim shapes as any other
- * schedule outcome.
- *
- * Re-schedule triggers: the effect re-runs whenever any field that
- * affects the projected critical date changes (id, currentPills,
- * dailyDose, warningThresholdDays, autoDeductEnabled,
- * name, unit) — see `criticalSignature`.
- *
- * Async race safety (all in-memory, nothing persisted for it):
- *   - Per-medication serialization: every native cancel/schedule runs on
- *     the shared per-medication operation queue
- *     (OperationQueue), so operations for one medication never
- *     interleave (they share one stable native notification id).
- *   - Generation counter: each effect run bumps a per-med generation; a
- *     chained operation captures its generation and abandons everything
- *     (cancelling only its own just-armed alarm, writing nothing) when a
- *     newer run superseded it while it awaited the bridge.
- *   - Post-schedule re-verification (one synchronous block, before any
- *     claim write): the medication must still exist, still be
- *     sufficient, and still project the SAME critical date. If the world
- *     moved (episode started/ended, med edited/deleted), the operation
- *     cancels the alarm it just armed and leaves the claim to the
- *     current owner — a stale operation can never overwrite newer
- *     business state or resurrect a dead episode's alarm.
+ * Async race safety: per-medication operation serialization +
+ * generation counters (see criticalAlarmOperations) and a synchronous
+ * post-schedule re-verification block before any claim write, so a stale
+ * operation can never overwrite newer business state.
+ */
  */
 export function useCriticalAlarmScheduler({
   medications,

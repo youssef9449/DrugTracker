@@ -543,6 +543,21 @@ public final class NotificationRuntime {
                 flags);
     }
 
+    /**
+     * Channel bootstrap WITHOUT posting (#503): the runtime owns channel
+     * creation/presentation mechanics; a startup orchestrator may create the
+     * channels a feature requires BEFORE those channels' existence is used as
+     * a capability gate. Creating a missing channel is deterministic;
+     * existing channels are left untouched (no importance downgrades).
+     */
+    public void createChannelIfAbsent(
+            String channelId,
+            String channelName,
+            int importance,
+            int visibility) {
+        ensureChannel(channelId, channelName, importance, visibility);
+    }
+
     private void ensureChannel(
             String channelId,
             String channelName,

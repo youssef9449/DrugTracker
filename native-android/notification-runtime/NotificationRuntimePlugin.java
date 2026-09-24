@@ -163,6 +163,36 @@ public final class NotificationRuntimePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void ensureChannel(PluginCall call) {
+        // #503: startup channel bootstrap before capability gating.
+        String channelId = call.getString("channelId", "");
+        String channelName = call.getString("channelName", channelId);
+        Integer importance = call.getInt("channelImportance", 4);
+        Integer visibility = call.getInt("channelVisibility", 1);
+        JSObject ret = new JSObject();
+        if (channelId == null || channelId.isEmpty()) {
+            ret.put("ok", false);
+            ret.put("error", "invalid_request");
+            ret.put("code", "invalid_request");
+            call.resolve(ret);
+            return;
+        }
+        try {
+            new NotificationRuntime(getContext()).createChannelIfAbsent(
+                    channelId,
+                    channelName,
+                    importance == null ? 4 : importance,
+                    visibility == null ? 1 : visibility);
+            ret.put("ok", true);
+        } catch (Exception e) {
+            ret.put("ok", false);
+            ret.put("error", "channel_bootstrap_failed");
+            ret.put("code", "channel_bootstrap_failed");
+        }
+        call.resolve(ret);
+    }
+
+    @PluginMethod
     public void checkChannel(PluginCall call) {
         String channelId = call.getString("channelId", "");
         boolean enabled = new NotificationRuntime(getContext())

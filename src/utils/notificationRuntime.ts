@@ -41,6 +41,12 @@ interface NotificationRuntimePlugin {
   cancel(options: { namespace: string; identity: string }): Promise<{ ok: boolean; error?: string; code?: string }>;
   checkPermission(): Promise<{ enabled: boolean }>;
   checkChannel(options: { channelId: string }): Promise<{ enabled: boolean }>;
+  ensureChannel(options: {
+    channelId: string;
+    channelName: string;
+    channelImportance: number;
+    channelVisibility?: number;
+  }): Promise<{ ok: boolean; error?: string; code?: string }>;
   retryPersistedNotificationDeliveries(): Promise<{ retried: number }>;
   addListener(
     eventName: 'notificationReceived' | 'notificationActionPerformed',
@@ -414,6 +420,29 @@ export async function getNotificationChannelState(
   } catch (error) {
     console.warn('[notification-runtime] channel capability check failed:', error);
     return 'unknown';
+  }
+}
+
+/**
+ * Channel bootstrap without posting (#503): startup creates the channels a
+ * feature requires BEFORE channel existence is evaluated as a capability
+ * gate, so a clean install cannot disable a valid preference merely because
+ * the channels were never created. Notification Runtime owns creation;
+ * callers supply their own feature-owned channel descriptors.
+ */
+export async function ensureNotificationChannel(options: {
+  channelId: string;
+  channelName: string;
+  channelImportance: 1 | 2 | 3 | 4 | 5;
+  channelVisibility?: number;
+}): Promise<boolean> {
+  if (!isAndroidNotificationRuntime()) return true;
+  try {
+    const result = await NotificationRuntime.ensureChannel(options);
+    return result?.ok === true;
+  } catch (error) {
+    console.warn('[notification-runtime] channel bootstrap failed:', error);
+    return false;
   }
 }
 

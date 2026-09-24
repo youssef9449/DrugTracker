@@ -588,73 +588,19 @@ public final class AutoDeductionEventStore {
     }
 
     /**
-     * Compact terminal event rows while preserving unresolved FIRED evidence.
-     *
-     * <p>RECONCILED rows are bounded by calendar date. REJECTED rows have no
-     * trustworthy occurrence identity by design, so they use their durable
-     * rejectedAt timestamp and a fixed retention window instead.</p>
+     * Compact terminal event rows — delegates to the dedicated compaction
+     * collaborator (#489); result/error semantics unchanged.
      */
     public CompactionResult compactTerminalEvents(
             String cutoffCalendarDate,
             java.util.Set<String> protectedOccurrenceKeys) {
-        if (!AutoDeductionContract.isValidCalendarDate(cutoffCalendarDate)) {
-            return CompactionResult.failure("invalid_cutoff", 0);
-        }
-        final long rejectedCutoffEpochMs =
-                System.currentTimeMillis()
-                        - (AutoDeductionContract.REJECTED_TERMINAL_RETENTION_DAYS
-                        * 24L * 60L * 60L * 1000L);
-        int removed = 0;
-        synchronized (LOCK) {
-            SharedPreferences.Editor editor = null;
-            for (Map.Entry<String, ?> entry : persistence.getAllEvents().entrySet()) {
-                if (!entry.getKey().startsWith(KEY_EVENT_PREFIX)
-                        || !(entry.getValue() instanceof String)) {
-                    continue;
-                }
-                String raw = (String) entry.getValue();
-                AutoDeductionPersistenceCodec.DecodeResult decoded =
-                        AutoDeductionPersistenceCodec.decodeEvent(raw);
-
-                if (AutoDeductionContract.STATUS_REJECTED.equals(decoded.status)) {
-                    Long rejectedAt = AutoDeductionPersistenceCodec.rejectedAtEpochMs(raw);
-                    // REJECTED is irrecoverable. Malformed REJECTED rows that
-                    // lack a timestamp are therefore safe to discard on a compaction
-                    // pass instead of becoming immortal terminal garbage.
-                    if (rejectedAt == null || rejectedAt.longValue() < rejectedCutoffEpochMs) {
-                        if (editor == null) editor = persistence.eventEditor();
-                        editor.remove(entry.getKey());
-                        removed++;
-                    }
-                    continue;
-                }
-
-                AutoDeductionPersistenceModels.EventRecord record = decoded.record;
-                if (record == null
-                        || !AutoDeductionContract.STATUS_RECONCILED.equals(record.status)
-                        || record.occurrence == null
-                        || record.occurrence.calendarDate.compareTo(cutoffCalendarDate) >= 0) {
-                    continue;
-                }
-                String occurrenceKey = record.occurrence.canonicalKey();
-                if (protectedOccurrenceKeys != null
-                        && protectedOccurrenceKeys.contains(occurrenceKey)) {
-                    continue;
-                }
-                if (editor == null) editor = persistence.eventEditor();
-                editor.remove(entry.getKey());
-                removed++;
-            }
-            if (editor != null) {
-                if (!failurePolicy.allowTerminalStateCompactionCommit()
-                        || !editor.commit()) {
-                    return CompactionResult.failure(
-                            "terminal_event_compaction_commit_failed",
-                            removed);
-                }
-            }
-        }
-        return CompactionResult.success(removed);
+        return AutoDeductionEventCompaction.compactTerminalEvents(
+                persistence,
+                failurePolicy,
+                KEY_EVENT_PREFIX,
+                LOCK,
+                cutoffCalendarDate,
+                protectedOccurrenceKeys);
     }
 
     public EventLookupResult getFiredUnreconciledEvent(

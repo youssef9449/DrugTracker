@@ -479,3 +479,27 @@ FIRED event / JS reconciliation
 ```
 
 Forbidden Auto dependencies are explicit: NotificationRuntime, notification ID allocation/registry, notification channel definitions, notification posting/cancellation helpers, and Capacitor Local Notifications. The repository guard scripts/test-alarm-notification-boundary-phase6.mjs enforces this boundary together with the shared Exact Alarm Runtime / Notification Runtime separation.
+
+## Canonical architecture contract (cross-feature invariants)
+
+**This document is the CANONICAL source for cross-feature architecture invariants** (#488). Cross-module rules — the Shared Exact Alarm Core's feature neutrality, occurrence identity, FIRED/RECONCILED lifecycle, generation ownership, and stock-authority direction — are stated HERE once. Production source comments keep only LOCAL semantics (what a specific method does for its own module) and must not restate the full architecture. Structural test scripts assert stable boundaries (which classes exist, which packages may import which, which plugin owns which channel) rather than re-describing architecture prose, so no second full-architecture copy needs synchronized maintenance.
+
+## Native class size policy (#489)
+
+Responsibility-oriented decomposition is triggered when a native production class crosses EITHER threshold:
+
+- **~1000 LOC**, or
+- **more than one distinct responsibility** (concurrency, persistence, codec, state transitions, query/compaction, platform install) living in one class.
+
+Extractions performed under this policy (baseline d4fd441 → this branch):
+
+| Class | Extraction |
+| --- | --- |
+| `AutoDeductionEventStore` | JSON codec stays in `AutoDeductionPersistenceCodec`; key-identity parsing + read-model classification in `AutoDeductionEventQueries`; terminal-state compaction in `AutoDeductionEventCompaction` |
+| `AutoDeductionScheduler` | narrow capability ports in `AutoDeductionPorts` consumed by `AutoDeductionRecurrence`/`AutoDeductionRecovery` |
+| `AutoDeductionRecovery` | `restoreFutureSchedules` decomposed into snapshot/route/past/future/finalize phase methods |
+| `ExactAlarmRuntime` | `schedule` transaction decomposed into validation/ownership/metadata/install/finalize steps; restoration policy in `ExactAlarmRestorePolicy` |
+| `NotificationRuntime` | delivery unified in one `postInternal`; retry persistence + payload serialization isolated |
+
+Remaining oversized classes (`AutoDeductionScheduler` façade, `AutoDeductionRecurrence`, `AutoDeductionRecovery`) are decomposed internally by method; further class-level splits must follow the same responsibility boundaries above and preserve lock/order invariants.
+

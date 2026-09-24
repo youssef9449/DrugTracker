@@ -47,9 +47,6 @@ type TestManualStockEnvelope = Omit<ManualStockEnvelope, 'globalAutoDeductEnable
 
 const TODAY = '2026-09-16';
 
-function durableMatchesEnvelopeSnapshot(envelope: { medications: import('../../src/types').Medication[]; logs: import('../../src/types').ConsumptionLog[]; globalAutoDeductEnabled?: boolean }, durable: AutoStockDurableState): boolean {
-  return matchesDurableEnvelope({ ...envelope, globalAutoDeductEnabled: envelope.globalAutoDeductEnabled ?? false }, durable);
-}
 
 
 

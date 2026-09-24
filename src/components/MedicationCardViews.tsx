@@ -240,7 +240,6 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
     currentPills,
     stripsDesc,
     tag,
-    onOpenRefill,
     onEdit,
     onDelete,
     onToggleAutoDeduct,

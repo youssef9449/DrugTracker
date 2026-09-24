@@ -616,7 +616,19 @@ public class FireRetryScheduleTest {
                 saved.getStringExtra(AutoDeductionContract.EXTRA_CALENDAR_DATE));
         assertEquals(0,
                 saved.getIntExtra(AutoDeductionContract.EXTRA_FIRE_RETRY_COUNT, 0));
-        assertEquals(vg[0],
+        JSONObject successorMetadata = new JSONObject(
+                schedulePrefs().getString(
+                        "sch:" + AutoDeductionContract.occurrenceKey(
+                                "med", "dose", expectedNextDate),
+                        "{}"));
+        String successorVersion = successorMetadata.optString(
+                ExactAlarmContract.FIELD_OPERATION_VERSION,
+                "");
+        assertFalse("successor must have its own fresh operationVersion",
+                successorVersion.isEmpty());
+        assertEquals(
+                "PendingIntent must carry the successor's authoritative operationVersion",
+                successorVersion,
                 saved.getStringExtra(AutoDeductionContract.EXTRA_OPERATION_VERSION));
 
         // The retry evidence is no longer needed after both stock and successor
@@ -715,6 +727,11 @@ public class FireRetryScheduleTest {
                 new AutoDeductionFailurePolicy() {
                     @Override
                     public boolean allowEventCommit() {
+                        return false;
+                    }
+
+                    @Override
+                    public boolean allowPendingFireCommit() {
                         return false;
                     }
                 };

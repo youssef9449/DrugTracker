@@ -52,7 +52,7 @@ export default function App() {
   } = runtimeState;
 
   const { navigateToTab, selectTab, registerBackOverlay } = useAppBackNavigation(activeTab, setActiveTab);
-  const { alarmingMedication, alarmingDoseId, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
+  const { alarmingMedication, alarmingDoseId, openAlarm, dismissAlarm, snoozeAlarm } = useDoseReminders({
     medications,
     allowManualTakeActionByMedicationId,
   });
@@ -60,7 +60,6 @@ export default function App() {
 
   const {
     handleConfirmRefill,
-    handleUndoRefill,
     handleToggleAutoDeduct,
     handleToggleGlobalAutoDeduct,
     handleConfirmAutoDeductPrompt,
@@ -119,7 +118,6 @@ export default function App() {
 
   const {
     medicationsWithStatus,
-    lastRefillByMed,
     filteredMedications,
     alertsCount,
     sufficientCount,

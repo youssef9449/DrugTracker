@@ -8,6 +8,9 @@ import {
 import type { Medication } from '../types';
 import './MedicationCardMaterial.css';
 import { MedicationNotificationStatusBadge } from './medicationCardParts';
+import { MedicationOverflowMenu } from './MedicationOverflowMenu';
+export { MedicationOverflowMenu } from './MedicationOverflowMenu';
+export type { MedicationOverflowMenuProps } from './MedicationOverflowMenu';
 
 export interface MedicationMenuProps {
   medication: Medication;
@@ -40,8 +43,6 @@ export function MedicationTypeIcon({ unit, className = "h-3.5 w-3.5" }: { unit: 
   }
 }
 
-export { MedicationOverflowMenu } from './MedicationOverflowMenu';
-export type { MedicationOverflowMenuProps } from './MedicationOverflowMenu';
 
 export function MedicationMenu({
   medication,

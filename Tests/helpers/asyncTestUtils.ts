@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 /**
  * Shared async test helpers for Dose Reminder and related lifecycle tests.
  * Deterministic; no shared mutable clocks beyond what the caller provides.

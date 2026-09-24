@@ -1,4 +1,4 @@
-import { useReducer, useEffect, useMemo, useCallback, type FormEvent } from 'react';
+import { useReducer, useEffect, useMemo, useCallback, type FormEvent, type SetStateAction } from 'react';
 import type { Medication, MedicationDose } from '../types';
 import {
   totalDailyAmount,
@@ -9,7 +9,6 @@ import {
   calculatePackageConfiguration,
 } from '../utils/addMedicationFormCalculations';
 import {
-  type AddMedicationFormModel,
   addMedicationFormReducer,
   createDefaultFormModel,
 } from './addMedicationFormReducer';
@@ -233,8 +232,8 @@ export function useAddMedicationForm({
     setCurrentPillsStr: (v: string) =>
       dispatch({ type: 'SET_CURRENT_PILLS_STR', value: v }),
     dosesPerDay: dosage.dosesPerDay,
-    setDosesPerDay: (v: number) =>
-      dispatch({ type: 'SET_DOSES_PER_DAY', value: v }),
+    setDosesPerDay: (v: SetStateAction<number>) =>
+      dispatch({ type: 'SET_DOSES_PER_DAY', value: typeof v === 'function' ? v(dosage.dosesPerDay) : v }),
     doseSchedule: dosage.doseSchedule,
     setDoseSchedule: (v: MedicationDose[] | ((prev: MedicationDose[]) => MedicationDose[])) => {
       const next =
@@ -275,22 +274,23 @@ export function useAddMedicationForm({
       dispatch({ type: 'SET_HELPER_LOOSE', value: v }),
     helperTotal,
     error: ui.error,
-    setError: (v: string) => dispatch({ type: 'SET_ERROR', value: v }),
+    setError: (v: SetStateAction<string>) =>
+      dispatch({ type: 'SET_ERROR', value: typeof v === 'function' ? v(ui.error) : v }),
     reminderEnabled: treatment.reminderEnabled,
-    setReminderEnabled: (v: boolean) =>
-      dispatch({ type: 'SET_REMINDER_ENABLED', value: v }),
+    setReminderEnabled: (v: SetStateAction<boolean>) =>
+      dispatch({ type: 'SET_REMINDER_ENABLED', value: typeof v === 'function' ? v(treatment.reminderEnabled) : v }),
     autoDeductEnabled: treatment.autoDeductEnabled,
     setAutoDeductEnabled: (v: boolean) =>
       dispatch({ type: 'SET_AUTO_DEDUCT_ENABLED', value: v }),
     isChronic: treatment.isChronic,
-    setIsChronic: (v: boolean) =>
-      dispatch({ type: 'SET_IS_CHRONIC', value: v }),
+    setIsChronic: (v: SetStateAction<boolean>) =>
+      dispatch({ type: 'SET_IS_CHRONIC', value: typeof v === 'function' ? v(treatment.isChronic) : v }),
     durationDaysStr: treatment.durationDaysStr,
-    setDurationDaysStr: (v: string) =>
-      dispatch({ type: 'SET_DURATION_DAYS_STR', value: v }),
+    setDurationDaysStr: (v: SetStateAction<string>) =>
+      dispatch({ type: 'SET_DURATION_DAYS_STR', value: typeof v === 'function' ? v(treatment.durationDaysStr) : v }),
     treatmentStartDateStr: treatment.treatmentStartDateStr,
-    setTreatmentStartDateStr: (v: string) =>
-      dispatch({ type: 'SET_TREATMENT_START_DATE_STR', value: v }),
+    setTreatmentStartDateStr: (v: SetStateAction<string>) =>
+      dispatch({ type: 'SET_TREATMENT_START_DATE_STR', value: typeof v === 'function' ? v(treatment.treatmentStartDateStr) : v }),
     previewDays,
     handleUnitChange,
     handleStripsChange,

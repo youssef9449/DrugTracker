@@ -11,7 +11,7 @@
  * Logs-tab / ConsumptionLogView restore UI stays intentionally removed.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { readPersistedMedications } from '../helpers/persistedMedications';
+import { readPersistedMedications } from './helpers/persistedMedications';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 
 vi.mock('@/native', () => ({

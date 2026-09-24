@@ -4,7 +4,7 @@ import { calculateMedicationStatus } from '../utils/medicationStatus';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { DAYS_PER_MONTH } from '../utils/time';
 import { formatDepletionDate } from '../utils/medicationPresentation';
-import { Plus, Calendar, CheckCircle2, ShoppingCart, Clock } from 'lucide-react';
+import { Plus, Calendar, CheckCircle2, ShoppingCart } from 'lucide-react';
 import { MedicationMenu, MedicationOverflowMenu } from './MedicationMenu';
 import { ReminderBadge } from './ReminderBadge';
 import {
@@ -149,7 +149,6 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
         <MedicationMenu
           medication={medication}
           isAutoActive={isAutoActive}
-          onOpenRefill={onOpenRefill}
           onEdit={onEdit}
           onDelete={onDelete}
           onToggleAutoDeduct={onToggleAutoDeduct}
@@ -297,7 +296,6 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
         <MedicationMenu
           medication={medication}
           isAutoActive={isAutoActive}
-          onOpenRefill={onOpenRefill}
           onEdit={onEdit}
           onDelete={onDelete}
           onToggleAutoDeduct={onToggleAutoDeduct}
@@ -421,7 +419,6 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
           <MedicationMenu
             medication={medication}
             isAutoActive={isAutoActive}
-            onOpenRefill={onOpenRefill}
             onEdit={onEdit}
             onDelete={onDelete}
             onToggleAutoDeduct={onToggleAutoDeduct}
@@ -508,7 +505,6 @@ export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) =
           <MedicationMenu
             medication={medication}
             isAutoActive={isAutoActive}
-            onOpenRefill={onOpenRefill}
             onEdit={onEdit}
             onDelete={onDelete}
             onToggleAutoDeduct={onToggleAutoDeduct}

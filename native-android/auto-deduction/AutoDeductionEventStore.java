@@ -24,6 +24,7 @@ public final class AutoDeductionEventStore {
     private static final String TAG = "AutoDeductionEventStore";
     private static final String KEY_EVENT_PREFIX = "evt:";
     private static final String KEY_PENDING_PREFIX = "pend:";
+    static final String KEY_PENDING_QUARANTINE_PREFIX = "quarantine:pend:";
     private static final Object LOCK = new Object();
 
     private final AutoDeductionEventPersistence persistence;
@@ -173,7 +174,12 @@ public final class AutoDeductionEventStore {
                 if (!entry.getKey().startsWith(KEY_PENDING_PREFIX)) continue;
                 Object value = entry.getValue();
                 if (!(value instanceof String)) {
-                    toRemove.add(entry.getKey());
+                    if (!quarantineMalformedPendingLocked(
+                            entry.getKey(),
+                            value,
+                            "invalid_pending_storage_type")) {
+                        promotionFailed = true;
+                    }
                     continue;
                 }
 
@@ -182,6 +188,16 @@ public final class AutoDeductionEventStore {
                     AutoDeductionPersistenceModels.EventRecord record =
                             AutoDeductionPersistenceCodec.fromPending(raw);
                     String key = record.occurrence.canonicalKey();
+                    String expectedPendingKey = KEY_PENDING_PREFIX + key;
+                    if (!entry.getKey().equals(expectedPendingKey)) {
+                        if (!quarantineMalformedPendingLocked(
+                                entry.getKey(),
+                                raw,
+                                "pending_identity_mismatch")) {
+                            promotionFailed = true;
+                        }
+                        continue;
+                    }
                     String eventKey = KEY_EVENT_PREFIX + key;
 
                     if (persistence.containsEvent(eventKey)) {
@@ -211,8 +227,12 @@ public final class AutoDeductionEventStore {
                         Log.e(TAG, "pending promotion failed for " + entry.getKey());
                     }
                 } catch (JSONException e) {
-                    Log.w(TAG, "invalid pending record discarded: " + entry.getKey());
-                    toRemove.add(entry.getKey());
+                    if (!quarantineMalformedPendingLocked(
+                            entry.getKey(),
+                            raw,
+                            "malformed_pending_record")) {
+                        promotionFailed = true;
+                    }
                 }
             }
 
@@ -225,6 +245,61 @@ public final class AutoDeductionEventStore {
                 ? PendingFiresResult.failure(
                         promoted, "pending_promotion_failed")
                 : PendingFiresResult.success(promoted);
+    }
+
+    /**
+     * Preserve malformed crash-recovery evidence in a separate durable namespace.
+     * The original live pending key is removed only in the same successful commit
+     * that creates its quarantine record.
+     */
+    private boolean quarantineMalformedPendingLocked(
+            String pendingKey,
+            Object value,
+            String reason) {
+        if (!failurePolicy.allowPendingQuarantineCommit()) {
+            Log.e(TAG, "pending quarantine commit blocked: " + pendingKey);
+            return false;
+        }
+        try {
+            JSONObject quarantine = new JSONObject();
+            quarantine.put(
+                    "status",
+                    "QUARANTINED");
+            quarantine.put(
+                    "quarantinedAtEpochMs",
+                    System.currentTimeMillis());
+            quarantine.put(
+                    "reason",
+                    reason == null || reason.isEmpty()
+                            ? "malformed_pending_record"
+                            : reason);
+            quarantine.put("originalKey", pendingKey);
+            if (value instanceof String) {
+                quarantine.put("raw", (String) value);
+            } else {
+                quarantine.put(
+                        "rawType",
+                        value == null
+                                ? "null"
+                                : value.getClass().getName());
+                quarantine.put(
+                        "rawValue",
+                        String.valueOf(value));
+            }
+
+            String suffix = pendingKey.startsWith(KEY_PENDING_PREFIX)
+                    ? pendingKey.substring(KEY_PENDING_PREFIX.length())
+                    : pendingKey;
+            SharedPreferences.Editor editor = persistence.pendingEditor();
+            editor.putString(
+                    KEY_PENDING_QUARANTINE_PREFIX + suffix,
+                    quarantine.toString());
+            editor.remove(pendingKey);
+            return editor.commit();
+        } catch (JSONException | RuntimeException e) {
+            Log.e(TAG, "pending quarantine build failed: " + pendingKey, e);
+            return false;
+        }
     }
 
     public boolean hasEvent(

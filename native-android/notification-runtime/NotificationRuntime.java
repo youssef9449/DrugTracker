@@ -8,11 +8,18 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.content.SharedPreferences;
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import androidx.core.app.NotificationManagerCompat;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 /**
  * Shared Android notification-delivery runtime.
  *
@@ -31,8 +38,13 @@ public final class NotificationRuntime {
     public static final String EXTRA_ACTION_ID = "notificationActionId";
 
     private static final int NOTIFICATION_ID = 1;
-    private static final String RETRY_PREFS = "drugtracker_notification_delivery_retry_v1";
-    private static final String RETRY_KEY = "entries";
+    private static final String RETRY_PREFS =
+            "drugtracker_notification_delivery_retry_v2";
+    private static final String RETRY_ENTRY_PREFIX = "entry:";
+    private static final int MAX_RETRY_ENTRIES = 64;
+    private static final long MAX_RETRY_AGE_MS =
+            7L * 24L * 60L * 60L * 1000L;
+    private static final Object RETRY_LOCK = new Object();
 
     private final Context appContext;
 
@@ -111,46 +123,96 @@ public final class NotificationRuntime {
     public void persistRetry(Request request) {
         if (request == null || request.namespace == null || request.namespace.isEmpty()
                 || request.identity == null || request.identity.isEmpty()) return;
+
+        final long now = System.currentTimeMillis();
+        final String entryKey = retryEntryKey(request.namespace, request.identity);
+
         try {
-            SharedPreferences prefs = appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
-            JSONArray entries = new JSONArray(prefs.getString(RETRY_KEY, "[]"));
-            JSONArray next = new JSONArray();
-            boolean replaced = false;
-            for (int i = 0; i < entries.length(); i++) {
-                JSONObject item = entries.optJSONObject(i);
-                if (item == null) continue;
-                if (request.namespace.equals(item.optString("namespace"))
-                        && request.identity.equals(item.optString("identity"))) {
-                    if (!replaced) {
-                        next.put(serializeRequest(request));
-                        replaced = true;
+            JSONObject entry = serializeRequest(request);
+            entry.put("queuedAtEpochMs", now);
+            entry.put("retryToken", UUID.randomUUID().toString());
+            String serialized = entry.toString();
+
+            synchronized (RETRY_LOCK) {
+                SharedPreferences prefs =
+                        appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
+                Map<String, ?> all = prefs.getAll();
+                SharedPreferences.Editor editor = prefs.edit();
+                List<RetryCandidate> candidates = new ArrayList<>();
+                boolean currentExists = false;
+
+                for (Map.Entry<String, ?> stored : all.entrySet()) {
+                    if (!stored.getKey().startsWith(RETRY_ENTRY_PREFIX)) continue;
+                    if (stored.getKey().equals(entryKey)) {
+                        currentExists = true;
+                        continue;
                     }
-                } else {
-                    next.put(item);
+
+                    Long queuedAt = readQueuedAt(stored.getValue());
+                    String retryToken = readRetryToken(stored.getValue());
+                    if (queuedAt == null
+                            || retryToken == null
+                            || now - queuedAt.longValue() > MAX_RETRY_AGE_MS) {
+                        editor.remove(stored.getKey());
+                        continue;
+                    }
+                    candidates.add(new RetryCandidate(
+                            stored.getKey(),
+                            queuedAt.longValue(),
+                            retryToken));
                 }
+
+                if (!currentExists) {
+                    candidates.sort((a, b) -> Long.compare(a.queuedAtEpochMs, b.queuedAtEpochMs));
+                    while (candidates.size() >= MAX_RETRY_ENTRIES && !candidates.isEmpty()) {
+                        RetryCandidate oldest = candidates.remove(0);
+                        editor.remove(oldest.key);
+                    }
+                }
+
+                editor.putString(entryKey, serialized).apply();
             }
-            if (!replaced) next.put(serializeRequest(request));
-            prefs.edit().putString(RETRY_KEY, next.toString()).apply();
         } catch (JSONException ignored) {
         }
     }
 
     public int retryPersistedFailures() {
-        SharedPreferences prefs = appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
-        JSONArray entries;
-        try {
-            entries = new JSONArray(prefs.getString(RETRY_KEY, "[]"));
-        } catch (JSONException e) {
-            return 0;
+        final long now = System.currentTimeMillis();
+        final List<RetryCandidate> candidates = new ArrayList<>();
+
+        synchronized (RETRY_LOCK) {
+            SharedPreferences prefs =
+                    appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
+            SharedPreferences.Editor cleanup = prefs.edit();
+
+            for (Map.Entry<String, ?> stored : prefs.getAll().entrySet()) {
+                if (!stored.getKey().startsWith(RETRY_ENTRY_PREFIX)) continue;
+                Long queuedAt = readQueuedAt(stored.getValue());
+                String retryToken = readRetryToken(stored.getValue());
+                if (queuedAt == null
+                        || retryToken == null
+                        || now - queuedAt.longValue() > MAX_RETRY_AGE_MS) {
+                    cleanup.remove(stored.getKey());
+                    continue;
+                }
+                candidates.add(new RetryCandidate(
+                        stored.getKey(),
+                        queuedAt.longValue(),
+                        retryToken));
+            }
+            cleanup.apply();
         }
+
+        candidates.sort((a, b) -> Long.compare(a.queuedAtEpochMs, b.queuedAtEpochMs));
         int accepted = 0;
-        for (int i = 0; i < entries.length(); i++) {
-            JSONObject item = entries.optJSONObject(i);
-            Request request = deserializeRequest(item);
-            if (request == null) continue;
+        for (RetryCandidate candidate : candidates) {
+            Request request = readRetryRequest(candidate.key);
+            if (request == null) {
+                removeRetryKey(candidate.key, candidate.retryToken);
+                continue;
+            }
             PostResult result = postWithoutPersistingRetry(request);
-            if (result.accepted) {
-                clearRetry(request.namespace, request.identity);
+            if (result.accepted && clearRetryIfUnchanged(candidate.key, candidate.retryToken)) {
                 accepted++;
             }
         }
@@ -232,19 +294,103 @@ public final class NotificationRuntime {
     }
 
     private void clearRetry(String namespace, String identity) {
-        try {
-            SharedPreferences prefs = appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
-            JSONArray entries = new JSONArray(prefs.getString(RETRY_KEY, "[]"));
-            JSONArray next = new JSONArray();
-            for (int i = 0; i < entries.length(); i++) {
-                JSONObject item = entries.optJSONObject(i);
-                if (item == null) continue;
-                if (namespace.equals(item.optString("namespace"))
-                        && identity.equals(item.optString("identity"))) continue;
-                next.put(item);
+        if (namespace == null || identity == null) return;
+        removeRetryKey(retryEntryKey(namespace, identity), null);
+    }
+
+    private void removeRetryKey(String entryKey, String expectedRetryToken) {
+        synchronized (RETRY_LOCK) {
+            SharedPreferences prefs =
+                    appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
+            if (expectedRetryToken != null) {
+                String currentRetryToken = readRetryToken(
+                        prefs.getString(entryKey, null));
+                if (currentRetryToken == null
+                        || !currentRetryToken.equals(expectedRetryToken)) {
+                    return;
+                }
             }
-            prefs.edit().putString(RETRY_KEY, next.toString()).apply();
-        } catch (JSONException ignored) {
+            prefs.edit().remove(entryKey).apply();
+        }
+    }
+
+    private boolean clearRetryIfUnchanged(
+            String entryKey,
+            String expectedRetryToken) {
+        synchronized (RETRY_LOCK) {
+            SharedPreferences prefs =
+                    appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
+            String currentRetryToken = readRetryToken(
+                    prefs.getString(entryKey, null));
+            if (currentRetryToken == null
+                    || !currentRetryToken.equals(expectedRetryToken)) {
+                return false;
+            }
+            prefs.edit().remove(entryKey).apply();
+            return true;
+        }
+    }
+
+    private Request readRetryRequest(String entryKey) {
+        synchronized (RETRY_LOCK) {
+            SharedPreferences prefs =
+                    appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
+            String raw = prefs.getString(entryKey, null);
+            if (raw == null) return null;
+            try {
+                return deserializeRequest(new JSONObject(raw));
+            } catch (JSONException e) {
+                return null;
+            }
+        }
+    }
+
+    private Long readQueuedAt(Object raw) {
+        if (!(raw instanceof String)) return null;
+        try {
+            long value = new JSONObject((String) raw).optLong(
+                    "queuedAtEpochMs", Long.MIN_VALUE);
+            return value > 0L ? Long.valueOf(value) : null;
+        } catch (JSONException e) {
+            return null;
+        }
+    }
+
+    private String readRetryToken(Object raw) {
+        if (!(raw instanceof String)) return null;
+        try {
+            String value = new JSONObject((String) raw).optString(
+                    "retryToken", "").trim();
+            return value.isEmpty() ? null : value;
+        } catch (JSONException e) {
+            return null;
+        }
+    }
+
+    private static String retryEntryKey(String namespace, String identity) {
+        String value = namespace + "\u0000" + identity;
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder(RETRY_ENTRY_PREFIX);
+            for (byte b : hash) {
+                result.append(String.format("%02x", b & 0xff));
+            }
+            return result.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    private static final class RetryCandidate {
+        final String key;
+        final long queuedAtEpochMs;
+        final String retryToken;
+
+        RetryCandidate(String key, long queuedAtEpochMs, String retryToken) {
+            this.key = key;
+            this.queuedAtEpochMs = queuedAtEpochMs;
+            this.retryToken = retryToken;
         }
     }
 

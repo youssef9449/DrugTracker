@@ -13,6 +13,10 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+
 
 /**
  * Shared native exact-alarm runtime.
@@ -33,6 +37,34 @@ public final class ExactAlarmRuntime {
     /** Private process-wide monitor; never exposed to callers. */
     private static final class OperationLock {
         private OperationLock() {}
+    }
+
+    /**
+     * Bridge operations that can reach durable alarm persistence are dispatched
+     * here so the Capacitor plugin handler thread never waits on disk I/O.
+     * The executor is process-wide and ordered; the existing OperationLock still
+     * owns the actual cross-feature transaction serialization.
+     */
+    private static final ExecutorService BACKGROUND_EXECUTOR =
+            Executors.newSingleThreadExecutor(new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable runnable) {
+                    Thread thread = new Thread(
+                            runnable,
+                            "DrugTracker-ExactAlarmRuntime");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
+
+    /**
+     * Run a caller-supplied exact-alarm operation away from the Capacitor plugin
+     * dispatch thread. Persistence inside the operation remains synchronous so
+     * durability/failure semantics are unchanged.
+     */
+    public static void executeAsync(Runnable action) {
+        if (action == null) return;
+        BACKGROUND_EXECUTOR.execute(action);
     }
 
     private final Context appContext;

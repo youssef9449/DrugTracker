@@ -81,34 +81,48 @@ public class AutoDeductionPlugin extends Plugin {
         }
         double amount = amountObj;
         long epoch = scheduledAt != null ? scheduledAt : 0L;
-        AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-        AutoDeductionScheduler.ScheduleResult result = scheduler.scheduleOccurrence(
-                medicationId,
-                doseId,
-                calendarDate,
-                timeHhmm,
-                amount,
-                epoch,
-                treatmentEndDate);
-        JSObject ret = new JSObject();
-        ret.put("ok", result.ok);
-        if (result.error != null) ret.put("error", result.error);
-        if (result.occurrenceKey != null) ret.put("occurrenceKey", result.occurrenceKey);
-        call.resolve(ret);
+        app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
+            try {
+                AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+                AutoDeductionScheduler.ScheduleResult result = scheduler.scheduleOccurrence(
+                        medicationId,
+                        doseId,
+                        calendarDate,
+                        timeHhmm,
+                        amount,
+                        epoch,
+                        treatmentEndDate);
+                JSObject ret = new JSObject();
+                ret.put("ok", result.ok);
+                if (result.error != null) ret.put("error", result.error);
+                if (result.occurrenceKey != null) ret.put("occurrenceKey", result.occurrenceKey);
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "scheduleOccurrence failed", e);
+                call.reject(e.getMessage() != null ? e.getMessage() : "schedule_occurrence_failed");
+            }
+        });
     }
     @PluginMethod
     public void cancelOccurrence(PluginCall call) {
         String medicationId = call.getString("medicationId");
         String doseId = call.getString("doseId");
         String calendarDate = call.getString("calendarDate");
-        AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-        AutoDeductionScheduler.CancelResult result = scheduler.cancelOccurrence(
-                medicationId, doseId, calendarDate);
-        JSObject ret = new JSObject();
-        ret.put("ok", result.isOk());
-        ret.put("status", result.status.name());
-        if (result.error != null) ret.put("error", result.error);
-        call.resolve(ret);
+        app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
+            try {
+                AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+                AutoDeductionScheduler.CancelResult result = scheduler.cancelOccurrence(
+                        medicationId, doseId, calendarDate);
+                JSObject ret = new JSObject();
+                ret.put("ok", result.isOk());
+                ret.put("status", result.status.name());
+                if (result.error != null) ret.put("error", result.error);
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "cancelOccurrence failed", e);
+                call.reject(e.getMessage() != null ? e.getMessage() : "cancel_occurrence_failed");
+            }
+        });
     }
     @PluginMethod
     public void recoverMissedOccurrence(PluginCall call) {
@@ -132,31 +146,34 @@ public class AutoDeductionPlugin extends Plugin {
         double amount = amountObj != null ? amountObj : Double.NaN;
         long scheduledAt = scheduledAtObj != null ? scheduledAtObj : -1L;
         long generation = generationObj != null ? generationObj : 0L;
-        try {
-            AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-            AutoDeductionScheduler.FireResult result = compensation
-                    ? scheduler.recoverMissedOccurrenceForCompensation(
-                            medicationId, doseId, calendarDate,
-                            scheduledAt, amount, generation)
-                    : scheduler.recoverMissedOccurrence(
-                            medicationId, doseId, calendarDate,
-                            scheduledAt, amount, generation);
-            JSObject ret = new JSObject();
-            ret.put("ok", result.allowsRecurrence());
-            ret.put("status", result.status.name());
-            if (result.status != AutoDeductionScheduler.FireResult.Status.CANCELLED
-                    && result.status != AutoDeductionScheduler.FireResult.Status.CREATED
-                    && result.status != AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS) {
+        app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
+            try {
+                AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+                AutoDeductionScheduler.FireResult result = compensation
+                        ? scheduler.recoverMissedOccurrenceForCompensation(
+                                medicationId, doseId, calendarDate,
+                                scheduledAt, amount, generation)
+                        : scheduler.recoverMissedOccurrence(
+                                medicationId, doseId, calendarDate,
+                                scheduledAt, amount, generation);
+                JSObject ret = new JSObject();
+                ret.put("ok", result.allowsRecurrence());
+                ret.put("status", result.status.name());
+                if (result.status != AutoDeductionScheduler.FireResult.Status.CANCELLED
+                        && result.status != AutoDeductionScheduler.FireResult.Status.CREATED
+                        && result.status != AutoDeductionScheduler.FireResult.Status.ALREADY_EXISTS) {
+                    ret.put("ok", false);
+                }
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "recoverMissedOccurrence failed", e);
+                JSObject ret = new JSObject();
                 ret.put("ok", false);
+                ret.put("status", "FAILED");
+                ret.put("error", e.getMessage() != null ? e.getMessage() : "recovery_failed");
+                call.resolve(ret);
             }
-            call.resolve(ret);
-        } catch (Exception e) {
-            JSObject ret = new JSObject();
-            ret.put("ok", false);
-            ret.put("status", "FAILED");
-            ret.put("error", e.getMessage() != null ? e.getMessage() : "recovery_failed");
-            call.resolve(ret);
-        }
+        });
     }
 
     /**
@@ -172,17 +189,24 @@ public class AutoDeductionPlugin extends Plugin {
             call.reject("invalid_args");
             return;
         }
-        AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-        AutoDeductionScheduler.InvalidateResult result =
-                scheduler.invalidateRecurrenceAuthorization(medicationId, doseId);
-        JSObject ret = new JSObject();
-        ret.put("ok", result.ok);
-        if (result.error != null) ret.put("error", result.error);
-        if (result.ok || result.schedulesCancelled) {
-            ret.put("generation", result.generation);
-        }
-        ret.put("schedulesCancelled", result.schedulesCancelled);
-        call.resolve(ret);
+        app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
+            try {
+                AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+                AutoDeductionScheduler.InvalidateResult result =
+                        scheduler.invalidateRecurrenceAuthorization(medicationId, doseId);
+                JSObject ret = new JSObject();
+                ret.put("ok", result.ok);
+                if (result.error != null) ret.put("error", result.error);
+                if (result.ok || result.schedulesCancelled) {
+                    ret.put("generation", result.generation);
+                }
+                ret.put("schedulesCancelled", result.schedulesCancelled);
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "invalidateRecurrenceAuthorization failed", e);
+                call.reject(e.getMessage() != null ? e.getMessage() : "invalidate_recurrence_failed");
+            }
+        });
     }
     @PluginMethod
     public void listFiredEvents(PluginCall call) {
@@ -218,26 +242,28 @@ public class AutoDeductionPlugin extends Plugin {
     }
     @PluginMethod
     public void restoreFutureSchedules(PluginCall call) {
-        try {
-            AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-            AutoDeductionScheduler.RestoreResult result = scheduler.restoreFutureSchedules();
-            JSObject ret = new JSObject();
-            ret.put("ok", result.ok);
-            ret.put("restored", result.restored);
-            ret.put("failed", result.failed);
-            if (result.error != null) {
-                ret.put("error", result.error);
+        app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
+            try {
+                AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+                AutoDeductionScheduler.RestoreResult result = scheduler.restoreFutureSchedules();
+                JSObject ret = new JSObject();
+                ret.put("ok", result.ok);
+                ret.put("restored", result.restored);
+                ret.put("failed", result.failed);
+                if (result.error != null) {
+                    ret.put("error", result.error);
+                }
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "restoreFutureSchedules failed", e);
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("restored", 0);
+                ret.put("failed", 0);
+                ret.put("error", e.getMessage() != null ? e.getMessage() : "restore_failed");
+                call.resolve(ret);
             }
-            call.resolve(ret);
-        } catch (Exception e) {
-            Log.e(TAG, "restoreFutureSchedules failed", e);
-            JSObject ret = new JSObject();
-            ret.put("ok", false);
-            ret.put("restored", 0);
-            ret.put("failed", 0);
-            ret.put("error", e.getMessage() != null ? e.getMessage() : "restore_failed");
-            call.resolve(ret);
-        }
+        });
     }
     /**
      * List durable schedule metadata so JS can cancel stale occurrences

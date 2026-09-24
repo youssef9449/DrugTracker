@@ -124,8 +124,9 @@ public final class AutoDeductionEventStore {
                 }
 
                 Log.e(TAG, "commit failed after retry for key=" + key);
-                boolean pendingOk = persistence.putPending(
-                        KEY_PENDING_PREFIX + key, payload);
+                boolean pendingOk = failurePolicy.allowPendingFireCommit()
+                        && persistence.putPending(
+                                KEY_PENDING_PREFIX + key, payload);
                 return new InsertFiredResult(
                         InsertFiredResult.Status.FAILED,
                         pendingOk);
@@ -394,13 +395,21 @@ public final class AutoDeductionEventStore {
                 return new MarkResult(false, false);
             }
 
-            if (!storageIdentityMatchesPayload(
-                    parseStorageKeyIdentity(prefKey), record)
-                    || !medicationId.equals(record.occurrence.medicationId)
+            StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
+            if (!storageIdentityMatchesPayload(storageIdentity, record)) {
+                String reason = storageIdentity != null
+                        && !storageIdentity.medicationId.equals(record.occurrence.medicationId)
+                        ? "identity_mismatch"
+                        : "malformed_fields";
+                EventLookupResult terminalized =
+                        terminalizeRejectedLocked(prefKey, reason);
+                return new MarkResult(terminalized.ok, false);
+            }
+            if (!medicationId.equals(record.occurrence.medicationId)
                     || !doseId.equals(record.occurrence.doseId)
                     || !calendarDate.equals(record.occurrence.calendarDate)) {
                 EventLookupResult terminalized =
-                        terminalizeRejectedLocked(prefKey, "identity_mismatch");
+                        terminalizeRejectedLocked(prefKey, "malformed_fields");
                 return new MarkResult(terminalized.ok, false);
             }
 
@@ -494,13 +503,50 @@ public final class AutoDeductionEventStore {
 
                 try {
                     String rejectionReason;
-                    if (decoded.isSuccess()
-                            && AutoDeductionContract.STATUS_FIRED.equals(decoded.record.status)
-                            && !storageIdentityMatchesPayload(
-                                    parseStorageKeyIdentity(prefKey), decoded.record)) {
-                        rejectionReason = "identity_mismatch";
-                    } else if ("invalid_json".equals(decoded.error)) {
+                    StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
+                    JSONObject rawObject = null;
+                    try {
+                        rawObject = new JSONObject(raw);
+                    } catch (JSONException ignored) {
+                        // Keep the invalid-json classification below.
+                    }
+                    String rawStatus = rawObject == null
+                            ? ""
+                            : rawObject.optString("status", "");
+                    String rawMedicationId = rawObject == null
+                            ? ""
+                            : rawObject.optString("medicationId", "").trim();
+                    String rawDoseId = rawObject == null
+                            ? ""
+                            : rawObject.optString("doseId", "").trim();
+                    String rawCalendarDate = rawObject == null
+                            ? ""
+                            : rawObject.optString("calendarDate", "").trim();
+                    double rawAmount = rawObject == null
+                            ? Double.NaN
+                            : rawObject.optDouble("amount", Double.NaN);
+
+                    boolean validIdentityPayload =
+                            AutoDeductionContract.STATUS_FIRED.equals(rawStatus)
+                                    && !rawMedicationId.isEmpty()
+                                    && !rawDoseId.isEmpty()
+                                    && AutoDeductionContract.isValidCalendarDate(rawCalendarDate)
+                                    && AutoDeductionContract.isValidAmount(rawAmount);
+
+                    if ("invalid_json".equals(decoded.error)) {
                         rejectionReason = "invalid_json";
+                    } else if (validIdentityPayload
+                            && storageIdentity != null
+                            && !storageIdentity.medicationId.equals(rawMedicationId)) {
+                        // A valid FIRED payload stored under another medication's
+                        // key is specifically an identity corruption.
+                        rejectionReason = "identity_mismatch";
+                    } else if (decoded.isSuccess()
+                            && AutoDeductionContract.STATUS_FIRED.equals(decoded.record.status)
+                            && !storageIdentityMatchesPayload(storageIdentity, decoded.record)) {
+                        // Dose/date mismatch under the same medication is malformed
+                        // record data for this lookup/storage row, not a new identity.
+                        rejectionReason = "malformed_fields";
                     } else {
                         rejectionReason = "malformed_fields";
                     }

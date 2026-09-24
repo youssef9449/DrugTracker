@@ -37,15 +37,23 @@ export default function App() {
   } = uiState;
 
   const {
-    medications, logs, pharmacySettings, hydrated, isFirstRun, isAutoDeductPromptOpen,
-    soundEnabled, notificationsEnabled, criticalStockAlertsEnabled, exactAlarmPermission,
-    criticalAlarmResumeTick, doseAlarmResumeTick, doseLifecycleTick, globalAutoDeductEnabled,
-    fontScale, isCompactView, allowManualTakeActionByMedicationId,
-    setMedications, setLogs, setPharmacySettings, setHydrated, setIsFirstRun,
-    setIsAutoDeductPromptOpen, setSoundEnabled, setNotificationsEnabled,
-    setCriticalStockAlertsEnabled, setExactAlarmPermission, setGlobalAutoDeductEnabled,
-    setFontScale, setIsCompactView, setDoseLifecycleTick, setCriticalAlarmResumeTick,
-    setDoseAlarmResumeTick,
+    medications,
+    logs,
+    pharmacySettings,
+    isAutoDeductPromptOpen,
+    soundEnabled,
+    notificationsEnabled,
+    criticalStockAlertsEnabled,
+    exactAlarmPermission,
+    globalAutoDeductEnabled,
+    fontScale,
+    isCompactView,
+    setPharmacySettings,
+    setSoundEnabled,
+    setNotificationsEnabled,
+    setCriticalStockAlertsEnabled,
+    setFontScale,
+    setIsCompactView,
   } = runtimeState;
 
   const { navigateToTab, selectTab, registerBackOverlay } = useAppBackNavigation(activeTab, setActiveTab);

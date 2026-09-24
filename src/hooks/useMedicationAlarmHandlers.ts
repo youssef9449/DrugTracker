@@ -30,7 +30,21 @@ export function useMedicationAlarmHandlers(deps: MedicationHandlersDeps, state: 
       setLogs(result.logs);
     }
     if (result.outcome === 'applied' && result.log) {
-      void cancelNotification('dose-reminder', medicationId + '::' + (doseId ?? ''));
+      runAsyncCommand(
+        'dose-reminder.notification-cancel',
+        async () => {
+          const cancelled = await cancelNotification(
+            'dose-reminder',
+            medicationId + '::' + (doseId ?? '')
+          );
+          if (!cancelled) {
+            throw new Error('dose_reminder_notification_cancel_failed');
+          }
+        },
+        (error) => {
+          console.warn('[dose-reminder] notification cancellation failed:', error);
+        }
+      );
       if (displayName) {
         showToast(TOAST_MESSAGES.doseTaken(displayName, result.doseAmount, displayUnit));
       }

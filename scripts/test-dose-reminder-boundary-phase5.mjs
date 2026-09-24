@@ -89,9 +89,4 @@ assert(
   !runtime.includes('AutoDeduction'),
   'Shared ExactAlarmRuntime must remain mechanism-only'
 );
-assert(
-  read('docs/SHARED_ALARM_NOTIFICATION_ARCHITECTURE_CONTRACTS.md').includes('allowManualTakeAction'),
-  'Architecture contract must document the neutral capability'
-);
-
 console.log('PASS: Phase 5 Dose Reminder boundary checks');

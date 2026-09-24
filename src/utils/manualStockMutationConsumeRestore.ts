@@ -1,16 +1,13 @@
-import type { ConsumptionLog, Medication } from '../types';
+import type { ConsumptionLog } from '../types';
 import { runManualStockTransaction, commitWithManualEnvelope } from './manualStockTransaction';
-import {
-  type GatedManualConsumeResult, type GatedManualRestoreResult,
-  type GatedAddMedicationResult, type GatedRefillResult,
-  type GatedAutoDeductToggleResult, type GatedGlobalAutoDeductToggleResult,
-  type GatedDeleteMedicationResult, type GatedMedicationUpdateResult,
+import type {
+  GatedManualConsumeResult,
+  GatedManualRestoreResult,
 } from './manualStockMutationTypes';
-import { consumeDose, restoreDose, applyDurableStockDelta } from './medActions';
+import { consumeDose, restoreDose } from './medActions';
 import { getOccurrenceSnapshot, type OccurrenceSnapshotResult } from './autoDeductionNativeEvents';
-import { isDoseSkippedOnDate, isDoseConsumedOnDate } from './dateCalculations';
+import { isDoseSkippedOnDate } from './dateCalculations';
 import { getSnoozeUntil, isSnoozeActive } from './doseReminderStorage';
-import { getMedicationTreatmentEndDate } from './medicationTreatment';
 import { generateId } from './id';
 import { resolveConsumeDoseId } from './manualStockMutationShared';
 

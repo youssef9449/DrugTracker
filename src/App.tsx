@@ -1,7 +1,6 @@
 import { AppHeader } from './components/AppHeader';
 import { AppTabContent } from './components/AppTabContent';
 import { AndroidBottomNav } from './components/AndroidBottomNav';
-import type { ActiveTab } from './components/AndroidBottomNav';
 import { AddMedicationModal } from './components/AddMedicationModal';
 import { RefillModal } from './components/RefillModal';
 import { AppSettingsModal } from './components/AppSettingsModal';
@@ -11,7 +10,6 @@ import { SelectDoseModal } from './components/SelectDoseModal';
 import { MedicationHistoryModal } from './components/MedicationHistoryModal';
 import { AutoDeductPromptModal } from './components/AutoDeductPromptModal';
 import { UpdatePrompt } from './components/UpdatePrompt';
-import type { MedicationSortField, MedicationSortDirection } from './utils/medicationSorting';
 import { TOAST_MESSAGES } from './constants/uiStrings';
 import { playSuccessChime } from './utils/sound';
 
@@ -24,9 +22,6 @@ import { useAppBackNavigation } from './hooks/useAppBackNavigation';
 import { useDerivedMedications } from './hooks/useDerivedMedications';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
-  const { navigateToTab, selectTab, registerBackOverlay } = useAppBackNavigation(activeTab, setActiveTab);
-
   const runtimeState = useAppRuntimeState();
   const uiState = useAppUiState();
 
@@ -52,127 +47,14 @@ export default function App() {
     setFontScale, setIsCompactView, setDoseLifecycleTick, setCriticalAlarmResumeTick,
     setDoseAlarmResumeTick,
   } = runtimeState;
+
+  const { navigateToTab, selectTab, registerBackOverlay } = useAppBackNavigation(activeTab, setActiveTab);
   const { alarmingMedication, alarmingDoseId, openAlarm, dismissAlarm, snoozeAlarm, testAlarm } = useDoseReminders({
     medications,
     allowManualTakeActionByMedicationId,
   });
 
-  // Multi-dose manual consume / restore requires explicit dose selection.
-  const [selectDoseMed, setSelectDoseMed] = useState<Medication | null>(null);
-  const [selectDoseMode, setSelectDoseMode] = useState<'take' | 'restore' | 'manage'>('take');
-  const [historyMedication, setHistoryMedication] = useState<Medication | null>(null);
 
-  // All Android Back behavior is registered with one authoritative dispatcher.
-  // App-owned overlays use explicit priorities; child-owned overlays register
-  // through the same dispatcher and therefore never install native listeners.
-  useEffect(() => {
-    const registrations = [
-      alarmingMedication
-        ? registerBackOverlay('dose-alarm', dismissAlarm, 100)
-        : undefined,
-      selectDoseMed
-        ? registerBackOverlay('select-dose', () => {
-            setSelectDoseMed(null);
-            setSelectDoseMode('take');
-          }, 90)
-        : undefined,
-      historyMedication
-        ? registerBackOverlay('medication-history', () => setHistoryMedication(null), 80)
-        : undefined,
-      isAutoDeductPromptOpen
-        ? registerBackOverlay('auto-deduct-prompt', () => {
-            handleConfirmAutoDeductPromptRef.current(false);
-          }, 70)
-        : undefined,
-      isAddModalOpen
-        ? registerBackOverlay('add-medication', () => {
-            setIsAddModalOpen(false);
-            setEditingMedication(null);
-          }, 60)
-        : undefined,
-      refillMedication
-        ? registerBackOverlay('refill', () => setRefillMedication(null), 50)
-        : undefined,
-      isSettingsModalOpen
-        ? registerBackOverlay('settings', () => setIsSettingsModalOpen(false), 40)
-        : undefined,
-    ];
-    return () => registrations.forEach((unregister) => unregister?.());
-  }, [
-    alarmingMedication,
-    dismissAlarm,
-    selectDoseMed,
-    historyMedication,
-    isAutoDeductPromptOpen,
-    isAddModalOpen,
-    refillMedication,
-    isSettingsModalOpen,
-    registerBackOverlay,
-  ]);
-
-  // Remove native listeners on unmount so duplicate handlers cannot accumulate.
-  // Clear any pending toast auto-dismiss timer.
-  useEffect(() => {
-    return () => {
-      cleanupNativeListeners()?.catch?.(() => {});
-      if (toastTimerRef.current) {
-        clearTimeout(toastTimerRef.current);
-        toastTimerRef.current = null;
-      }
-    };
-  }, []);
-
-  // Track the toast auto-dismiss timer so it can be cleared on
-  // unmount (prevents a setToast-after-unmount warning / leak).
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // showToast is defined with useCallback BEFORE the persistence
-  // effects so those effects can surface write failures (M1: previously
-  // every catch was empty and a quota-exceeded write silently dropped
-  // data). Stabilizing it via useCallback also keeps the persistence
-  // effects from re-subscribing on every render.
-  const toastIdRef = useRef(0);
-
-  const showToast = useCallback((message: string) => {
-    const id = ++toastIdRef.current;
-    setToast({ id, message });
-    if (toastTimerRef.current) {
-      clearTimeout(toastTimerRef.current);
-    }
-    toastTimerRef.current = setTimeout(() => {
-      setToast((curr) => (curr?.id === id ? null : curr));
-      toastTimerRef.current = null;
-    }, TOAST_DURATION_MS);
-  }, []);
-
-  const {
-    handleConfirmRefill,
-    handleUndoRefill,
-    handleToggleAutoDeduct,
-    handleToggleGlobalAutoDeduct,
-    handleConfirmAutoDeductPrompt,
-    handleSaveMedication,
-    handleDeleteMedication,
-    handleTakeDoseFromAlarm,
-    handleSnoozeFromAlarm,
-    handleConsumeDose,
-    handleCardRestoreDose,
-    handleSelectDoseFromModal,
-    handleToggleCriticalStockAlerts,
-    handleToggleMedicationReminder,
-    handleToggleMedicationCriticalStockAlerts,
-    handleSavePharmacySettings,
-    handleSavePharmacy,
-    handleDeletePharmacy,
-    handleSaveUserContact,
-    handleDeleteUserContact,
-    handleSaveUserAddress,
-    handleDeleteUserAddress,
-    userContacts,
-    userAddresses,
-    handleToggleNotifications,
-    handleSendTestNotification,
-    handleOpenExactAlarmSettings,
   } = useAppRuntime({
     state: runtimeState,
     ui: { selectDoseMode, settingsModalMode },
@@ -199,6 +81,27 @@ export default function App() {
     isSettingsModalOpen,
     setIsSettingsModalOpen,
   });
+
+  useAppBackOverlays({
+    registerBackOverlay,
+    alarmingMedication,
+    dismissAlarm,
+    selectDoseMed,
+    setSelectDoseMed,
+    setSelectDoseMode,
+    historyMedication,
+    setHistoryMedication,
+    isAutoDeductPromptOpen,
+    handleConfirmAutoDeductPrompt,
+    isAddModalOpen,
+    setIsAddModalOpen,
+    setEditingMedication,
+    refillMedication,
+    setRefillMedication,
+    isSettingsModalOpen,
+    setIsSettingsModalOpen,
+  });
+
 
   // Consume-pill feature: manually consume a selected explicit dose from the card.
   // Subtracts that dose's schedule amount from currentPills; marks the dose occurrence as consumed

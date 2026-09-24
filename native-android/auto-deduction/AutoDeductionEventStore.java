@@ -708,7 +708,11 @@ public final class AutoDeductionEventStore {
 
             StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
             if (!storageIdentityMatchesPayload(storageIdentity, record)) {
-                return terminalizeRejectedLocked(prefKey, "identity_mismatch");
+                String reason = storageIdentity != null
+                        && !storageIdentity.medicationId.equals(record.occurrence.medicationId)
+                        ? "identity_mismatch"
+                        : "malformed_fields";
+                return terminalizeRejectedLocked(prefKey, reason);
             }
             if (!medicationId.equals(record.occurrence.medicationId)
                     || !doseId.equals(record.occurrence.doseId)

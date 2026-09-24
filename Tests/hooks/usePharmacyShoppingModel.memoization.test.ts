@@ -27,7 +27,7 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
   return {
     id: 'med-1',
     name: 'Aspirin',
-    currentPills: 10,
+    currentPills: 2,
     dailyDose: 1,
     unit: 'قرص',
     warningThresholdDays: 5,

@@ -130,6 +130,39 @@ export function useAppRuntime(deps: AppRuntimeDeps) {
     setDoseAlarmResumeTick, setExactAlarmPermission, setNotificationsEnabled,
   });
 
+  const handleApplyAppPreferences = async (prefs: {
+    soundEnabled: boolean;
+    notificationsEnabled: boolean;
+    criticalStockAlertsEnabled: boolean;
+    autoDeductEnabled: boolean;
+  }) => {
+    if (prefs.soundEnabled !== soundEnabled) {
+      setSoundEnabled(prefs.soundEnabled);
+    }
+    if (prefs.autoDeductEnabled !== globalAutoDeductEnabled) {
+      await medicationHandlers.handleToggleGlobalAutoDeduct();
+    }
+    if (prefs.notificationsEnabled !== notificationsEnabled) {
+      setNotificationsEnabled(prefs.notificationsEnabled);
+      showToast(
+        prefs.notificationsEnabled
+          ? TOAST_MESSAGES.notificationsOn
+          : TOAST_MESSAGES.notificationsOff
+      );
+    }
+    if (prefs.criticalStockAlertsEnabled !== criticalStockAlertsEnabled) {
+      setCriticalStockAlertsEnabled(prefs.criticalStockAlertsEnabled);
+      showToast(
+        prefs.criticalStockAlertsEnabled
+          ? TOAST_MESSAGES.criticalAlertsOn
+          : TOAST_MESSAGES.criticalAlertsOff
+      );
+    }
+    if (prefs.soundEnabled) {
+      playSuccessChime();
+    }
+  };
+
   const handleToggleNotifications = async () => {
     if (!notificationsEnabled) {
       let pushAllowed = false;
@@ -181,6 +214,7 @@ export function useAppRuntime(deps: AppRuntimeDeps) {
     ...medicationHandlers,
     ...pharmacyHandlers,
     handleToggleNotifications,
+    handleApplyAppPreferences,
     handleSendTestNotification,
     handleOpenExactAlarmSettings,
   };

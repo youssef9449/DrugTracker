@@ -51,6 +51,7 @@ vi.mock('../utils/notificationTestFacade', async () => {
 });
 
 import { scheduleCriticalAlarm, cancelCriticalAlarm, verifyCriticalAlarmPending } from '../utils/notificationTestFacade';
+import { readCriticalClaims as readClaims, writeCriticalClaims as writeClaims, writeCriticalClaim, clearCriticalClaims } from '../helpers/criticalStockClaims';
 
 const scheduleMock = vi.mocked(scheduleCriticalAlarm);
 const cancelMock = vi.mocked(cancelCriticalAlarm);
@@ -87,13 +88,10 @@ function defaultOpts(
   };
 }
 
-function readClaims(): Record<string, { claimed: boolean; alarmTime: number | null }> {
+> {
   return JSON.parse(localStorage.getItem(CRITICAL_CLAIMS_STORAGE_KEY) || '{}');
 }
 
-function writeClaims(claims: Record<string, { claimed: boolean; alarmTime: number | null }>) {
-  localStorage.setItem(CRITICAL_CLAIMS_STORAGE_KEY, JSON.stringify(claims));
-}
 
 /** A deferred promise the test resolves manually. */
 function deferred<T>() {

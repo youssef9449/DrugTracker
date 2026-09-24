@@ -12,6 +12,7 @@ vi.mock('../utils/notificationTestFacade', () => ({
 }));
 
 import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notificationTestFacade';
+import { readCriticalClaims as readClaims, writeCriticalClaims as writeClaims, writeCriticalClaim, clearCriticalClaims } from '../helpers/criticalStockClaims';
 
 const sendMock = vi.mocked(sendCriticalStockAlert);
 const cancelMock = vi.mocked(cancelCriticalAlarm);
@@ -45,15 +46,10 @@ function useAlerts(props: {
   });
 }
 
-function readClaims(): Record<string, { claimed: boolean; alarmTime: number | null }> {
+> {
   return JSON.parse(localStorage.getItem(CRITICAL_CLAIMS_STORAGE_KEY) || '{}');
 }
 
-function writeClaim(medId: string, claim: { claimed: boolean; alarmTime: number | null }) {
-  const claims = readClaims();
-  claims[medId] = claim;
-  localStorage.setItem(CRITICAL_CLAIMS_STORAGE_KEY, JSON.stringify(claims));
-}
 
 beforeEach(() => {
   vi.clearAllMocks();

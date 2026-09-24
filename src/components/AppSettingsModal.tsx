@@ -111,6 +111,23 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   const [draftCritical, setDraftCritical] = useState(criticalStockAlertsEnabled);
   const [draftAutoDeduct, setDraftAutoDeduct] = useState(autoDeductEnabled);
   /**
+   * Canonical notification-permission request for settings toggles.
+   * Shared by dose-reminder and critical-stock draft toggles (#473).
+   * Does not mutate draft state; callers flip only on success.
+   */
+  const ensureNotificationPermission = async (logLabel: string): Promise<boolean> => {
+    try {
+      const currentPerm = await getNotificationPermission();
+      if (currentPerm === 'granted') return true;
+      if (currentPerm === 'default') return await requestNotificationPermission();
+      return false;
+    } catch (err) {
+      console.warn(`[AppSettingsModal] Notification permission error (${logLabel}):`, err);
+      return false;
+    }
+  };
+
+  /**
    * OFF → ON for phone notifications: require OS notification permission
    * (same flow as App.handleToggleNotifications). Do not flip draft to true
    * on denial/error. ON → OFF is immediate.
@@ -120,23 +137,14 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
       setDraftNotifications(false);
       return;
     }
-    let pushAllowed = false;
-    try {
-      const currentPerm = await getNotificationPermission();
-      if (currentPerm === 'granted') {
-        pushAllowed = true;
-      } else if (currentPerm === 'default') {
-        pushAllowed = await requestNotificationPermission();
-      }
-    } catch (err) {
-      console.warn('[AppSettingsModal] Notification permission error:', err);
-    }
+    const pushAllowed = await ensureNotificationPermission('notifications');
     if (!pushAllowed) {
       showToast?.(TOAST_MESSAGES.notificationsPermissionDenied);
       return;
     }
     setDraftNotifications(true);
   };
+
   /**
    * OFF → ON for critical-stock alerts: require OS notification permission.
    * Independent of dose-reminder draft — never flips draftNotifications.
@@ -146,20 +154,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
       setDraftCritical(false);
       return;
     }
-    let pushAllowed = false;
-    try {
-      const currentPerm = await getNotificationPermission();
-      if (currentPerm === 'granted') {
-        pushAllowed = true;
-      } else if (currentPerm === 'default') {
-        pushAllowed = await requestNotificationPermission();
-      }
-    } catch (err) {
-      console.warn(
-        '[AppSettingsModal] Notification permission error (critical toggle):',
-        err
-      );
-    }
+    const pushAllowed = await ensureNotificationPermission('critical');
     if (!pushAllowed) {
       showToast?.(TOAST_MESSAGES.notificationsPermissionDenied);
       return;

@@ -1,15 +1,8 @@
 import { useEffect } from 'react';
 import type { AppRuntimeState } from './useAppRuntimeState';
 import type { AppUiState } from './useAppUiState';
-import {
-  requestNotificationPermission,
-  getNotificationPermission,
-} from '../utils/notifications/notificationPermissions';
-import { sendTestAlertNotification } from '../utils/notifications/doseReminderNotifications';
-import { openExactAlarmSettings } from '../utils/exactAlarm';
-import { playSuccessChime } from '../utils/sound';
 import { persist } from '../utils/storage';
-import { PERSIST_FAILURE_MESSAGES, TOAST_MESSAGES } from '../constants/uiStrings';
+import { PERSIST_FAILURE_MESSAGES } from '../constants/uiStrings';
 import {
   STORAGE_PHARMACY_KEY, SOUND_KEY, NOTIFICATIONS_KEY, FONT_SIZE_KEY,
   CRITICAL_STOCK_ALERTS_KEY, COMPACT_VIEW_KEY,
@@ -27,6 +20,7 @@ import { useMedicationHandlers } from './useMedicationHandlers';
 import { usePharmacyUserHandlers } from './usePharmacyUserHandlers';
 import { useNativeActionHandlers } from './useNativeActionHandlers';
 import { useAppHydration } from './useAppHydration';
+import { useAppPreferenceHandlers } from './useAppPreferenceHandlers';
 
 export interface AppRuntimeDeps {
   state: AppRuntimeState;
@@ -130,92 +124,21 @@ export function useAppRuntime(deps: AppRuntimeDeps) {
     setDoseAlarmResumeTick, setExactAlarmPermission, setNotificationsEnabled,
   });
 
-  const handleApplyAppPreferences = async (prefs: {
-    soundEnabled: boolean;
-    notificationsEnabled: boolean;
-    criticalStockAlertsEnabled: boolean;
-    autoDeductEnabled: boolean;
-  }) => {
-    if (prefs.soundEnabled !== soundEnabled) {
-      setSoundEnabled(prefs.soundEnabled);
-    }
-    if (prefs.autoDeductEnabled !== globalAutoDeductEnabled) {
-      await medicationHandlers.handleToggleGlobalAutoDeduct();
-    }
-    if (prefs.notificationsEnabled !== notificationsEnabled) {
-      setNotificationsEnabled(prefs.notificationsEnabled);
-      showToast(
-        prefs.notificationsEnabled
-          ? TOAST_MESSAGES.notificationsOn
-          : TOAST_MESSAGES.notificationsOff
-      );
-    }
-    if (prefs.criticalStockAlertsEnabled !== criticalStockAlertsEnabled) {
-      setCriticalStockAlertsEnabled(prefs.criticalStockAlertsEnabled);
-      showToast(
-        prefs.criticalStockAlertsEnabled
-          ? TOAST_MESSAGES.criticalAlertsOn
-          : TOAST_MESSAGES.criticalAlertsOff
-      );
-    }
-    if (prefs.soundEnabled) {
-      playSuccessChime();
-    }
-  };
-
-  const handleToggleNotifications = async () => {
-    if (!notificationsEnabled) {
-      let pushAllowed = false;
-      try {
-        const currentPerm = await getNotificationPermission();
-        if (currentPerm === 'granted') pushAllowed = true;
-        else if (currentPerm === 'default') pushAllowed = await requestNotificationPermission();
-      } catch (err) {
-        console.warn('[AppRuntime] Notification permission error:', err);
-      }
-      if (!pushAllowed) {
-        showToast(TOAST_MESSAGES.notificationsPermissionDenied);
-        return;
-      }
-      setNotificationsEnabled(true);
-      if (soundEnabled) playSuccessChime();
-      showToast(TOAST_MESSAGES.notificationsOn);
-      return;
-    }
-    setNotificationsEnabled(false);
-    showToast(TOAST_MESSAGES.notificationsOff);
-  };
-
-  const handleSendTestNotification = async () => {
-    if (soundEnabled) playSuccessChime();
-    try {
-      await sendTestAlertNotification();
-      showToast(TOAST_MESSAGES.testNotificationSent);
-    } catch (err) {
-      console.warn('[AppRuntime] Failed to send test alert notification:', err);
-      showToast('تعذّر إرسال الإشعار التجريبي');
-    }
-  };
-
-  const handleOpenExactAlarmSettings = () => {
-    openExactAlarmSettings()
-      .then((result) => {
-        if (!result.ok) {
-          console.warn('[AppRuntime] exact alarm settings failed:', result.error, result.errorCode);
-          showToast('إعدادات المنبهات الدقيقة غير متاحة على هذا الجهاز');
-        }
-      })
-      .catch((err) => {
-        console.warn('[AppRuntime] exact alarm settings failed:', err);
-      });
-  };
+  const preferenceHandlers = useAppPreferenceHandlers({
+    soundEnabled,
+    notificationsEnabled,
+    criticalStockAlertsEnabled,
+    globalAutoDeductEnabled,
+    setSoundEnabled,
+    setNotificationsEnabled,
+    setCriticalStockAlertsEnabled,
+    handleToggleGlobalAutoDeduct: medicationHandlers.handleToggleGlobalAutoDeduct,
+    showToast,
+  });
 
   return {
     ...medicationHandlers,
     ...pharmacyHandlers,
-    handleToggleNotifications,
-    handleApplyAppPreferences,
-    handleSendTestNotification,
-    handleOpenExactAlarmSettings,
+    ...preferenceHandlers,
   };
 }

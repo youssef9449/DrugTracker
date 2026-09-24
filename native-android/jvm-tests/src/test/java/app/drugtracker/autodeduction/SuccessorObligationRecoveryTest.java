@@ -561,5 +561,3 @@ public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixtur
     }
 
 }
-
-}

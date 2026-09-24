@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { Medication } from '../types';
 import type { OrderItem } from '../utils/whatsapp';
 import { TOAST_DURATION_MS } from '../utils/time';
@@ -26,21 +26,21 @@ export interface AppUiState {
   medicationSortField: MedicationSortField;
   medicationSortDirection: MedicationSortDirection;
   toast: { id: number; message: string } | null;
-  setActiveTab: React.Dispatch<React.SetStateAction<ActiveTab>>;
-  setFilter: React.Dispatch<React.SetStateAction<AppFilter>>;
-  setSearchQuery: React.Dispatch<React.SetStateAction<string>>;
-  setIsAddModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setIsSettingsModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setSettingsModalMode: React.Dispatch<React.SetStateAction<SettingsModalMode>>;
-  setActiveOrderItems: React.Dispatch<React.SetStateAction<OrderItem[] | undefined>>;
-  setEditingMedication: React.Dispatch<React.SetStateAction<Medication | null>>;
-  setRefillMedication: React.Dispatch<React.SetStateAction<Medication | null>>;
-  setSelectDoseMed: React.Dispatch<React.SetStateAction<Medication | null>>;
-  setSelectDoseMode: React.Dispatch<React.SetStateAction<'take' | 'restore' | 'manage'>>;
-  setHistoryMedication: React.Dispatch<React.SetStateAction<Medication | null>>;
-  setIsPhoneFrame: React.Dispatch<React.SetStateAction<boolean>>;
-  setMedicationSortField: React.Dispatch<React.SetStateAction<MedicationSortField>>;
-  setMedicationSortDirection: React.Dispatch<React.SetStateAction<MedicationSortDirection>>;
+  setActiveTab: Dispatch<SetStateAction<ActiveTab>>;
+  setFilter: Dispatch<SetStateAction<AppFilter>>;
+  setSearchQuery: Dispatch<SetStateAction<string>>;
+  setIsAddModalOpen: Dispatch<SetStateAction<boolean>>;
+  setIsSettingsModalOpen: Dispatch<SetStateAction<boolean>>;
+  setSettingsModalMode: Dispatch<SetStateAction<SettingsModalMode>>;
+  setActiveOrderItems: Dispatch<SetStateAction<OrderItem[] | undefined>>;
+  setEditingMedication: Dispatch<SetStateAction<Medication | null>>;
+  setRefillMedication: Dispatch<SetStateAction<Medication | null>>;
+  setSelectDoseMed: Dispatch<SetStateAction<Medication | null>>;
+  setSelectDoseMode: Dispatch<SetStateAction<'take' | 'restore' | 'manage'>>;
+  setHistoryMedication: Dispatch<SetStateAction<Medication | null>>;
+  setIsPhoneFrame: Dispatch<SetStateAction<boolean>>;
+  setMedicationSortField: Dispatch<SetStateAction<MedicationSortField>>;
+  setMedicationSortDirection: Dispatch<SetStateAction<MedicationSortDirection>>;
   showToast: (message: string) => void;
 }
 

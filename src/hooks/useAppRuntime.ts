@@ -1,7 +1,32 @@
 import { useEffect } from 'react';
 import type { AppRuntimeState } from './useAppRuntimeState';
 import type { AppUiState } from './useAppUiState';
-
+import {
+  requestNotificationPermission,
+  getNotificationPermission,
+} from '../utils/notifications/notificationPermissions';
+import { sendTestAlertNotification } from '../utils/notifications/doseReminderNotifications';
+import { openExactAlarmSettings } from '../utils/exactAlarm';
+import { playSuccessChime } from '../utils/sound';
+import { persist } from '../utils/storage';
+import { PERSIST_FAILURE_MESSAGES, TOAST_MESSAGES } from '../constants/uiStrings';
+import {
+  STORAGE_PHARMACY_KEY, SOUND_KEY, NOTIFICATIONS_KEY, FONT_SIZE_KEY,
+  CRITICAL_STOCK_ALERTS_KEY, COMPACT_VIEW_KEY,
+} from '../constants/storageKeys';
+import { PHARMACY_PERSIST_DEBOUNCE_MS } from '../utils/time';
+import { usePersistentEffect } from './usePersistentEffect';
+import { useStartupAutoDeduction } from './useStartupAutoDeduction';
+import { useStockAlerts } from './useStockAlerts';
+import { useCriticalAlarmScheduler } from './useCriticalAlarmScheduler';
+import { useDoseReminderScheduler } from './useDoseReminderScheduler';
+import { useMidnightTick } from './useMidnightTick';
+import { useAutoDeductionScheduler } from './useAutoDeductionScheduler';
+import { useExactAutoDeductionReconciliation } from './useExactAutoDeductionReconciliation';
+import { useMedicationHandlers } from './useMedicationHandlers';
+import { usePharmacyUserHandlers } from './usePharmacyUserHandlers';
+import { useNativeActionHandlers } from './useNativeActionHandlers';
+import { useAppHydration } from './useAppHydration';
 
 export interface AppRuntimeDeps {
   state: AppRuntimeState;
@@ -14,7 +39,6 @@ export interface AppRuntimeDeps {
     openAlarm: (medId: string, doseId: string) => void;
   };
 }
-
 export function useAppRuntime(deps: AppRuntimeDeps) {
   const { state, ui, uiActions, services } = deps;
   const {

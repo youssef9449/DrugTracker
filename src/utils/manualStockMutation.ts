@@ -21,7 +21,8 @@ export {
 
 export {
   shouldDismissAlarmAfterManualTake,
-} from './manualStockMutationShared';
+  resolveConsumeDoseId,
+} from './manualStockMutationConsumeRestore';
 
 export {
   runGatedManualConsume,
@@ -42,5 +43,8 @@ export {
 export {
   runGatedAutoDeductToggle,
   runGatedGlobalAutoDeductToggle,
-  runGatedMedicationNotificationToggle,
 } from './manualStockMutationPreferences';
+
+export {
+  runGatedMedicationNotificationToggle,
+} from './manualStockMutationNotifications';

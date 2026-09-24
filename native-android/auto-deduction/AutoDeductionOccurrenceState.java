@@ -17,12 +17,23 @@ import java.util.TimeZone;
 final class AutoDeductionOccurrenceState {
     private static final String TAG = "AutoDeductionOccurrenceState";
 
-    private final AutoDeductionScheduler scheduler;
+    interface Host {
+        Context appContext();
+        Map<String, String> getAllScheduleMetadata();
+        AutoDeductionEventStore eventStore();
+        AutoDeductionRetryEvidenceStore retryEvidenceStore();
+        AutoSuccessorObligationStore successorObligationStore();
+        AutoDeductionFailurePolicy failurePolicy();
+        boolean isOccurrenceCancelledKey(String occurrenceKey);
+        AutoDeductionSchedulingAdapter schedulingAdapter();
+    }
+
+    private final Host host;
     private final Context appContext;
 
-    AutoDeductionOccurrenceState(AutoDeductionScheduler scheduler) {
-        this.scheduler = scheduler;
-        this.appContext = scheduler.appContext();
+    AutoDeductionOccurrenceState(Host host) {
+        this.host = host;
+        this.appContext = host.appContext();
     }
 
     boolean compactTerminalState() {
@@ -31,7 +42,7 @@ final class AutoDeductionOccurrenceState {
         synchronized (AutoDeductionScheduler.class) {
             Set<String> protectedKeys = new HashSet<String>();
             Map<String, String> schedules =
-                    scheduler.getAllScheduleMetadata();
+                    host.getAllScheduleMetadata();
             for (String rawKey : schedules.keySet()) {
                 if (rawKey == null || rawKey.isEmpty()) continue;
                 String key = rawKey.startsWith("sch:")
@@ -44,7 +55,7 @@ final class AutoDeductionOccurrenceState {
             // for the same occurrence is terminal. Otherwise a late FIRED/retry/
             // successor recovery could lose its idempotency marker and deduct twice.
             AutoDeductionEventStore.FiredEventsResult fired =
-                    scheduler.eventStore().listFiredEventsResult();
+                    host.eventStore().listFiredEventsResult();
             if (!fired.ok) {
                 Log.w(TAG, "cannot compact terminal state: fired-event snapshot failed: "
                         + fired.error);
@@ -57,7 +68,7 @@ final class AutoDeductionOccurrenceState {
             }
 
             AutoDeductionRetryEvidenceStore.ListResult retry =
-                    scheduler.retryEvidenceStore().listAll();
+                    host.retryEvidenceStore().listAll();
             if (!retry.ok) {
                 Log.w(TAG, "cannot compact terminal state: retry-evidence snapshot failed: "
                         + retry.error);
@@ -70,7 +81,7 @@ final class AutoDeductionOccurrenceState {
             }
 
             AutoSuccessorObligationStore.ListResult obligations =
-                    scheduler.successorObligationStore().listAll();
+                    host.successorObligationStore().listAll();
             if (!obligations.ok) {
                 Log.w(TAG, "cannot compact terminal state: successor-obligation snapshot failed: "
                         + obligations.error);
@@ -85,12 +96,12 @@ final class AutoDeductionOccurrenceState {
 
             try {
                 AutoDeductionEventStore.CompactionResult events =
-                        scheduler.eventStore().compactTerminalEvents(
+                        host.eventStore().compactTerminalEvents(
                                 cutoff, protectedKeys);
                 AutoDeductionStockStore.CompactionResult markers =
                         new AutoDeductionStockStore(
                                 appContext,
-                                scheduler.failurePolicy())
+                                host.failurePolicy())
                                 .compactTerminalOccurrenceMarkers(
                                         cutoff, protectedKeys);
                 if (!events.ok) {
@@ -124,7 +135,7 @@ final class AutoDeductionOccurrenceState {
 
         synchronized (AutoDeductionScheduler.class) {
             AutoDeductionEventStore.EventLookupResult firedLookup =
-                    scheduler.eventStore().getFiredUnreconciledEvent(
+                    host.eventStore().getFiredUnreconciledEvent(
                             medicationId, doseId, calendarDate);
             if (!firedLookup.ok) {
                 return AutoDeductionScheduler.OccurrenceSnapshot.failure(
@@ -143,14 +154,14 @@ final class AutoDeductionOccurrenceState {
                         "invalid_fired_amount");
             }
 
-            if (scheduler.isOccurrenceCancelledKey(key)) {
+            if (host.isOccurrenceCancelledKey(key)) {
                 return new AutoDeductionScheduler.OccurrenceSnapshot(
                         AutoDeductionScheduler.OccurrenceSnapshot.Status.CANCELLED,
                         null);
             }
 
             AutoDeductionPersistenceModels.ScheduleRecord schedule =
-                    scheduler.schedulingAdapter().getScheduleRecord(key);
+                    host.schedulingAdapter().getScheduleRecord(key);
             if (schedule != null) {
                 return new AutoDeductionScheduler.OccurrenceSnapshot(
                         AutoDeductionScheduler.OccurrenceSnapshot.Status.SCHEDULED,

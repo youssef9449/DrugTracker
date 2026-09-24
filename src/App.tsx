@@ -46,6 +46,7 @@ export default function App() {
     criticalStockAlertsEnabled,
     exactAlarmPermission,
     globalAutoDeductEnabled,
+    allowManualTakeActionByMedicationId,
     fontScale,
     isCompactView,
     setPharmacySettings,

@@ -5,6 +5,7 @@ import { evaluateCriticalStockPolicy } from '../utils/criticalStockPolicy';
 import { sendCriticalStockAlert } from '../utils/notifications/criticalStockNotifications';
 import { cancelCriticalAlarm } from '../utils/criticalAlarmScheduling';
 import {
+  claimsEqual,
   getCriticalNotificationClaim,
   loadCriticalNotificationClaims,
 } from '../utils/criticalNotificationClaims';
@@ -48,7 +49,10 @@ export function useStockAlerts({
     // is temporarily unavailable.
     for (const medId of Object.keys(claims)) {
       if (!medicationIds.has(medId)) {
-        void updateCriticalNotificationClaim(medId, () => null).then((result) => {
+        const expectedClaim = claims[medId];
+        void updateCriticalNotificationClaim(medId, (current) =>
+          claimsEqual(current, expectedClaim) ? null : current
+        ).then((result) => {
           if (!result.ok) {
             console.warn('[critical-stock] failed to clear deleted-medication claim');
           }
@@ -71,7 +75,10 @@ export function useStockAlerts({
 
       if (!decision.isCriticalEpisode) {
         if (claim && decision.shouldClearClaim) {
-          void updateCriticalNotificationClaim(med.id, () => null).then((result) => {
+          const expectedClaim = claim;
+          void updateCriticalNotificationClaim(med.id, (current) =>
+            claimsEqual(current, expectedClaim) ? null : current
+          ).then((result) => {
             if (!result.ok) {
               console.warn('[critical-stock] failed to clear ended-episode claim');
             }

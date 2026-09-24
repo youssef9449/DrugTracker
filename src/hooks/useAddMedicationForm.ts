@@ -177,7 +177,6 @@ export function useAddMedicationForm({
     // the closure at the moment the modal opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
-  if (!isOpen) return null;
   // Handle unit changes: update sensible defaults when switching between solid and liquid
   const handleUnitChange = (newUnit: string) => {
     setUnit(newUnit);
@@ -338,7 +337,7 @@ export function useAddMedicationForm({
     packageSize, packageSizeStr, setPackageSize, setPackageSizeStr,
     showStockHelper, setShowStockHelper,
     helperBoxes, helperStrips, helperLoose, setHelperBoxes, setHelperStrips, setHelperLoose, helperTotal,
-    error, reminderEnabled, setReminderEnabled, autoDeductEnabled, setAutoDeductEnabled,
+    error, setError, reminderEnabled, setReminderEnabled, autoDeductEnabled, setAutoDeductEnabled,
     isChronic, setIsChronic, durationDaysStr, setDurationDaysStr, treatmentStartDateStr, setTreatmentStartDateStr,
     previewDays,
     handleUnitChange, handleStripsChange, handlePillsPerStripChange, applyStockHelper, handleSubmit,

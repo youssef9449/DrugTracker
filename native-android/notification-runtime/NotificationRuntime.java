@@ -156,8 +156,7 @@ public final class NotificationRuntime {
 
                 if (!currentExists) {
                     candidates.sort((a, b) -> Long.compare(a.queuedAtEpochMs, b.queuedAtEpochMs));
-                    int allowedOthers = Math.max(0, MAX_RETRY_ENTRIES - 1);
-                    while (candidates.size() >= allowedOthers && !candidates.isEmpty()) {
+                    while (candidates.size() >= MAX_RETRY_ENTRIES && !candidates.isEmpty()) {
                         RetryCandidate oldest = candidates.remove(0);
                         editor.remove(oldest.key);
                     }
@@ -289,10 +288,13 @@ public final class NotificationRuntime {
         synchronized (RETRY_LOCK) {
             SharedPreferences prefs =
                     appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
-            if (expectedQueuedAtEpochMs != null
-                    && expectedQueuedAtEpochMs.longValue() != readQueuedAt(
-                            prefs.getString(entryKey, null))) {
-                return;
+            if (expectedQueuedAtEpochMs != null) {
+                Long currentQueuedAt = readQueuedAt(
+                        prefs.getString(entryKey, null));
+                if (currentQueuedAt == null
+                        || currentQueuedAt.longValue() != expectedQueuedAtEpochMs.longValue()) {
+                    return;
+                }
             }
             prefs.edit().remove(entryKey).apply();
         }

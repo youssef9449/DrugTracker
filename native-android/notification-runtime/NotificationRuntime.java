@@ -19,6 +19,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 /**
  * Shared Android notification-delivery runtime.
  *
@@ -129,6 +130,7 @@ public final class NotificationRuntime {
         try {
             JSONObject entry = serializeRequest(request);
             entry.put("queuedAtEpochMs", now);
+            entry.put("retryToken", UUID.randomUUID().toString());
             String serialized = entry.toString();
 
             synchronized (RETRY_LOCK) {
@@ -147,11 +149,17 @@ public final class NotificationRuntime {
                     }
 
                     Long queuedAt = readQueuedAt(stored.getValue());
-                    if (queuedAt == null || now - queuedAt.longValue() > MAX_RETRY_AGE_MS) {
+                    String retryToken = readRetryToken(stored.getValue());
+                    if (queuedAt == null
+                            || retryToken == null
+                            || now - queuedAt.longValue() > MAX_RETRY_AGE_MS) {
                         editor.remove(stored.getKey());
                         continue;
                     }
-                    candidates.add(new RetryCandidate(stored.getKey(), queuedAt.longValue()));
+                    candidates.add(new RetryCandidate(
+                            stored.getKey(),
+                            queuedAt.longValue(),
+                            retryToken));
                 }
 
                 if (!currentExists) {
@@ -180,11 +188,17 @@ public final class NotificationRuntime {
             for (Map.Entry<String, ?> stored : prefs.getAll().entrySet()) {
                 if (!stored.getKey().startsWith(RETRY_ENTRY_PREFIX)) continue;
                 Long queuedAt = readQueuedAt(stored.getValue());
-                if (queuedAt == null || now - queuedAt.longValue() > MAX_RETRY_AGE_MS) {
+                String retryToken = readRetryToken(stored.getValue());
+                if (queuedAt == null
+                        || retryToken == null
+                        || now - queuedAt.longValue() > MAX_RETRY_AGE_MS) {
                     cleanup.remove(stored.getKey());
                     continue;
                 }
-                candidates.add(new RetryCandidate(stored.getKey(), queuedAt.longValue()));
+                candidates.add(new RetryCandidate(
+                        stored.getKey(),
+                        queuedAt.longValue(),
+                        retryToken));
             }
             cleanup.apply();
         }
@@ -194,11 +208,11 @@ public final class NotificationRuntime {
         for (RetryCandidate candidate : candidates) {
             Request request = readRetryRequest(candidate.key);
             if (request == null) {
-                removeRetryKey(candidate.key, candidate.queuedAtEpochMs);
+                removeRetryKey(candidate.key, null);
                 continue;
             }
             PostResult result = postWithoutPersistingRetry(request);
-            if (result.accepted && clearRetryIfUnchanged(candidate.key, candidate.queuedAtEpochMs)) {
+            if (result.accepted && clearRetryIfUnchanged(candidate.key, candidate.retryToken)) {
                 accepted++;
             }
         }
@@ -284,15 +298,15 @@ public final class NotificationRuntime {
         removeRetryKey(retryEntryKey(namespace, identity), null);
     }
 
-    private void removeRetryKey(String entryKey, Long expectedQueuedAtEpochMs) {
+    private void removeRetryKey(String entryKey, String expectedRetryToken) {
         synchronized (RETRY_LOCK) {
             SharedPreferences prefs =
                     appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
-            if (expectedQueuedAtEpochMs != null) {
-                Long currentQueuedAt = readQueuedAt(
+            if (expectedRetryToken != null) {
+                String currentRetryToken = readRetryToken(
                         prefs.getString(entryKey, null));
-                if (currentQueuedAt == null
-                        || currentQueuedAt.longValue() != expectedQueuedAtEpochMs.longValue()) {
+                if (currentRetryToken == null
+                        || !currentRetryToken.equals(expectedRetryToken)) {
                     return;
                 }
             }
@@ -302,12 +316,14 @@ public final class NotificationRuntime {
 
     private boolean clearRetryIfUnchanged(
             String entryKey,
-            long expectedQueuedAtEpochMs) {
+            String expectedRetryToken) {
         synchronized (RETRY_LOCK) {
             SharedPreferences prefs =
                     appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
-            Long queuedAt = readQueuedAt(prefs.getString(entryKey, null));
-            if (queuedAt == null || queuedAt.longValue() != expectedQueuedAtEpochMs) {
+            String currentRetryToken = readRetryToken(
+                    prefs.getString(entryKey, null));
+            if (currentRetryToken == null
+                    || !currentRetryToken.equals(expectedRetryToken)) {
                 return false;
             }
             prefs.edit().remove(entryKey).apply();
@@ -340,6 +356,17 @@ public final class NotificationRuntime {
         }
     }
 
+    private String readRetryToken(Object raw) {
+        if (!(raw instanceof String)) return null;
+        try {
+            String value = new JSONObject((String) raw).optString(
+                    "retryToken", "").trim();
+            return value.isEmpty() ? null : value;
+        } catch (JSONException e) {
+            return null;
+        }
+    }
+
     private static String retryEntryKey(String namespace, String identity) {
         String value = namespace + "\u0000" + identity;
         try {
@@ -358,10 +385,12 @@ public final class NotificationRuntime {
     private static final class RetryCandidate {
         final String key;
         final long queuedAtEpochMs;
+        final String retryToken;
 
-        RetryCandidate(String key, long queuedAtEpochMs) {
+        RetryCandidate(String key, long queuedAtEpochMs, String retryToken) {
             this.key = key;
             this.queuedAtEpochMs = queuedAtEpochMs;
+            this.retryToken = retryToken;
         }
     }
 

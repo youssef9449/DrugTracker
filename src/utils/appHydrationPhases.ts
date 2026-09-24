@@ -229,17 +229,17 @@ async function initializeNotificationPermission(
   }
 
   if (savedPreference.ok && savedPreference.value === null) {
-    setNotificationsEnabled(perm === 'granted');
-
     if (perm === 'default') {
-      requestNotificationPermission()
-        .then((granted) => {
-          applyNotificationPermissionResultIfUnset(granted, setNotificationsEnabled);
-        })
-        .catch((err) => {
-          console.warn('[App] Auto-request notification permission failed:', err);
-        });
+      // Wait for the first-open OS decision before hydration can publish
+      // readiness. Otherwise the hydrated-state persistence effect could
+      // save the initial false state and make that value look explicit before
+      // the async grant/denial result arrives.
+      const granted = await requestNotificationPermission();
+      applyNotificationPermissionResultIfUnset(granted, setNotificationsEnabled);
+      return;
     }
+
+    setNotificationsEnabled(perm === 'granted');
   }
 }
 

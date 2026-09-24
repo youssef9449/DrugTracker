@@ -35,39 +35,52 @@ public final class DoseReminderPlugin extends Plugin {
             return;
         }
 
-        DoseReminderAlarmAdapter.ScheduleResult result =
-                new DoseReminderAlarmAdapter(getContext()).scheduleOccurrence(
-                        medicationId,
-                        doseId,
-                        reminderTime,
-                        amount,
-                        medicationName,
-                        unit,
-                        doseDescription,
-                        Boolean.TRUE.equals(allowManualTakeAction),
-                        triggerAt,
-                        null,
-                        treatmentEndDate.isEmpty() ? null : treatmentEndDate);
+        ExactAlarmRuntime.executeAsync(() -> {
+            try {
+                DoseReminderAlarmAdapter.ScheduleResult result =
+                        new DoseReminderAlarmAdapter(getContext()).scheduleOccurrence(
+                                medicationId,
+                                doseId,
+                                reminderTime,
+                                amount,
+                                medicationName,
+                                unit,
+                                doseDescription,
+                                Boolean.TRUE.equals(allowManualTakeAction),
+                                triggerAt,
+                                null,
+                                treatmentEndDate.isEmpty() ? null : treatmentEndDate);
 
-        JSObject ret = new JSObject();
-        ret.put("ok", result.ok);
-        if (result.error != null) ret.put("error", result.error);
-        call.resolve(ret);
+                JSObject ret = new JSObject();
+                ret.put("ok", result.ok);
+                if (result.error != null) ret.put("error", result.error);
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("dose_reminder_schedule_failed");
+            }
+        });
     }
 
     @PluginMethod
     public void cancel(PluginCall call) {
         String medicationId = call.getString("medicationId");
         String doseId = call.getString("doseId");
-        DoseReminderAlarmAdapter.CancelResult result =
-                new DoseReminderAlarmAdapter(getContext())
-                        .cancelOccurrence(medicationId, doseId);
 
-        JSObject ret = new JSObject();
-        ret.put("ok", result.isOk());
-        ret.put("status", result.status.name());
-        if (result.error != null) ret.put("error", result.error);
-        call.resolve(ret);
+        ExactAlarmRuntime.executeAsync(() -> {
+            try {
+                DoseReminderAlarmAdapter.CancelResult result =
+                        new DoseReminderAlarmAdapter(getContext())
+                                .cancelOccurrence(medicationId, doseId);
+
+                JSObject ret = new JSObject();
+                ret.put("ok", result.isOk());
+                ret.put("status", result.status.name());
+                if (result.error != null) ret.put("error", result.error);
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("dose_reminder_cancel_failed");
+            }
+        });
     }
 
     @PluginMethod
@@ -87,39 +100,52 @@ public final class DoseReminderPlugin extends Plugin {
             return;
         }
 
-        DoseReminderAlarmAdapter.ScheduleResult result =
-                new DoseReminderAlarmAdapter(getContext()).scheduleSnooze(
-                        medicationId,
-                        doseId,
-                        reminderTime,
-                        amount,
-                        medicationName,
-                        unit,
-                        triggerAt,
-                        Boolean.TRUE.equals(allowManualTakeAction),
-                        doseDescription);
+        ExactAlarmRuntime.executeAsync(() -> {
+            try {
+                DoseReminderAlarmAdapter.ScheduleResult result =
+                        new DoseReminderAlarmAdapter(getContext()).scheduleSnooze(
+                                medicationId,
+                                doseId,
+                                reminderTime,
+                                amount,
+                                medicationName,
+                                unit,
+                                triggerAt,
+                                Boolean.TRUE.equals(allowManualTakeAction),
+                                doseDescription);
 
-        JSObject ret = new JSObject();
-        ret.put("ok", result.ok);
-        if (result.operationVersion != null) {
-            ret.put("operationVersion", result.operationVersion);
-        }
-        if (result.error != null) ret.put("error", result.error);
-        call.resolve(ret);
+                JSObject ret = new JSObject();
+                ret.put("ok", result.ok);
+                if (result.operationVersion != null) {
+                    ret.put("operationVersion", result.operationVersion);
+                }
+                if (result.error != null) ret.put("error", result.error);
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("dose_reminder_snooze_schedule_failed");
+            }
+        });
     }
 
     @PluginMethod
     public void cancelSnooze(PluginCall call) {
         String medicationId = call.getString("medicationId");
         String doseId = call.getString("doseId");
-        DoseReminderAlarmAdapter.CancelResult result =
-                new DoseReminderAlarmAdapter(getContext())
-                        .cancelSnooze(medicationId, doseId);
-        JSObject ret = new JSObject();
-        ret.put("ok", result.isOk());
-        ret.put("status", result.status.name());
-        if (result.error != null) ret.put("error", result.error);
-        call.resolve(ret);
+
+        ExactAlarmRuntime.executeAsync(() -> {
+            try {
+                DoseReminderAlarmAdapter.CancelResult result =
+                        new DoseReminderAlarmAdapter(getContext())
+                                .cancelSnooze(medicationId, doseId);
+                JSObject ret = new JSObject();
+                ret.put("ok", result.isOk());
+                ret.put("status", result.status.name());
+                if (result.error != null) ret.put("error", result.error);
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("dose_reminder_snooze_cancel_failed");
+            }
+        });
     }
 
     @PluginMethod

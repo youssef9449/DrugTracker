@@ -34,7 +34,7 @@ final class AutoDeductionEventCompaction {
             String cutoffCalendarDate,
             Set<String> protectedOccurrenceKeys) {
         if (!AutoDeductionContract.isValidCalendarDate(cutoffCalendarDate)) {
-            return CompactionResult.failure("invalid_cutoff", 0);
+            return AutoDeductionEventStore.CompactionResult.failure("invalid_cutoff", 0);
         }
         final long rejectedCutoffEpochMs =
                 System.currentTimeMillis()
@@ -84,12 +84,12 @@ final class AutoDeductionEventCompaction {
             if (editor != null) {
                 if (!failurePolicy.allowTerminalStateCompactionCommit()
                         || !editor.commit()) {
-                    return CompactionResult.failure(
+                    return AutoDeductionEventStore.CompactionResult.failure(
                             "terminal_event_compaction_commit_failed",
                             removed);
                 }
             }
         }
-        return CompactionResult.success(removed);
+        return AutoDeductionEventStore.CompactionResult.success(removed);
     }
 }

@@ -544,10 +544,18 @@ public final class AutoDeductionEventStore {
                     continue;
                 }
 
-                String rejected = AutoDeductionPersistenceCodec.encodeRejected(
-                        prefKey,
-                        classification.rejectionReason,
-                        System.currentTimeMillis());
+                final String rejected;
+                try {
+                    rejected = AutoDeductionPersistenceCodec.encodeRejected(
+                            prefKey,
+                            classification.rejectionReason,
+                            System.currentTimeMillis());
+                } catch (JSONException e) {
+                    // Same fail-closed contract as terminalizeRejectedLocked:
+                    // encodeRejected cannot throw for valid inputs, but a
+                    // failure must not silently skip terminalization.
+                    return FiredEventsResult.failure("rejected_persist_failed");
+                }
                 if (editor == null) editor = persistence.eventEditor();
                 editor.putString(prefKey, rejected);
                 needsTerminalization = true;

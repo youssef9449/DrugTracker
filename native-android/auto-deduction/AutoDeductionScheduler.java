@@ -148,6 +148,11 @@ public final class AutoDeductionScheduler {
             @Override public boolean removeScheduleMetadataIfVersionLocked(String prefKey, String expectedVersion) {
                 return AutoDeductionScheduler.this.removeScheduleMetadataIfVersionLocked(prefKey, expectedVersion);
             }
+            @Override public boolean removeScheduleMetadataIfVersion(
+                    String prefKey, String expectedVersion) {
+                return AutoDeductionScheduler.this.removeScheduleMetadataIfVersion(
+                        prefKey, expectedVersion);
+            }
             @Override public AutoDeductionSchedulingAdapter schedulingAdapter() {
                 return AutoDeductionScheduler.this.schedulingAdapter;
             }

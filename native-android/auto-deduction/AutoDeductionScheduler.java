@@ -54,8 +54,10 @@ public final class AutoDeductionScheduler {
     private static final String TAG = "AutoDeductionScheduler";
     /** JSON/Intent field: medication+dose recurrence authorization generation. */
     public static final String FIELD_RECURRENCE_GENERATION = "recurrenceGeneration";
-    /** Auto-owned serialization boundary for business/recovery mutations. */
-    private static final Object SCHEDULE_LOCK = new Object();
+    /** Auto-owned process-wide serialization boundary. */
+    private static final class ScheduleOperationLock {
+        private ScheduleOperationLock() {}
+    }
     private final Context appContext;
     /** Single Auto-specific scheduling boundary over the shared exact-alarm runtime. */
     private final AutoDeductionSchedulingAdapter schedulingAdapter;
@@ -109,7 +111,6 @@ public final class AutoDeductionScheduler {
         return successorObligationStore.markStockApplied(
                 medicationId, doseId, calendarDate);
     }
-    Object scheduleLock() { return SCHEDULE_LOCK; }
     long recoveryNowForService() { return recoveryNowMs(); }
 
     public AutoDeductionScheduler(Context context) {
@@ -479,7 +480,7 @@ public final class AutoDeductionScheduler {
      * Reentrant-safe if already holding SCHEDULE_LOCK.
      */
     boolean removeScheduleMetadataIfVersion(String prefKey, String expectedVersion) {
-        synchronized (SCHEDULE_LOCK) {
+        synchronized (AutoDeductionScheduler.ScheduleOperationLock.class) {
             return removeScheduleMetadataIfVersionLocked(prefKey, expectedVersion);
         }
     }
@@ -491,7 +492,7 @@ public final class AutoDeductionScheduler {
         removeSchedule(storageKey);
     }
     void removeScheduleMetadata(String prefKey) {
-        synchronized (SCHEDULE_LOCK) {
+        synchronized (AutoDeductionScheduler.ScheduleOperationLock.class) {
             removeScheduleMetadataLocked(prefKey);
         }
     }

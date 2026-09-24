@@ -6,16 +6,12 @@ import {
   Phone,
   UserCheck,
   Check,
-  CheckCircle2,
-  MessageSquare,
-  MessageCircle,
-  Bell,
-  BellOff,
-  AlertTriangle,
 } from 'lucide-react';
 import { Medication, PharmacySettings } from '../types';
 import { Toggle } from './ui/Toggle';
 import { AppPreferencesSection } from './settings/AppPreferencesSection';
+import { NotificationSettingsSection } from './settings/NotificationSettingsSection';
+import { WhatsAppPreviewSection } from './settings/WhatsAppPreviewSection';
 import { Modal } from './ui/Modal';
 import {
   cleanPhoneNumber,
@@ -289,134 +285,15 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 draftSound={draftSound}
                 setDraftSound={setDraftSound}
               />
-              {/* Notifications & Alerts Management Section */}
-              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className={`p-1.5 rounded-lg ${
-                        draftNotifications ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-500'
-                      }`}
-                    >
-                      {draftNotifications ? (
-                        <Bell className="w-4 h-4 fill-amber-500" />
-                      ) : (
-                        <BellOff className="w-4 h-4" />
-                      )}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-800">تذكيرات مواعيد الجرعات</span>
-                        <span
-                          className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                            draftNotifications ? 'bg-amber-100 text-amber-900 border border-amber-300/50' : 'bg-slate-200 text-slate-700'
-                          }`}
-                        >
-                          {draftNotifications ? 'مفعّلة' : 'متوقفة'}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-slate-500">تذكيرات الجرعات في المواعيد المحددة فقط</p>
-                    </div>
-                  </div>
-                  <Toggle
-                    id="settings-toggle-notifications"
-                    checked={draftNotifications}
-                    onChange={() => { void handleDraftNotificationsToggle(); }}
-                    label={
-                      draftNotifications
-                        ? 'تذكيرات مواعيد الجرعات مفعّلة — انقر للإيقاف'
-                        : 'تذكيرات مواعيد الجرعات متوقفة — انقر للتفعيل'
-                    }
-                    color="amber"
-                  />
-                </div>
-                <hr className="border-slate-200" />
-                {/* Critical Stock Alerts Toggle */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className={`p-1.5 rounded-lg ${
-                        draftCritical ? 'bg-rose-100 text-rose-600' : 'bg-slate-200 text-slate-500'
-                      }`}
-                    >
-                      <AlertTriangle
-                        className={`w-4 h-4 ${
-                          draftCritical ? 'fill-rose-500/30' : ''
-                        }`}
-                      />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-800">تنبيهات النفاذ الحرج للمخزون</span>
-                        <span
-                          className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                            draftCritical ? 'bg-rose-100 text-rose-800 border border-rose-300/50' : 'bg-slate-200 text-slate-700'
-                          }`}
-                        >
-                          {draftCritical ? 'مفعّلة' : 'متوقفة'}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-slate-500">
-                        إشعار فوري عند اقتراب نفاد الدواء أو نفاذه (حسب إعداد كل دواء)
-                      </p>
-                    </div>
-                  </div>
-                                    <Toggle
-                    id="settings-toggle-critical"
-                    checked={draftCritical}
-                    onChange={() => { void handleDraftCriticalToggle(); }}
-                    label={
-                      draftCritical
-                        ? 'تنبيهات المخزون الحرج مفعلة — انقر للإيقاف'
-                        : 'تنبيهات المخزون الحرج متوقفة — انقر للتفعيل'
-                    }
-                    color="rose"
-                  />
-                </div>
-                {/* Test Notification Button */}
-                {onSendTestNotification && (
-                  <button
-                    type="button"
-                    onClick={onSendTestNotification}
-                    className="w-full h-10 px-4 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 rounded-full text-xs font-semibold flex items-center justify-center gap-2 transition active:scale-98 cursor-pointer"
-                  >
-                    <Bell className="w-4 h-4 text-amber-600" />
-                    <span>تجربة إشعار وتنبيه صوتي الآن (اختبار فوري)</span>
-                  </button>
-                )}
-                {/* Exact-alarm permission warning (Android 12+) */}
-                {draftNotifications && exactAlarmPermission === 'denied' && onOpenExactAlarmSettings && (
-                  <div className="bg-rose-50 border border-rose-300/80 rounded-2xl p-3.5 space-y-2">
-                    <div className="flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                      <div className="text-[11px] text-rose-900 leading-relaxed">
-                        <strong>تنبيه: المنبهات الدقيقة غير مفعّلة</strong>
-                        <br />
-                        لضمان وصول تذكير الجرعة في موعده بالضبط، اسمح للتطبيق باستخدام
-                        المنبهات الدقيقة من إعدادات Android. بدون هذا الإذن قد يتأخر
-                        التذكير دقائق أو ساعات.
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={onOpenExactAlarmSettings}
-                      className="w-full h-10 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-full text-xs font-semibold flex items-center justify-center gap-2 transition active:scale-98 shadow-2xs cursor-pointer"
-                    >
-                      <Bell className="w-4 h-4" />
-                      <span>السماح بالمنبهات الدقيقة (إعدادات Android)</span>
-                    </button>
-                  </div>
-                )}
-                {/* Exact-alarm granted indicator */}
-                {draftNotifications && exactAlarmPermission === 'granted' && (
-                  <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    <span>المنبهات الدقيقة مفعّلة — تذكيرات الجرعات مضمونة في موعدها</span>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+              <NotificationSettingsSection
+                draftNotifications={draftNotifications}
+                draftCritical={draftCritical}
+                onToggleNotifications={() => { void handleDraftNotificationsToggle(); }}
+                onToggleCritical={() => { void handleDraftCriticalToggle(); }}
+                exactAlarmPermission={exactAlarmPermission}
+                onOpenExactAlarmSettings={onOpenExactAlarmSettings}
+                onSendTestNotification={onSendTestNotification}
+              />
           {/* Pharmacy and WhatsApp Configuration Section */}
           {isPharmacyOnly && <div className="space-y-3 pt-1">
             {/* Pharmacy Phone Number */}
@@ -516,45 +393,14 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 </span>
               </div>
             </div>
-            {/* Live Preview of WhatsApp Message */}
-            <div className="bg-white text-slate-700 rounded-2xl p-3.5 text-xs space-y-2 font-mono border border-slate-200 shadow-sm">
-              <div className="flex items-center justify-between text-[11px] text-teal-800 font-bold">
-                <span className="flex items-center gap-1">
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  {activeOrderItems && activeOrderItems.length > 0
-                    ? 'معاينة طلب الأدوية المحددة في صفحة الشراء:'
-                    : 'معاينة رسالة الواتساب الموجهة للصيدلية:'}
-                </span>
-                <span className="text-slate-500">
-                  {formattedPhone ? `+${formattedPhone}` : 'لم يحدد الرقم بعد'}
-                </span>
-              </div>
-              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-[11px] text-slate-700 leading-relaxed whitespace-pre-line select-text max-h-44 overflow-y-auto">
-                {previewMsg}
-              </div>
-              {/* Test / Send WhatsApp Link Button */}
-              {pharmacyPhone.trim() && (
-                <div className="flex items-center gap-2 pt-1">
-                  <a
-                    href={waUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 h-10 px-4 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-full text-xs font-semibold flex items-center justify-center gap-2 transition active:scale-98 shadow-2xs cursor-pointer"
-                  >
-                    <MessageCircle className="w-4 h-4" />
-                    <span>فتح واتساب الآن ({formattedPhone || pharmacyPhone})</span>
-                  </a>
-                  <a
-                    href={appUrl}
-                    className="h-10 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-full text-xs font-semibold transition border border-slate-700 shrink-0 flex items-center justify-center cursor-pointer"
-                    title="فتح عبر تطبيق واتساب مباشرة"
-                  >
-                    تطبيق الهاتف
-                  </a>
-                </div>
-              )}
-            </div>
-          </div>}
+            <WhatsAppPreviewSection
+              previewMsg={previewMsg}
+              waUrl={waUrl}
+              appUrl={appUrl}
+              pharmacyPhone={pharmacyPhone}
+              formattedPhone={formattedPhone}
+              hasActiveOrderItems={Boolean(activeOrderItems && activeOrderItems.length > 0)}
+            />
           {/* Submit Button */}
           <div className="pt-2">
             <button

@@ -14,37 +14,31 @@ import { MedicationSortControl } from './MedicationSortControl';
 import { Toggle } from './ui/Toggle';
 import { playSuccessChime } from '../utils/sound';
 
-interface AppTabContentProps {
-  activeTab: ActiveTab;
-  filter: 'all' | 'alerts' | 'sufficient';
-  searchQuery: string;
+interface StockViewModel {
   medications: Medication[];
   logs: ConsumptionLog[];
-  pharmacySettings: PharmacySettings;
-  isCompactView: boolean;
-  medicationSortField: MedicationSortField;
-  medicationSortDirection: MedicationSortDirection;
-  soundEnabled: boolean;
   medicationsWithStatus: Array<{ med: Medication; statusInfo: ReturnType<typeof calculateMedicationStatus> }>;
   filteredMedications: Medication[];
   alertsCount: number;
   sufficientCount: number;
-  lastRefillByMed: Map<string, ConsumptionLog>;
-  userContacts: UserContact[];
-  userAddresses: UserAddress[];
-  showToast: (message: string) => void;
+  filter: 'all' | 'alerts' | 'sufficient';
+  searchQuery: string;
+  isCompactView: boolean;
+  medicationSortField: MedicationSortField;
+  medicationSortDirection: MedicationSortDirection;
+  soundEnabled: boolean;
+}
+
+interface StockActions {
   setFilter: Dispatch<SetStateAction<'all' | 'alerts' | 'sufficient'>>;
   setSearchQuery: Dispatch<SetStateAction<string>>;
   setMedicationSortField: Dispatch<SetStateAction<MedicationSortField>>;
   setMedicationSortDirection: Dispatch<SetStateAction<MedicationSortDirection>>;
   setIsCompactView: Dispatch<SetStateAction<boolean>>;
-  setPharmacySettings: Dispatch<SetStateAction<PharmacySettings>>;
   setEditingMedication: Dispatch<SetStateAction<Medication | null>>;
   setIsAddModalOpen: Dispatch<SetStateAction<boolean>>;
   setRefillMedication: Dispatch<SetStateAction<Medication | null>>;
   setHistoryMedication: Dispatch<SetStateAction<Medication | null>>;
-  navigateToTab: (tab: ActiveTab) => void;
-  registerBackOverlay: (id: string, close: () => void, priority?: number) => () => void;
   openAdd: () => void;
   handleDeleteMedication: (id: string) => void;
   handleToggleAutoDeduct: (id: string) => void;
@@ -52,28 +46,62 @@ interface AppTabContentProps {
   handleToggleMedicationCriticalStockAlerts: (id: string) => void;
   handleConsumeDose: (medicationId: string, doseId?: string) => void;
   handleCardRestoreDose: (medicationId: string, doseId?: string) => void;
-  handleUndoRefill: (medicationId: string) => void;
-  testAlarm: (medication: Medication, doseId?: string) => void;
+}
+
+interface PharmacyActions {
+  pharmacySettings: PharmacySettings;
+  setPharmacySettings: Dispatch<SetStateAction<PharmacySettings>>;
   handleSavePharmacy: (pharmacy: Pharmacy) => void;
   handleDeletePharmacy: (id: string) => void;
+}
+
+interface UserDataActions {
+  userContacts: UserContact[];
+  userAddresses: UserAddress[];
   handleSaveUserContact: (contact: UserContact) => void;
   handleDeleteUserContact: (id: string) => void;
   handleSaveUserAddress: (address: UserAddress) => void;
   handleDeleteUserAddress: (id: string) => void;
 }
-export const AppTabContent: FC<AppTabContentProps> = (props) => {
+
+interface NavigationActions {
+  activeTab: ActiveTab;
+  navigateToTab: (tab: ActiveTab) => void;
+  registerBackOverlay: (id: string, close: () => void, priority?: number) => () => void;
+  showToast: (message: string) => void;
+}
+
+interface AppTabContentProps {
+  stock: StockViewModel;
+  stockActions: StockActions;
+  pharmacy: PharmacyActions;
+  userData: UserDataActions;
+  navigation: NavigationActions;
+}
+
+export const AppTabContent: FC<AppTabContentProps> = ({
+  stock,
+  stockActions,
+  pharmacy,
+  userData,
+  navigation,
+}) => {
   const {
-    activeTab, filter, searchQuery, medications, logs, pharmacySettings, isCompactView,
-    medicationSortField, medicationSortDirection, soundEnabled, medicationsWithStatus,
-    filteredMedications, alertsCount, sufficientCount, userContacts, userAddresses,
-    showToast, setFilter, setSearchQuery, setMedicationSortField, setMedicationSortDirection,
-    setIsCompactView, setPharmacySettings, setEditingMedication, setIsAddModalOpen,
-    setRefillMedication, setHistoryMedication, navigateToTab, registerBackOverlay, openAdd,
+    medications, logs, medicationsWithStatus, filteredMedications, alertsCount, sufficientCount,
+    filter, searchQuery, isCompactView, medicationSortField, medicationSortDirection, soundEnabled,
+  } = stock;
+  const {
+    setFilter, setSearchQuery, setMedicationSortField, setMedicationSortDirection, setIsCompactView,
+    setEditingMedication, setIsAddModalOpen, setRefillMedication, setHistoryMedication, openAdd,
     handleDeleteMedication, handleToggleAutoDeduct, handleToggleMedicationReminder,
     handleToggleMedicationCriticalStockAlerts, handleConsumeDose, handleCardRestoreDose,
-    handleSavePharmacy, handleDeletePharmacy,
-    handleSaveUserContact, handleDeleteUserContact, handleSaveUserAddress, handleDeleteUserAddress,
-  } = props;
+  } = stockActions;
+  const { pharmacySettings, setPharmacySettings, handleSavePharmacy, handleDeletePharmacy } = pharmacy;
+  const {
+    userContacts, userAddresses, handleSaveUserContact, handleDeleteUserContact,
+    handleSaveUserAddress, handleDeleteUserAddress,
+  } = userData;
+  const { activeTab, navigateToTab, registerBackOverlay, showToast } = navigation;
 
   return (
       <main className="flex-1 overflow-y-auto pb-24 relative">

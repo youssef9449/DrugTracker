@@ -1,10 +1,14 @@
 import { useState, useMemo, useEffect } from 'react';
 import type { Medication, PharmacySettings } from '../types';
+import { calculateMedicationStatus } from '../utils/medicationStatus';
 import { cleanPhoneNumber, generatePharmacyOrderMessage, calculateMedicationOrderQuantity, buildWhatsAppUrl, type OrderItem } from '../utils/whatsapp';
 import {
-  getShoppingAvailableUnits, getShoppingDefaultUnits, getShoppingUnitSize, shoppingUnitToPills,
-  shoppingRequestedPills, getMedicationPeriod, getDurationDays, getQuantityMode, getSelectedUnits,
-  getUnitQuantity, getCustomQuantityInputValue, getRequestedPills, getOrderBreakdown, unitLabel,
+  getShoppingAvailableUnits, getShoppingDefaultUnits, getShoppingUnitSize,
+  shoppingRequestedPills, getMedicationPeriod as resolveMedicationPeriod,
+  getDurationDays as resolveDurationDays, getQuantityMode as resolveQuantityMode,
+  getSelectedUnits as resolveSelectedUnits, getUnitQuantity as resolveUnitQuantity,
+  getCustomQuantityInputValue as resolveCustomQuantityInputValue,
+  getRequestedPills as resolveRequestedPills, getOrderBreakdown as resolveOrderBreakdown, unitLabel,
   type OrderUnit, type CustomOrderQuantities, type PeriodUnit, type MedicationPeriod, type QuantityMode,
 } from '../utils/pharmacyShoppingCalculations';
 
@@ -50,6 +54,24 @@ export function usePharmacyShoppingModel({
   // `displayList` changes. Cleared for a med when it leaves
   // `displayList` (so it starts fresh if it returns).
   const [deselectedIds, setDeselectedIds] = useState<Set<string>>(new Set());
+  const getMedicationPeriod = (med: Medication): MedicationPeriod =>
+    resolveMedicationPeriod(medicationPeriods, med, settings.defaultDurationDays);
+  const getDurationDays = (med: Medication): number =>
+    resolveDurationDays(medicationPeriods, med, settings.defaultDurationDays);
+  const getQuantityMode = (med: Medication): QuantityMode =>
+    resolveQuantityMode(quantityModes, med);
+  const getSelectedUnits = (med: Medication): OrderUnit[] =>
+    resolveSelectedUnits(orderUnits, med);
+  const getUnitQuantity = (med: Medication, unit: OrderUnit, suggestedPills: number): number =>
+    resolveUnitQuantity(customOrderQuantities, orderUnits, quantityModes, med, unit, suggestedPills);
+  const getCustomQuantityInputValue = (med: Medication, unit: OrderUnit, suggestedPills: number): number | '' =>
+    resolveCustomQuantityInputValue(customOrderQuantities, med, unit, suggestedPills);
+  const getRequestedPills = (med: Medication, suggestedPills: number): number =>
+    resolveRequestedPills(quantityModes, customOrderQuantities, orderUnits, med, suggestedPills);
+  const getOrderBreakdown = (med: Medication, suggestedPills: number): { unit: OrderUnit; quantity: number }[] =>
+    resolveOrderBreakdown(customOrderQuantities, orderUnits, quantityModes, med, suggestedPills);
+  const getAvailableUnits = (med: Medication): OrderUnit[] => getShoppingAvailableUnits(med);
+
   const urgentMeds = useMemo(() => {
     return medications.filter((m) => {
       const { status } = calculateMedicationStatus(m);
@@ -126,16 +148,6 @@ export function usePharmacyShoppingModel({
       return next;
     });
   };
-  const getMedicationPeriod = (med: Medication): MedicationPeriod => medicationPeriods[med.id] || {
-    value: settings.defaultDurationDays === 60 ? 2 : 30,
-    unit: settings.defaultDurationDays === 60 ? 'month' : 'day',
-  };
-  const getDurationDays = (med: Medication) => {
-    const period = getMedicationPeriod(med);
-    const rawValue = period.value === '' ? 1 : period.value;
-    return Math.max(1, rawValue || 1) * (period.unit === 'month' ? 30 : 1);
-  };
-  const getQuantityMode = (med: Medication): QuantityMode => quantityModes[med.id] || 'period';
   const handleMedicationPeriodChange = (medId: string, field: keyof MedicationPeriod, value: string) => {
     const med = medications.find((item) => item.id === medId);
     if (!med) return;
@@ -167,133 +179,6 @@ export function usePharmacyShoppingModel({
   };
   const getRequestedAmount = (med: Medication) =>
     calculateMedicationOrderQuantity(med, getDurationDays(med));
-  // ── Unit display helpers ─────────────────────────────────────
-  // The selected unit only changes how the calculated quantity is shown.
-  // It must never change the quantity required for the selected period.
-  /** Available order units; custom mode can select more than one simultaneously. */
-  function getAvailableUnits(med: Medication): OrderUnit[] {
-    return getShoppingAvailableUnits(med);
-  }
-  function getSelectedUnits(med: Medication): OrderUnit[] {
-    return orderUnits[med.id] || getShoppingDefaultUnits(med);
-  }
-  function getUnitQuantity(med: Medication, unit: OrderUnit, suggestedPills: number): number {
-    if (getQuantityMode(med) === 'custom') {
-      const stored = customOrderQuantities[med.id]?.[unit];
-      if (stored === '') return 0;
-      if (stored !== undefined) return stored;
-    }
-    const unitSize = getShoppingUnitSize(med, unit);
-    return Math.max(1, Math.ceil(suggestedPills / unitSize));
-  }
-  /** Display value for each custom-unit input. */
-  function getCustomQuantityInputValue(
-    med: Medication,
-    unit: OrderUnit,
-    suggestedPills: number
-  ): number | '' {
-    const stored = customOrderQuantities[med.id]?.[unit];
-    if (stored !== undefined) return stored;
-    return getUnitQuantity(med, unit, suggestedPills);
-  }
-  function getRequestedPills(med: Medication, suggestedPills: number): number {
-    return shoppingRequestedPills(
-      med,
-      suggestedPills,
-      quantityModes,
-      customOrderQuantities,
-      orderUnits
-    );
-  }
-  const handleToggleQuantityMode = (med: Medication, mode: QuantityMode, suggestedPills: number) => {
-    setQuantityModes((prev) => ({ ...prev, [med.id]: mode }));
-    if (mode !== 'custom') return;
-    const selectedUnits = getSelectedUnits(med);
-    setCustomOrderQuantities((prev) => {
-      const current = prev[med.id] || {};
-      const next = { ...current };
-      for (const unit of selectedUnits) {
-        if (next[unit] === undefined) {
-          next[unit] = Math.max(1, Math.ceil(
-            suggestedPills / getShoppingUnitSize(med, unit)
-          ));
-        }
-      }
-      return {
-        ...prev,
-        [med.id]: next,
-      };
-    });
-  };
-  const handleToggleOrderUnit = (med: Medication, unit: OrderUnit, _suggestedPills: number) => {
-    const selected = getSelectedUnits(med);
-    if (getQuantityMode(med) !== 'custom') {
-      // "حسب الفترة" keeps the existing single-unit display selection.
-      setOrderUnits((prev) => ({
-        ...prev,
-        [med.id]: [unit],
-      }));
-      return;
-    }
-    if (selected.includes(unit)) {
-      // Keep at least one unit active in custom mode.
-      if (selected.length <= 1) return;
-      setOrderUnits((prev) => ({
-        ...prev,
-        [med.id]: selected.filter((item) => item !== unit),
-      }));
-      return;
-    }
-    setOrderUnits((prev) => ({
-      ...prev,
-      [med.id]: [...selected, unit],
-    }));
-    setCustomOrderQuantities((prev) => ({
-      ...prev,
-      [med.id]: {
-        ...(prev[med.id] || {}),
-        [unit]: 1,
-      },
-    }));
-  };
-  const handleCustomQuantityChange = (med: Medication, unit: OrderUnit, raw: string) => {
-    if (raw === '') {
-      setCustomOrderQuantities((prev) => ({
-        ...prev,
-        [med.id]: {
-          ...(prev[med.id] || {}),
-          [unit]: '',
-        },
-      }));
-      return;
-    }
-    const parsed = parseInt(raw, 10);
-    setCustomOrderQuantities((prev) => ({
-      ...prev,
-      [med.id]: {
-        ...(prev[med.id] || {}),
-        [unit]: Math.max(1, Number.isFinite(parsed) ? parsed : 1),
-      },
-    }));
-  };
-  /** Display label for a unit. */
-  function unitLabel(unit: OrderUnit, med: Medication, count: number): string {
-    if (unit === 'pills') return pluralizeArabic(count, med.unit);
-    if (unit === 'boxes') {
-      const boxName = med.unit === 'مل' ? 'عبوة' : 'علبة';
-      return pluralizeArabic(count, boxName);
-    }
-    return pluralizeArabic(count, 'شريط');
-  }
-  function getOrderBreakdown(med: Medication, suggestedPills: number): { unit: OrderUnit; quantity: number }[] {
-    if (getQuantityMode(med) !== 'custom') return [];
-    return getSelectedUnits(med)
-      .map((unit) => ({
-        unit,
-        quantity: getUnitQuantity(med, unit, suggestedPills),
-      }))
-      .filter((item) => item.quantity > 0);
-  }
   const activeOrderItems = useMemo((): OrderItem[] => {
     return displayList
       .filter((med) => selectedMedIds.has(med.id))
@@ -415,18 +300,14 @@ export function usePharmacyShoppingModel({
     activeOrderItems, currentWhatsAppMessage, isSendModalOpen, setIsSendModalOpen,
     hasPharmacyPhone, displayPhone, selectedCount, targetWaUrl,
     handleToggleSelect, handleRemoveFromShopping,
-    getMedicationPeriod: (med: Medication) => getMedicationPeriod(medicationPeriods, med, settings.defaultDurationDays),
-    getQuantityMode: (med: Medication) => getQuantityMode(quantityModes, med),
-    getAvailableUnits: (med: Medication) => getShoppingAvailableUnits(med),
-    getSelectedUnits: (med: Medication) => getSelectedUnits(orderUnits, med),
-    getUnitQuantity: (med: Medication, unit: OrderUnit, suggestedPills: number) =>
-      getUnitQuantity(customOrderQuantities, orderUnits, quantityModes, med, unit, suggestedPills),
-    getCustomQuantityInputValue: (med: Medication, unit: OrderUnit, suggestedPills: number) =>
-      getCustomQuantityInputValue(customOrderQuantities, med, unit, suggestedPills),
-    getOrderBreakdown: (med: Medication, suggestedPills: number) =>
-      getOrderBreakdown(customOrderQuantities, orderUnits, quantityModes, med, suggestedPills),
-    getRequestedPills: (med: Medication, suggestedPills: number) =>
-      getRequestedPills(quantityModes, customOrderQuantities, orderUnits, med, suggestedPills),
+    getMedicationPeriod,
+    getQuantityMode,
+    getAvailableUnits,
+    getSelectedUnits,
+    getUnitQuantity,
+    getCustomQuantityInputValue,
+    getOrderBreakdown,
+    getRequestedPills,
     unitLabel, getRequestedAmount, handleMedicationPeriodChange, handleToggleQuantityMode,
     handleToggleOrderUnit, handleCustomQuantityChange, toggleWhatsappContact,
     toggleWhatsappAddress, handleSendToWhatsApp,

@@ -8,8 +8,9 @@
  * See CriticalNotificationClaim in types.ts for the semantics.
  *
  * Storage shape: { [medicationId]: CriticalNotificationClaim } under one
- * versioned key. All access is synchronous localStorage (via loadJson /
- * saveJson), so a read-decide-write pass is atomic with respect to other
+ * versioned key. All access is synchronous localStorage (via the
+ * runtime-validated readJsonOutcome reader and the persist writer), so a
+ * read-decide-write pass is atomic with respect to other
  * JS code (single-threaded) as long as callers do not await in between.
  */
 

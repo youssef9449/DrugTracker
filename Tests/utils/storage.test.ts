@@ -89,6 +89,26 @@ describe('readJsonOutcome / loadValidatedJson (runtime-validated reads)', () => 
     expect(outcome.status).toBe('invalid');
   });
 
+  it('rejects a stored null when the validator explicitly rejects it (#477)', () => {
+    // Persisted JSON null is only valid when the parser ACCEPTS it. A
+    // validator that rejects null must still produce an invalid outcome —
+    // null is not globally valid just because it is representable.
+    localStorage.setItem('k', 'null');
+    const outcome = readJsonOutcome<{ a: number }>('k', (raw) =>
+      raw !== null && raw !== undefined && typeof raw === 'object' && (raw as { a?: unknown }).a === 1
+        ? { ok: true, value: raw as { a: number } }
+        : { ok: false, reason: 'test_null_rejected' }
+    );
+    expect(outcome).toEqual({ status: 'invalid', reason: 'test_null_rejected' });
+    // The convenience wrapper falls back on a validator-rejected null too —
+    // it must not reinterpret the rejection as a valid null.
+    expect(loadValidatedJson<{ a: number }>('k', (raw) =>
+      raw !== null && raw !== undefined && typeof raw === 'object' && (raw as { a?: unknown }).a === 1
+        ? { ok: true, value: raw as { a: number } }
+        : { ok: false, reason: 'test_null_rejected' }
+    , { a: 0 })).toEqual({ a: 0 });
+  });
+
   it('reports read_failed when storage itself throws', () => {
     const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('boom');

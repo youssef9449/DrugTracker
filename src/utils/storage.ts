@@ -152,7 +152,9 @@ export type StorageJsonOutcome<T> =
  * Returning `null`/`undefined` from a parser is a CONTRACT ERROR and is
  * treated as a shape rejection (never as valid data) — this keeps a generic
  * TypeScript cast from smuggling unvalidated durable values through the
- * boundary.
+ * boundary. TypeScript generics are never a substitute for runtime
+ * validation here: a `T` annotation alone does not make a stored payload
+ * trusted; only an explicit `{ ok: true }` verdict does.
  */
 export type JsonParserVerdict<T> =
   | { ok: true; value: T }

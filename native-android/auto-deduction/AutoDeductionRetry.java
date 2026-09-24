@@ -218,6 +218,21 @@ public FireResult recoverFireFromIndependentEvidence(
                             && Double.compare(evidence.amount, current.amount) == 0
                             && evidence.treatmentEndDate.equals(current.treatmentEndDate);
 
+            // A current schedule that replaced the evidence, or a recurrence
+            // generation that was disabled/revoked, invalidates the retry before
+            // any FIRED row or stock mutation can be created. A missing schedule
+            // with the same active generation is different: it can represent the
+            // one-shot alarm having already been consumed, so its durable evidence
+            // remains recoverable.
+            if (current != null && !ownsCurrentSchedule) {
+                clearIndependentFireRetryEvidenceLocked(key);
+                return FireResult.cancelled();
+            }
+            if (current == null && evidence.recurrenceGeneration != activeGeneration) {
+                clearIndependentFireRetryEvidenceLocked(key);
+                return FireResult.cancelled();
+            }
+
             AutoDeductionEventStore.InsertFiredResult ir =
                     scheduler.eventStore().insertFiredIfAbsent(
                             medicationId,

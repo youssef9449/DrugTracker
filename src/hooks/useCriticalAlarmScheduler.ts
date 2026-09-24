@@ -149,7 +149,6 @@ export interface UseCriticalAlarmSchedulerOptions {
  * post-schedule re-verification block before any claim write, so a stale
  * operation can never overwrite newer business state.
  */
- */
 export function useCriticalAlarmScheduler({
   medications,
   criticalStockAlertsEnabled,

@@ -63,11 +63,82 @@ export function usePharmacyShoppingModel({
   const getSelectedUnits = (med: Medication): OrderUnit[] =>
     resolveSelectedUnits(orderUnits, med);
   const getUnitQuantity = (med: Medication, unit: OrderUnit, suggestedPills: number): number =>
-    resolveUnitQuantity(customOrderQuantities, orderUnits, quantityModes, med, unit, suggestedPills);
+    resolveUnitQuantity(customOrderQuantities, quantityModes, med, unit, suggestedPills);
   const getCustomQuantityInputValue = (med: Medication, unit: OrderUnit, suggestedPills: number): number | '' =>
     resolveCustomQuantityInputValue(customOrderQuantities, med, unit, suggestedPills);
   const getRequestedPills = (med: Medication, suggestedPills: number): number =>
     resolveRequestedPills(quantityModes, customOrderQuantities, orderUnits, med, suggestedPills);
+  const handleToggleQuantityMode = (med: Medication, mode: QuantityMode, suggestedPills: number) => {
+    setQuantityModes((prev) => ({ ...prev, [med.id]: mode }));
+    if (mode !== 'custom') return;
+    const selectedUnits = getSelectedUnits(med);
+    setCustomOrderQuantities((prev) => {
+      const current = prev[med.id] || {};
+      const next = { ...current };
+      for (const unit of selectedUnits) {
+        if (next[unit] === undefined) {
+          next[unit] = Math.max(1, Math.ceil(
+            suggestedPills / getShoppingUnitSize(med, unit)
+          ));
+        }
+      }
+      return {
+        ...prev,
+        [med.id]: next,
+      };
+    });
+  };
+
+  const handleToggleOrderUnit = (med: Medication, unit: OrderUnit, _suggestedPills: number) => {
+    const selected = getSelectedUnits(med);
+    if (getQuantityMode(med) !== 'custom') {
+      setOrderUnits((prev) => ({
+        ...prev,
+        [med.id]: [unit],
+      }));
+      return;
+    }
+    if (selected.includes(unit)) {
+      if (selected.length <= 1) return;
+      setOrderUnits((prev) => ({
+        ...prev,
+        [med.id]: selected.filter((item) => item !== unit),
+      }));
+      return;
+    }
+    setOrderUnits((prev) => ({
+      ...prev,
+      [med.id]: [...selected, unit],
+    }));
+    setCustomOrderQuantities((prev) => ({
+      ...prev,
+      [med.id]: {
+        ...(prev[med.id] || {}),
+        [unit]: 1,
+      },
+    }));
+  };
+
+  const handleCustomQuantityChange = (med: Medication, unit: OrderUnit, raw: string) => {
+    if (raw === '') {
+      setCustomOrderQuantities((prev) => ({
+        ...prev,
+        [med.id]: {
+          ...(prev[med.id] || {}),
+          [unit]: '',
+        },
+      }));
+      return;
+    }
+    const parsed = parseInt(raw, 10);
+    setCustomOrderQuantities((prev) => ({
+      ...prev,
+      [med.id]: {
+        ...(prev[med.id] || {}),
+        [unit]: Math.max(1, Number.isFinite(parsed) ? parsed : 1),
+      },
+    }));
+  };
   const getOrderBreakdown = (med: Medication, suggestedPills: number): { unit: OrderUnit; quantity: number }[] =>
     resolveOrderBreakdown(customOrderQuantities, orderUnits, quantityModes, med, suggestedPills);
   const getAvailableUnits = (med: Medication): OrderUnit[] => getShoppingAvailableUnits(med);

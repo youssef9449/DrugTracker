@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Medication, PharmacySettings } from '../types';
 import { Toggle } from './ui/Toggle';
+import { AppPreferencesSection } from './settings/AppPreferencesSection';
 import { Modal } from './ui/Modal';
 import {
   cleanPhoneNumber,

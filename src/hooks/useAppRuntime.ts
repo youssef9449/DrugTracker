@@ -1,14 +1,5 @@
-import { useEffect } from 'react';
 import type { AppRuntimeState } from './useAppRuntimeState';
 import type { AppUiState } from './useAppUiState';
-import { persist } from '../utils/storage';
-import { PERSIST_FAILURE_MESSAGES } from '../constants/uiStrings';
-import {
-  STORAGE_PHARMACY_KEY, SOUND_KEY, NOTIFICATIONS_KEY, FONT_SIZE_KEY,
-  CRITICAL_STOCK_ALERTS_KEY, COMPACT_VIEW_KEY,
-} from '../constants/storageKeys';
-import { PHARMACY_PERSIST_DEBOUNCE_MS } from '../utils/time';
-import { usePersistentEffect } from './usePersistentEffect';
 import { useStartupAutoDeduction } from './useStartupAutoDeduction';
 import { useStockAlerts } from './useStockAlerts';
 import { useCriticalAlarmScheduler } from './useCriticalAlarmScheduler';
@@ -21,6 +12,7 @@ import { usePharmacyUserHandlers } from './usePharmacyUserHandlers';
 import { useNativeActionHandlers } from './useNativeActionHandlers';
 import { useAppHydration } from './useAppHydration';
 import { useAppPreferenceHandlers } from './useAppPreferenceHandlers';
+import { useAppPersistence } from './useAppPersistence';
 
 export interface AppRuntimeDeps {
   state: AppRuntimeState;
@@ -57,33 +49,15 @@ export function useAppRuntime(deps: AppRuntimeDeps) {
     setGlobalAutoDeductEnabled, setFontScale, setIsCompactView,
   });
 
-  usePersistentEffect({
-    storageKey: STORAGE_PHARMACY_KEY, value: pharmacySettings, enabled: hydrated,
-    debounceMs: PHARMACY_PERSIST_DEBOUNCE_MS, failureMessage: PERSIST_FAILURE_MESSAGES.pharmacy, showToast,
-  });
-  usePersistentEffect({
-    storageKey: SOUND_KEY, value: String(soundEnabled), json: false, enabled: hydrated,
-    failureMessage: PERSIST_FAILURE_MESSAGES.sound, showToast,
-  });
-  usePersistentEffect({
-    storageKey: NOTIFICATIONS_KEY, value: String(notificationsEnabled), json: false, enabled: hydrated,
-    failureMessage: PERSIST_FAILURE_MESSAGES.notifications, showToast,
-  });
-  useEffect(() => {
-    if (typeof document !== 'undefined') {
-      document.documentElement.classList.toggle('font-scale-large', fontScale === 'large');
-    }
-    if (!hydrated) return;
-    const err = persist(FONT_SIZE_KEY, fontScale, { json: false });
-    if (err) console.warn('[AppRuntime] failed to persist font size:', err);
-  }, [fontScale, hydrated]);
-  usePersistentEffect({
-    storageKey: CRITICAL_STOCK_ALERTS_KEY, value: String(criticalStockAlertsEnabled), json: false,
-    enabled: hydrated, failureMessage: PERSIST_FAILURE_MESSAGES.critical, showToast,
-  });
-  usePersistentEffect({
-    storageKey: COMPACT_VIEW_KEY, value: String(isCompactView), json: false,
-    enabled: hydrated, failureMessage: 'تعذر حفظ خيار العرض', showToast,
+  useAppPersistence({
+    hydrated,
+    pharmacySettings,
+    soundEnabled,
+    notificationsEnabled,
+    criticalStockAlertsEnabled,
+    fontScale,
+    isCompactView,
+    showToast,
   });
 
   useStartupAutoDeduction({ hydrated, isFirstRun, setMedications, setLogs, setGlobalAutoDeductEnabled, showToast });

@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const checks = [
+  'scripts/test-async-command-boundary-group6.mjs',
   'scripts/test-alarm-notification-boundary-phase6.mjs',
   'scripts/test-auto-deduction-business-adapter-phase3.mjs',
   'scripts/test-auto-deduction-scheduling-adapter.mjs',

@@ -4,7 +4,6 @@ import { renderHook } from '@testing-library/react';
 import type { Medication } from '@/types';
 import { useStockAlerts } from '@/hooks/useStockAlerts';
 import { getTodayDateString, getCriticalAlarmDate } from '@/utils/dateCalculations';
-import { CRITICAL_CLAIMS_STORAGE_KEY } from '@/utils/criticalNotificationClaims';
 
 vi.mock('../utils/notificationTestFacade', () => ({
   sendCriticalStockAlert: vi.fn(() => Promise.resolve(true)),
@@ -12,7 +11,7 @@ vi.mock('../utils/notificationTestFacade', () => ({
 }));
 
 import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notificationTestFacade';
-import { readCriticalClaims as readClaims, writeCriticalClaims as writeClaims, writeCriticalClaim, clearCriticalClaims } from '../helpers/criticalStockClaims';
+import { readCriticalClaims as readClaims, writeCriticalClaims as writeClaims, writeCriticalClaim as writeClaim, clearCriticalClaims } from '../helpers/criticalStockClaims';
 
 const sendMock = vi.mocked(sendCriticalStockAlert);
 const cancelMock = vi.mocked(cancelCriticalAlarm);
@@ -45,11 +44,6 @@ function useAlerts(props: {
     ...props,
   });
 }
-
-> {
-  return JSON.parse(localStorage.getItem(CRITICAL_CLAIMS_STORAGE_KEY) || '{}');
-}
-
 
 beforeEach(() => {
   vi.clearAllMocks();

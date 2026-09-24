@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, cleanup } from '@testing-library/react';
 import type { Medication } from '@/types';
 import { getTodayDateString, getCriticalAlarmDate } from '@/utils/dateCalculations';
-import { CRITICAL_CLAIMS_STORAGE_KEY } from '@/utils/criticalNotificationClaims';
 import {
   useCriticalAlarmScheduler,
   type UseCriticalAlarmSchedulerOptions } from '@/hooks/useCriticalAlarmScheduler';
@@ -51,7 +50,7 @@ vi.mock('../utils/notificationTestFacade', async () => {
 });
 
 import { scheduleCriticalAlarm, cancelCriticalAlarm, verifyCriticalAlarmPending } from '../utils/notificationTestFacade';
-import { readCriticalClaims as readClaims, writeCriticalClaims as writeClaims, writeCriticalClaim, clearCriticalClaims } from '../helpers/criticalStockClaims';
+import { readCriticalClaims as readClaims, writeCriticalClaims as writeClaims, writeCriticalClaim as writeClaim, clearCriticalClaims } from '../helpers/criticalStockClaims';
 
 const scheduleMock = vi.mocked(scheduleCriticalAlarm);
 const cancelMock = vi.mocked(cancelCriticalAlarm);
@@ -87,11 +86,6 @@ function defaultOpts(
     ...overrides,
   };
 }
-
-> {
-  return JSON.parse(localStorage.getItem(CRITICAL_CLAIMS_STORAGE_KEY) || '{}');
-}
-
 
 /** A deferred promise the test resolves manually. */
 function deferred<T>() {

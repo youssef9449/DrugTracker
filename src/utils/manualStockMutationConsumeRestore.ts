@@ -1,4 +1,4 @@
-import type { ConsumptionLog } from '../types';
+import type { ConsumptionLog, Medication } from '../types';
 import { runManualStockTransaction, commitWithManualEnvelope } from './manualStockTransaction';
 import type {
   GatedManualConsumeResult,
@@ -8,14 +8,16 @@ import { consumeDose, restoreDose } from './medActions';
 import { getOccurrenceSnapshot, type OccurrenceSnapshotResult } from './autoDeductionNativeEvents';
 import { isDoseSkippedOnDate } from './dateCalculations';
 import { generateId } from './id';
+import type { GatedManualOutcome } from './manualStockMutationTypes';
+
 export function shouldDismissAlarmAfterManualTake(
-  outcome: import('./manualStockMutationTypes').GatedManualOutcome
+  outcome: GatedManualOutcome
 ): boolean {
   return outcome === 'applied' || outcome === 'already_consumed';
 }
 
-export function resolveConsumeDoseId(
-  med: import('../types').Medication,
+function resolveConsumeDoseId(
+  med: Medication,
   doseId?: string
 ): string | undefined {
   const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];

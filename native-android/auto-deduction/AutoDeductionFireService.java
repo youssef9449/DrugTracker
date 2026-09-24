@@ -130,11 +130,8 @@ public FireResult fireOccurrenceIfNotCancelled(
                 // record: keep retry evidence so the exact occurrence can be
                 // reconstructed even if schedule metadata disappears.
                 String timeHhmm = schedule.timeHhmm;
-                String operationVersion = deliveryOperationVersion != null
-                        ? deliveryOperationVersion : schedule.operationVersion;
-                long gen = deliveryRecurrenceGeneration > 0L
-                        ? deliveryRecurrenceGeneration
-                        : scheduler.getRecurrenceGenerationLocked(medicationId, doseId);
+                String operationVersion = deliveryOperationVersion;
+                long gen = deliveryRecurrenceGeneration;
                 scheduler.recordIndependentFireRetryEvidenceLocked(
                         medicationId, doseId, calendarDate, scheduledAtEpochMs,
                         amount, timeHhmm, schedule.treatmentEndDate,

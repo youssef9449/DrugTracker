@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import type { Medication, PharmacySettings } from '../types';
 import { usePharmacyShoppingSelection } from './usePharmacyShoppingSelection';
-import { generatePharmacyOrderMessage, calculateMedicationOrderQuantity, type OrderItem } from '../utils/whatsapp';
+import { calculateMedicationOrderQuantity, type OrderItem } from '../utils/whatsapp';
 import {
   getShoppingAvailableUnits, getShoppingUnitSize,
   shoppingRequestedPills, getMedicationPeriod as resolveMedicationPeriod,
@@ -42,30 +42,7 @@ export function usePharmacyShoppingModel({
     deselectAllDisplayedMeds,
     restoreAllMedicationsToShopping,
   } = selection;
-  const pharmacies = settings.pharmacies || [];
-  const selectedPharmacy = pharmacies.find((pharmacy) => pharmacy.id === settings.selectedPharmacyId)
-    || pharmacies[0];
-  const whatsappContacts = useMemo(
-    () => settings.whatsappContacts ?? [],
-    [settings.whatsappContacts]
-  );
-  const whatsappAddresses = useMemo(
-    () => settings.whatsappAddresses ?? [],
-    [settings.whatsappAddresses]
-  );
-  const selectedWhatsappContactIds = settings.selectedWhatsappContactIds
-    ?? whatsappContacts.map((contact) => contact.id);
-  const selectedWhatsappAddressIds = settings.selectedWhatsappAddressIds
-    ?? whatsappAddresses.map((item) => item.id);
-  const [showAllForPlanning, setShowAllForPlanning] = useState(false);
-  // Multiple order units may be selected together in "كمية محددة".
   const [orderUnits, setOrderUnits] = useState<Record<string, OrderUnit[]>>({});
-  const [removedFromShoppingIds, setRemovedFromShoppingIds] = useState<Set<string>>(new Set());
-  // #20: track meds the user explicitly DESELECTED so the
-  // reconciliation effect doesn't silently re-select them when
-  // `displayList` changes. Cleared for a med when it leaves
-  // `displayList` (so it starts fresh if it returns).
-  const [deselectedIds, setDeselectedIds] = useState<Set<string>>(new Set());
   const getMedicationPeriod = (med: Medication): MedicationPeriod =>
     resolveMedicationPeriod(medicationPeriods, med, settings.defaultDurationDays);
   const getDurationDays = (med: Medication): number =>
@@ -235,6 +212,7 @@ export function usePharmacyShoppingModel({
     customOrderQuantities,
     orderUnits,
     getDurationDays,
+    getOrderBreakdown,
     settings,
     onUpdateSettings,
     showToast,
@@ -259,14 +237,8 @@ export function usePharmacyShoppingModel({
     unitLabel, getRequestedAmount, handleMedicationPeriodChange, handleToggleQuantityMode,
     handleToggleOrderUnit, handleCustomQuantityChange, toggleWhatsappContact,
     toggleWhatsappAddress, handleSendToWhatsApp,
-    selectAllDisplayedMeds: () => {
-      setSelectedMedIds(new Set(displayList.map((m) => m.id)));
-      setDeselectedIds(new Set());
-    },
-    deselectAllDisplayedMeds: () => {
-      setSelectedMedIds(new Set());
-      setDeselectedIds(new Set(displayList.map((m) => m.id)));
-    },
-    restoreAllMedicationsToShopping: () => setRemovedFromShoppingIds(new Set()),
+    selectAllDisplayedMeds,
+    deselectAllDisplayedMeds,
+    restoreAllMedicationsToShopping,
   };
 }

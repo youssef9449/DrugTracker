@@ -127,6 +127,8 @@ describe('Phase 4 — Manual envelope ownership (no native ACK)', () => {
   afterEach(() => {
     __setAutoStockGateTestHooks(null);
     __setManualEnvelopeTestHooks(null);
+    __setExactAutoEnvelopeStorageTestHooks(null);
+    __resetStockMutationOrderingForTests();
     vi.useRealTimers();
   });
 

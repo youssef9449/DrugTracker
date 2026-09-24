@@ -26,6 +26,7 @@ describe('Phase 4 — durableMatchesEnvelopeSnapshot pure contract', () => {
     const durableFull = {
       medications: full.medications.map((m: ReturnType<typeof med>) => ({ ...m })),
       logs: full.logs.map((l) => ({ ...l })),
+      globalAutoDeductEnabled: false,
     };
     expect(durableMatchesEnvelopeSnapshot(full, durableFull)).toBe(true);
 

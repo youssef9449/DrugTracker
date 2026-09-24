@@ -217,9 +217,6 @@ export function useAddMedicationForm({
   };
 
 
-  const previewDoseNum = totalDailyAmount(dosage.doseSchedule);
-  const previewDays =
-    previewDoseNum > 0 ? Math.floor(stock.currentPills / previewDoseNum) : 0;
 
   // Stable consumer API: field accessors + named setters over the reducer.
   return {
@@ -291,7 +288,6 @@ export function useAddMedicationForm({
     treatmentStartDateStr: treatment.treatmentStartDateStr,
     setTreatmentStartDateStr: (v: SetStateAction<string>) =>
       dispatch({ type: 'SET_TREATMENT_START_DATE_STR', value: typeof v === 'function' ? v(treatment.treatmentStartDateStr) : v }),
-    previewDays,
     handleUnitChange,
     handleStripsChange,
     handlePillsPerStripChange,

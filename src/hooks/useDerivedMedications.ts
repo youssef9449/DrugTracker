@@ -77,8 +77,7 @@ export function useDerivedMedications(
   const alertsCount = useMemo(
     () => medicationsWithStatus.filter(({ statusInfo }) =>
       statusInfo.status === 'out_of_stock' ||
-      statusInfo.status === 'critical' ||
-      false
+      statusInfo.status === 'critical'
     ).length,
     [medicationsWithStatus]
   );

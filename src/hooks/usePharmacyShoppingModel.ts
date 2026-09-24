@@ -194,7 +194,7 @@ export function usePharmacyShoppingModel({
           orderBreakdown: getOrderBreakdown(med, suggestedPills),
         };
       });
-  }, [displayList, selectedMedIds, medicationPeriods, quantityModes, customOrderQuantities, orderUnits, settings.defaultDurationDays]);
+  }, [displayList, selectedMedIds, medicationPeriods, quantityModes, customOrderQuantities, orderUnits, settings.defaultDurationDays, getDurationDays, getOrderBreakdown]);
   const {
     pharmacies,
     selectedPharmacy,

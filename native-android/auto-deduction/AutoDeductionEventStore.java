@@ -14,10 +14,12 @@ import java.util.Map;
 /**
  * Durable Auto-Deduction event ledger.
  *
- * <p>Business semantics live here: insert-if-absent, pending-fire promotion,
- * FIRED → RECONCILED transitions, and fail-closed malformed-row handling.
- * Raw SharedPreferences access is isolated in AutoDeductionEventPersistence,
- * while all JSON encoding/decoding is isolated in AutoDeductionPersistenceCodec.</p>
+ * <p>Responsibility split (#467): raw SharedPreferences access is isolated in
+ * AutoDeductionEventPersistence, all JSON encoding/decoding is isolated in
+ * AutoDeductionPersistenceCodec, and key-identity parsing / read-model
+ * classification live in AutoDeductionEventQueries. Business state
+ * transitions (insert-if-absent, pending-fire promotion, FIRED → RECONCILED,
+ * fail-closed terminalization) and terminal-state compaction live here.</p>
  */
 public final class AutoDeductionEventStore {
 
@@ -347,51 +349,17 @@ public final class AutoDeductionEventStore {
         }
     }
 
-    private static final class StorageIdentity {
-        final String medicationId;
-        final String doseId;
-        final String calendarDate;
 
-        StorageIdentity(
-                String medicationId,
-                String doseId,
-                String calendarDate) {
-            this.medicationId = medicationId;
-            this.doseId = doseId;
-            this.calendarDate = calendarDate;
-        }
-    }
 
-    private static final char OCCURRENCE_KEY_SEPARATOR = '\u001f';
-
-    private static StorageIdentity parseStorageKeyIdentity(String prefKey) {
-        if (prefKey == null || !prefKey.startsWith(KEY_EVENT_PREFIX)) return null;
-        String encoded = prefKey.substring(KEY_EVENT_PREFIX.length());
-        int first = encoded.indexOf(OCCURRENCE_KEY_SEPARATOR);
-        int second = first >= 0
-                ? encoded.indexOf(OCCURRENCE_KEY_SEPARATOR, first + 1)
-                : -1;
-        if (first <= 0 || second <= first + 1 || second >= encoded.length() - 1) {
-            return null;
-        }
-        if (encoded.indexOf(OCCURRENCE_KEY_SEPARATOR, second + 1) >= 0) {
-            return null;
-        }
-        return new StorageIdentity(
-                encoded.substring(0, first),
-                encoded.substring(first + 1, second),
-                encoded.substring(second + 1));
+    /** Key-identity parsing delegated to the query/validation collaborator (#467). */
+    private static AutoDeductionEventQueries.StorageIdentity parseStorageKeyIdentity(String prefKey) {
+        return AutoDeductionEventQueries.parseStorageKeyIdentity(KEY_EVENT_PREFIX, prefKey);
     }
 
     private static boolean storageIdentityMatchesPayload(
-            StorageIdentity identity,
+            AutoDeductionEventQueries.StorageIdentity identity,
             AutoDeductionPersistenceModels.EventRecord record) {
-        if (identity == null || record == null || record.occurrence == null) {
-            return false;
-        }
-        return identity.medicationId.equals(record.occurrence.medicationId)
-                && identity.doseId.equals(record.occurrence.doseId)
-                && identity.calendarDate.equals(record.occurrence.calendarDate);
+        return AutoDeductionEventQueries.storageIdentityMatchesPayload(identity, record);
     }
 
     private EventLookupResult terminalizeRejectedLocked(
@@ -471,7 +439,7 @@ public final class AutoDeductionEventStore {
                 return new MarkResult(false, false);
             }
 
-            StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
+            AutoDeductionEventQueries.StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
             if (!storageIdentityMatchesPayload(storageIdentity, record)) {
                 String reason = storageIdentity != null
                         && !storageIdentity.medicationId.equals(record.occurrence.medicationId)
@@ -559,81 +527,30 @@ public final class AutoDeductionEventStore {
                 AutoDeductionPersistenceCodec.DecodeResult decoded =
                         AutoDeductionPersistenceCodec.decodeEvent(raw);
 
-                if (AutoDeductionContract.STATUS_REJECTED.equals(decoded.status)) {
+                // Read-model classification lives in the query collaborator
+                // (#467): this loop only consumes its verdict and owns the
+                // fail-closed terminalization write for non-FIRED rows.
+                AutoDeductionEventQueries.FiredRowClassification classification =
+                        AutoDeductionEventQueries.classifyFiredRow(
+                                decoded,
+                                raw,
+                                parseStorageKeyIdentity(prefKey));
+                if (classification.isFired()) {
+                    firedRecords.add(classification.firedRecord);
                     continue;
                 }
-                // RECONCILED is a valid terminal event and must remain untouched.
-                // Only FIRED rows are candidates for the recovery read model.
-                if (decoded.isSuccess()
-                        && AutoDeductionContract.STATUS_RECONCILED.equals(decoded.record.status)) {
-                    continue;
-                }
-                if (decoded.isSuccess()
-                        && AutoDeductionContract.STATUS_FIRED.equals(decoded.record.status)
-                        && storageIdentityMatchesPayload(
-                                parseStorageKeyIdentity(prefKey),
-                                decoded.record)) {
-                    firedRecords.add(decoded.record);
+                if (classification.rejectionReason == null) {
+                    // REJECTED / RECONCILED terminal rows are left untouched.
                     continue;
                 }
 
-                try {
-                    String rejectionReason;
-                    StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
-                    JSONObject rawObject = null;
-                    try {
-                        rawObject = new JSONObject(raw);
-                    } catch (JSONException ignored) {
-                        // Keep the invalid-json classification below.
-                    }
-                    String rawStatus = rawObject == null
-                            ? ""
-                            : rawObject.optString("status", "");
-                    String rawMedicationId = rawObject == null
-                            ? ""
-                            : rawObject.optString("medicationId", "").trim();
-                    String rawDoseId = rawObject == null
-                            ? ""
-                            : rawObject.optString("doseId", "").trim();
-                    String rawCalendarDate = rawObject == null
-                            ? ""
-                            : rawObject.optString("calendarDate", "").trim();
-                    double rawAmount = rawObject == null
-                            ? Double.NaN
-                            : rawObject.optDouble("amount", Double.NaN);
-
-                    boolean validIdentityPayload =
-                            AutoDeductionContract.STATUS_FIRED.equals(rawStatus)
-                                    && !rawMedicationId.isEmpty()
-                                    && !rawDoseId.isEmpty()
-                                    && AutoDeductionContract.isValidCalendarDate(rawCalendarDate)
-                                    && AutoDeductionContract.isValidAmount(rawAmount);
-
-                    if ("invalid_json".equals(decoded.error)) {
-                        rejectionReason = "invalid_json";
-                    } else if (validIdentityPayload
-                            && storageIdentity != null
-                            && !storageIdentity.medicationId.equals(rawMedicationId)) {
-                        // A valid FIRED payload stored under another medication's
-                        // key is specifically an identity corruption.
-                        rejectionReason = "identity_mismatch";
-                    } else {
-                        // Any well-formed FIRED row that reaches this branch has
-                        // either a malformed field set or a dose/date mismatch under
-                        // the same medication. Only a medication identity mismatch
-                        // is classified separately above.
-                        rejectionReason = "malformed_fields";
-                    }
-                    String rejected = AutoDeductionPersistenceCodec.encodeRejected(
-                            prefKey,
-                            rejectionReason,
-                            System.currentTimeMillis());
-                    if (editor == null) editor = persistence.eventEditor();
-                    editor.putString(prefKey, rejected);
-                    needsTerminalization = true;
-                } catch (JSONException e) {
-                    return FiredEventsResult.failure("rejected_build_failed");
-                }
+                String rejected = AutoDeductionPersistenceCodec.encodeRejected(
+                        prefKey,
+                        classification.rejectionReason,
+                        System.currentTimeMillis());
+                if (editor == null) editor = persistence.eventEditor();
+                editor.putString(prefKey, rejected);
+                needsTerminalization = true;
             }
 
             if (needsTerminalization && !commitEditor(editor)) {
@@ -779,7 +696,7 @@ public final class AutoDeductionEventStore {
                 return EventLookupResult.absent();
             }
 
-            StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
+            AutoDeductionEventQueries.StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
             if (!storageIdentityMatchesPayload(storageIdentity, record)) {
                 String reason = storageIdentity != null
                         && !storageIdentity.medicationId.equals(record.occurrence.medicationId)

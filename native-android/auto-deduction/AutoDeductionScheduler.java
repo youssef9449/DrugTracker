@@ -1039,7 +1039,6 @@ public final class AutoDeductionScheduler {
                 observedVersion,
                 treatmentEndDateOverride);
     }
-    public ScheduleResult scheduleNextOccurrence(String medicationId,String doseId,String fromDate,String timeHhmm,double amount) { return recurrenceService.scheduleNextOccurrence(medicationId,doseId,fromDate,timeHhmm,amount); }
     public ScheduleResult scheduleNextOccurrenceIfAbsent(String medicationId,String doseId,String fromDate,String timeHhmm,double amount,long expectedGen) { return recurrenceService.scheduleNextOccurrenceIfAbsent(medicationId,doseId,fromDate,timeHhmm,amount,expectedGen); }
     boolean recoverSuccessorObligations() { return recurrenceService.recoverSuccessorObligations(); }
     ScheduleResult scheduleNextOccurrenceFromIndependentEvidenceLocked(

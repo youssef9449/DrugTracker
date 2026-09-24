@@ -10,22 +10,24 @@ import app.drugtracker.autodeduction.AutoDeductionScheduler.CancelResult;
 
 /** Focused Auto-Deduction responsibility collaborator: AutoDeductionRecurrence. */
 final class AutoDeductionRecurrence {
-    interface Host {
-        Context appContext();
-        AutoSuccessorObligationStore successorObligationStore();
+    /**
+     * Host surface narrowed to the ports this service consumes (#466): the
+     * recurrence service OWNS generation storage, so GenerationPort is not
+     * part of its host; the remaining capabilities come from the named ports.
+     */
+    interface Host extends
+            AutoDeductionPorts.AppContextPort,
+            AutoDeductionPorts.ScheduleStoragePort,
+            AutoDeductionPorts.RecoveryEvidencePort,
+            AutoDeductionPorts.CancellationPort,
+            AutoDeductionPorts.FailurePolicyPort,
+            AutoDeductionPorts.SuccessorObligationPort {
         CancelResult cancelAllSchedulesForDoseLocked(String medicationId, String doseId);
-        AutoDeductionFailurePolicy failurePolicy();
         boolean removeScheduleMetadataIfVersionLocked(String prefKey, String expectedVersion);
-        AutoDeductionSchedulingAdapter schedulingAdapter();
-        boolean isOccurrenceCancelledKey(String occurrenceKey);
-        AutoDeductionEventStore eventStore();
-        long recoveryNowForService();
         FireResult recoverMissedOccurrence(
                 String medicationId, String doseId, String calendarDate,
                 long scheduledAt, double amount, long generation,
                 String treatmentEndDate, String fallbackTimeHhmm);
-        boolean markSuccessorObligationStockApplied(
-                String medicationId, String doseId, String calendarDate);
     }
 
     private final Host host;
@@ -190,14 +192,13 @@ ScheduleResult installFutureSuccessorIfGenerationHolds(
             if (currentPast != null) {
                 treatmentEndDate = currentPast.treatmentEndDate;
             }
-            if (!treatmentEndDate.isEmpty()
-                    && !AutoDeductionContract.isValidCalendarDate(treatmentEndDate)) {
+            // Consolidated treatment-end precondition (#514): the validity
+            // rule exists ONCE and its result is reused by the successor
+            // installation path below.
+            if (!isValidTreatmentEndDate(treatmentEndDate)) {
                 return ScheduleResult.fail("invalid_treatment_end_date");
             }
             if (!treatmentEndDate.isEmpty()) {
-                if (!AutoDeductionContract.isValidCalendarDate(treatmentEndDate)) {
-                    return ScheduleResult.fail("invalid_treatment_end_date");
-                }
                 if (calendarDate.compareTo(treatmentEndDate) > 0) {
                     if (!cleanupPastScheduleIfOwnedLocked(pastPrefKey, observedVersion)) {
                         return ScheduleResult.fail("source_schedule_cleanup_failed");
@@ -404,6 +405,42 @@ ScheduleResult installFutureSuccessorIfGenerationHolds(
         return ScheduleResult.success(record.occurrence.canonicalKey());
     }
 
+        /**
+     * Named treatment-end validity precondition (#514): one definition of a
+     * usable treatmentEndDate (empty = unbounded; otherwise a real calendar
+     * date). Reused by the successor-installation flow.
+     */
+    private static boolean isValidTreatmentEndDate(String treatmentEndDate) {
+        return treatmentEndDate == null
+                || treatmentEndDate.isEmpty()
+                || AutoDeductionContract.isValidCalendarDate(treatmentEndDate);
+    }
+
+    /**
+     * Shared recurrence-walking decision (#509): the ONE canonical
+     * treatment-end gate applied by every successor-walking path
+     * (if-absent continuation, obligation continuation). Returns null when
+     * the walk may continue past nextDate, or the terminal walk outcome.
+     */
+    private ScheduleResult treatmentEndWalkGate(
+            String treatmentEndDate,
+            String nextDate,
+            String medicationId,
+            String doseId) {
+        if (!isValidTreatmentEndDate(treatmentEndDate)) {
+            return ScheduleResult.fail("invalid_treatment_end_date");
+        }
+        if (!treatmentEndDate.isEmpty()
+                && nextDate.compareTo(treatmentEndDate) > 0) {
+            return new ScheduleResult(
+                    true,
+                    "treatment_ended",
+                    AutoDeductionContract.occurrenceKey(
+                            medicationId, doseId, nextDate));
+        }
+        return null;
+    }
+
     private boolean cleanupPastScheduleIfOwnedLocked(
             String pastPrefKey,
             String observedVersion) {
@@ -419,30 +456,6 @@ ScheduleResult installFutureSuccessorIfGenerationHolds(
         return host.schedulingAdapter().removeScheduleIfOwned(
                 pastPrefKey,
                 observedVersion);
-    }
-
-public ScheduleResult scheduleNextOccurrence(
-            String medicationId,
-            String doseId,
-            String fromCalendarDate,
-            String timeHhmm,
-            double amount
-    ) {
-        long generation;
-        synchronized (AutoDeductionScheduler.class) {
-            generation = ensureRecurrenceGenerationLocked(
-                    medicationId, doseId);
-        }
-        if (generation <= 0L) {
-            return ScheduleResult.fail("recurrence_generation_write_failed");
-        }
-        return scheduleNextOccurrenceIfAbsent(
-                medicationId,
-                doseId,
-                fromCalendarDate,
-                timeHhmm,
-                amount,
-                generation);
     }
 
 public ScheduleResult scheduleNextOccurrenceIfAbsent(
@@ -545,13 +558,16 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
         }
 
         while (true) {
-            if (!treatmentEndDate.isEmpty()
-                    && nextDate.compareTo(treatmentEndDate) > 0) {
-                return new ScheduleResult(
-                        true,
-                        "treatment_ended",
-                        AutoDeductionContract.occurrenceKey(
-                                medicationId, doseId, nextDate));
+            // Shared recurrence-walking gate (#509) — validity was already
+            // part of the source-snapshot acceptance above; the canonical
+            // gate keeps both paths on the same decision.
+            ScheduleResult gate = treatmentEndWalkGate(
+                    treatmentEndDate,
+                    nextDate,
+                    medicationId,
+                    doseId);
+            if (gate != null) {
+                return gate;
             }
 
             Long epoch = AutoDeductionScheduler.computeEpochMs(nextDate, activeTime);
@@ -766,18 +782,15 @@ public ScheduleResult scheduleNextOccurrenceIfAbsent(
         String nextDate = AutoDeductionScheduler.nextCalendarDate(currentObligationDate);
 
         while (nextDate != null) {
-            if (!obligation.treatmentEndDate.isEmpty()
-                    && !AutoDeductionContract.isValidCalendarDate(
-                            obligation.treatmentEndDate)) {
-                return ScheduleResult.fail("invalid_treatment_end_date");
-            }
-            if (!obligation.treatmentEndDate.isEmpty()
-                    && nextDate.compareTo(obligation.treatmentEndDate) > 0) {
-                return new ScheduleResult(
-                        true,
-                        "treatment_ended",
-                        AutoDeductionContract.occurrenceKey(
-                                medicationId, doseId, nextDate));
+            // Shared recurrence-walking gate (#509) — same decision as the
+            // if-absent path so edge-case fixes cannot drift.
+            ScheduleResult gate = treatmentEndWalkGate(
+                    obligation.treatmentEndDate,
+                    nextDate,
+                    medicationId,
+                    doseId);
+            if (gate != null) {
+                return gate;
             }
 
             Long epoch = AutoDeductionScheduler.computeEpochMs(

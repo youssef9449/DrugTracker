@@ -34,19 +34,28 @@ const mocks = vi.hoisted(() => ({
   cancelStale: vi.fn(),
 }));
 
-vi.mock('../utils/notificationTestFacade', async () => {
-  const actual = await vi.importActual<typeof import('../utils/notificationTestFacade')>(
-    '../utils/notificationTestFacade'
+vi.mock('@/utils/doseReminderScheduling', async () => {
+  const actual = await vi.importActual<typeof import('@/utils/doseReminderScheduling')>(
+    '@/utils/doseReminderScheduling'
   );
   return {
     ...actual,
     scheduleDoseReminder: mocks.schedule,
     cancelDoseReminder: mocks.cancel,
-    cancelSnoozedDoseReminder: mocks.cancelSnoozed,
     isDoseReminderPending: mocks.isPending,
     isNativeDoseReminderReArmed: mocks.isNativeReArmed,
     // cancelStaleDoseReminderAlarms: NOT mocked — real implementation runs
     // so the test can verify actual IDs sent to LocalNotifications.cancel.
+  };
+});
+
+vi.mock('@/utils/notifications/doseReminderNotifications', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/utils/notifications/doseReminderNotifications')
+  >('@/utils/notifications/doseReminderNotifications');
+  return {
+    ...actual,
+    cancelSnoozedDoseReminder: mocks.cancelSnoozed,
   };
 });
 

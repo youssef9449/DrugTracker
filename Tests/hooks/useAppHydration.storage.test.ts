@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
+import { NOTIFICATIONS_KEY } from '@/constants/storageKeys';
 
 vi.mock('@/utils/notifications/notificationPermissions', () => ({
   getNotificationPermission: vi.fn(() => Promise.resolve('unsupported')),
@@ -101,14 +102,14 @@ describe('notification permission result application', () => {
   });
 
   it('never overwrites an explicit persisted preference', () => {
-    localStorage.setItem('notifications_enabled', 'true');
+    localStorage.setItem(NOTIFICATIONS_KEY, 'true');
     const setNotificationsEnabled = vi.fn();
 
     applyNotificationPermissionResultIfUnset(false, setNotificationsEnabled);
 
     expect(setNotificationsEnabled).not.toHaveBeenCalled();
 
-    localStorage.setItem('notifications_enabled', 'false');
+    localStorage.setItem(NOTIFICATIONS_KEY, 'false');
     applyNotificationPermissionResultIfUnset(true, setNotificationsEnabled);
 
     expect(setNotificationsEnabled).not.toHaveBeenCalled();

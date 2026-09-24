@@ -1,345 +1,49 @@
-import { useEffect, type Dispatch, type SetStateAction } from 'react';
-import type {
-  Medication,
-  ConsumptionLog,
-  PharmacySettings,
-} from '../types';
-import { DEFAULT_PHARMACY_SETTINGS } from '../types';
+import { useEffect } from 'react';
+import type { AppHydrationPhaseSetters } from '../utils/appHydrationPhases';
 import {
-  requestNotificationPermission,
-  getNotificationPermission,
-} from '../utils/notifications/notificationPermissions';
-import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
-import { initNativeBridge } from '../native';
-import { isNotificationChannelEnabled, retryPersistedNotificationDeliveries } from '../utils/notificationRuntime';
-import {
-  DOSE_REMINDER_CHANNEL_ID,
-  DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
-} from '../utils/notifications/doseReminderNotifications';
-import {
-  isValidConsumptionLogRecord,
-  isValidMedicationRecord,
-  loadJson,
-  loadString,
-  persist,
-  readStorageItem,
-} from '../utils/storage';
-import { convergeAutoDeductionStock } from '../utils/autoDeductionNativeStock';
-import {
-  STORAGE_MEDS_KEY,
-  STORAGE_LOGS_KEY,
-  STORAGE_PHARMACY_KEY,
-  STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
-  STORAGE_AUTO_DEDUCT_PROMPTED_KEY,
-  SOUND_KEY,
-  NOTIFICATIONS_KEY,
-  FONT_SIZE_KEY,
-  CRITICAL_STOCK_ALERTS_KEY,
-  COMPACT_VIEW_KEY,
-} from '../constants/storageKeys';
+  loadPersistedAppState,
+  initializeAppPermissions,
+  initializeNativeRuntime,
+  convergeHydratedStock,
+  publishHydrationReadiness,
+} from '../utils/appHydrationPhases';
 
-export interface AppHydrationSetters {
-  setMedications: Dispatch<SetStateAction<Medication[]>>;
-  setLogs: Dispatch<SetStateAction<ConsumptionLog[]>>;
-  setPharmacySettings: Dispatch<SetStateAction<PharmacySettings>>;
-  setHydrated: Dispatch<SetStateAction<boolean>>;
-  setIsFirstRun: Dispatch<SetStateAction<boolean>>;
-  setIsAutoDeductPromptOpen: Dispatch<SetStateAction<boolean>>;
-  setSoundEnabled: Dispatch<SetStateAction<boolean>>;
-  setNotificationsEnabled: Dispatch<SetStateAction<boolean>>;
-  setCriticalStockAlertsEnabled: Dispatch<SetStateAction<boolean>>;
-  setExactAlarmPermission: Dispatch<SetStateAction<ExactAlarmPermission | null>>;
-  setGlobalAutoDeductEnabled: Dispatch<SetStateAction<boolean>>;
-  setFontScale: Dispatch<SetStateAction<'normal' | 'large'>>;
-  setIsCompactView: Dispatch<SetStateAction<boolean>>;
-}
+export type AppHydrationSetters = AppHydrationPhaseSetters;
 
 /**
- * Client-side hydration: load persisted state, request permissions,
- * init native bridge, then flip hydrated=true.
+ * Client-side hydration coordinator.
  *
  * Ordering is intentional and must be preserved:
- * read storage → Promise.all(permissions + initNativeBridge)
- * → setHydrated(true) in finally.
+ * 1. persisted-state loading;
+ * 2. notification/exact-alarm capability initialization and native runtime
+ *    initialization start concurrently;
+ * 3. Native Auto stock convergence;
+ * 4. readiness publication.
+ *
+ * Each phase owns one responsibility; this hook only coordinates their order.
  */
 export function useAppHydration(setters: AppHydrationSetters): void {
-  const {
-    setMedications,
-    setLogs,
-    setPharmacySettings,
-    setHydrated,
-    setIsFirstRun,
-    setIsAutoDeductPromptOpen,
-    setSoundEnabled,
-    setNotificationsEnabled,
-    setCriticalStockAlertsEnabled,
-    setExactAlarmPermission,
-    setGlobalAutoDeductEnabled,
-    setFontScale,
-    setIsCompactView,
-  } = setters;
-
   useEffect(() => {
-    // Medications — use loadJson (silent fallback). The "first run"
-    // detection distinguishes "no key set" (null) from "empty array
-    // explicitly saved" (loadJson returns []).
-    const savedMedsStorage = readStorageItem(STORAGE_MEDS_KEY);
-    const autoDeductPromptedStorage = readStorageItem(STORAGE_AUTO_DEDUCT_PROMPTED_KEY);
-    if (!savedMedsStorage.ok) {
-      console.warn('[App] Medication storage read failed; starting with empty state.');
-    }
-    if (!autoDeductPromptedStorage.ok) {
-      console.warn('[App] Auto-deduct prompt storage read failed; skipping first-run prompt.');
-    }
-    // First-ever open: no saved meds. Flag isFirstRun so scheduler effects
-    // stay gated until the user completes the Auto-Deduct decision.
-    // Do NOT open the prompt here — wait until hydrated=true (see finally).
-    const isFirstEverOpen = savedMedsStorage.ok && savedMedsStorage.value === null;
-    let loadedMedications: Medication[] = [];
-    const shouldShowAutoDeductPrompt =
-      isFirstEverOpen && autoDeductPromptedStorage.ok && autoDeductPromptedStorage.value === null;
-    if (isFirstEverOpen) {
-      setIsFirstRun(true);
-    } else {
-      // #15: accept an empty array here (don't gate on length > 0).
-      // Otherwise, when the user deletes all medications, the persisted
-      // "[]" is ignored on next launch, the seed INITIAL_MEDICATIONS
-      // stays in state, and the hydration-gated persistence effect
-      // overwrites the user's "[]" with the seed meds.
-      const parsed = loadJson<unknown>(STORAGE_MEDS_KEY, null);
-      if (Array.isArray(parsed)) {
-        const validMedications = parsed.filter(isValidMedicationRecord);
-        if (validMedications.length !== parsed.length) {
-          console.warn('[App] Ignored malformed persisted medication records during hydration.');
-        }
-        loadedMedications = validMedications;
-      }
-    }
+    const persistedState = loadPersistedAppState(setters);
 
-    // Logs
-    const savedLogs = loadJson<unknown>(STORAGE_LOGS_KEY, null);
-    if (Array.isArray(savedLogs)) {
-      const validLogs = savedLogs.filter(isValidConsumptionLogRecord);
-      if (validLogs.length !== savedLogs.length) {
-        console.warn('[App] Ignored malformed persisted consumption-log records during hydration.');
-      }
-      setLogs(validLogs);
-    }
-
-    // Pharmacy settings — explicit current schema only (no unknown-key pass-through).
-    const parsed = loadJson<Partial<PharmacySettings> | null>(
-      STORAGE_PHARMACY_KEY,
-      null
-    );
-    if (parsed && typeof parsed === 'object') {
-      const pharmacies = Array.isArray(parsed.pharmacies) ? parsed.pharmacies : [];
-      const whatsappContacts = Array.isArray(parsed.whatsappContacts)
-        ? parsed.whatsappContacts
-        : [];
-      const whatsappAddresses = Array.isArray(parsed.whatsappAddresses)
-        ? parsed.whatsappAddresses
-        : [];
-      const selectedWhatsappContactIds = Array.isArray(parsed.selectedWhatsappContactIds)
-        ? parsed.selectedWhatsappContactIds
-        : [];
-      const selectedWhatsappAddressIds = Array.isArray(parsed.selectedWhatsappAddressIds)
-        ? parsed.selectedWhatsappAddressIds
-        : [];
-      const defaultDurationDays =
-        parsed.defaultDurationDays === 60 ? 60 : DEFAULT_PHARMACY_SETTINGS.defaultDurationDays;
-      setPharmacySettings({
-        defaultDurationDays,
-        pharmacies,
-        selectedPharmacyId:
-          typeof parsed.selectedPharmacyId === 'string' && parsed.selectedPharmacyId
-            ? parsed.selectedPharmacyId
-            : pharmacies[0]?.id || '',
-        whatsappContacts,
-        whatsappAddresses,
-        selectedWhatsappContactIds,
-        selectedWhatsappAddressIds,
-      });
-    }
-
-    // Sound flag — persisted as 'true'/'false' string; default true.
-    setSoundEnabled(loadString(SOUND_KEY, 'true') !== 'false');
-
-    // Notifications flag — persisted as 'true'/'false' string if user explicitly set it.
-    const savedNotifications = loadString(NOTIFICATIONS_KEY, '');
-    if (savedNotifications === 'true' || savedNotifications === 'false') {
-      setNotificationsEnabled(savedNotifications === 'true');
-    }
-
-    // Font size — persisted as 'normal'/'large' string.
-    if (loadString(FONT_SIZE_KEY, 'normal') === 'large') setFontScale('large');
-
-    // Critical-stock alerts — if explicitly set, respect user choice; otherwise default false on first run.
-    const savedCritical = loadString(CRITICAL_STOCK_ALERTS_KEY, '');
-    if (savedCritical === 'true' || savedCritical === 'false') {
-      setCriticalStockAlertsEnabled(savedCritical === 'true');
-    } else {
-      setCriticalStockAlertsEnabled(false);
-    }
-
-    // Global auto-deduct — default true.
-    setGlobalAutoDeductEnabled(loadString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true') !== 'false');
-
-    // Compact view preference for All Medications
-    if (loadString(COMPACT_VIEW_KEY, 'false') === 'true') {
-      setIsCompactView(true);
-    }
-
-    // Initialize the in-app notifications flag from the async permission
-    // state if no preference has been explicitly saved yet by the user.
-    // Also check exact-alarm permission (Android 12+) and run native
-    // bridge initialization (notification channels, listeners).
-    //
-    // Hydration MUST complete only AFTER all three settle so the
-    // scheduler effects never run before Android notification channels
-    // exist. Previously initNativeBridge ran fire-and-forget alongside
-    // the permission Promise.all, which allowed hydrated===true while
-    // channel creation was still in flight.
-    //
-    // Each task catches its own errors so a single failure cannot
-    // prevent the others from completing, and .finally still marks
-    // the app ready (matching the previous fault-tolerant policy).
     Promise.all([
-      getNotificationPermission()
-        .then((perm) => {
-          const savedPreference = loadString(NOTIFICATIONS_KEY, '');
-          if (savedPreference === 'true' && perm !== 'granted') {
-            setNotificationsEnabled(false);
-            return;
-          }
-          if (savedPreference === 'true') {
-            setNotificationsEnabled(true);
-            return;
-          }
-          if (savedPreference === '') {
-            setNotificationsEnabled(perm === 'granted');
-
-            // Auto-request notification permission on the FIRST app open
-            // after install. The browser only shows the permission prompt
-            // when the permission state is 'default' (user hasn't been asked
-            // yet). Once the user grants or denies, the browser remembers
-            // the decision and won't re-show the prompt. If the user denied
-            // permission, this becomes a no-op; the bell button in
-            // AppHeader then takes the user to OS settings to re-enable.
-            //
-            // Auto-requesting on mount is recommended by the Web Push API
-            // spec because it ensures the prompt shows after the user has
-            // had a chance to see the app's value (which is now true on
-            // first open, since the user has just installed it).
-            //
-            // On Android 13+ (Capacitor), this triggers the OS
-            // POST_NOTIFICATIONS permission dialog via
-            // LocalNotifications.requestPermissions(). On older Android,
-            // this is a no-op (notifications allowed by default).
-            if (perm === 'default') {
-              requestNotificationPermission()
-                .then((granted) => {
-                  if (loadString(NOTIFICATIONS_KEY, '') === null) {
-                    setNotificationsEnabled(granted);
-                  }
-                })
-                .catch((err) => {
-                  console.warn('[App] Auto-request notification permission failed:', err);
-                });
-            }
-          }
-        })
-        .catch((err) => {
-          console.warn('[App] getNotificationPermission failed:', err);
-        }),
-      getExactAlarmPermission()
-        .then((state) => {
-          setExactAlarmPermission(state);
-        })
-        .catch((err) => {
-          console.warn('[App] getExactAlarmPermission failed:', err);
-        }),
-      // Native bridge: status bar, back button, notification channels,
-      // and listeners. No-op on web — see src/native.ts. Included in
-      // Promise.all so setHydrated cannot race ahead of channel setup.
-      initNativeBridge()
-        .then(async () => {
-          void retryPersistedNotificationDeliveries();
-          const [backgroundChannel, foregroundChannel] = await Promise.all([
-            isNotificationChannelEnabled(DOSE_REMINDER_CHANNEL_ID),
-            isNotificationChannelEnabled(DOSE_REMINDER_FOREGROUND_CHANNEL_ID),
-          ]);
-          if (loadString(NOTIFICATIONS_KEY, '') === 'true'
-              && (!backgroundChannel || !foregroundChannel)) {
-            setNotificationsEnabled(false);
-          }
-        })
-        .catch((err) => {
-          console.warn('[App] Native bridge init failed:', err);
-        }),
-    ]).then(async () => {
-      // Native Auto owns the live stock balance on Android. Existing Native
-      // balances win; localStorage currentPills seeds only medications that
-      // have never been initialized in the Native Auto stock store.
-      if (!isFirstEverOpen && loadedMedications.length > 0) {
-        const native = await convergeAutoDeductionStock(loadedMedications);
-        if (native.ok) {
-          setMedications(native.medications);
-          // Keep the JS durable mirror aligned so a later process restart does
-          // not briefly display an older balance before Native convergence.
-          const currentRaw = JSON.stringify(loadedMedications);
-          const nativeRaw = JSON.stringify(native.medications);
-          if (currentRaw !== nativeRaw) {
-            const persistError = persist(
-              STORAGE_MEDS_KEY,
-              native.medications,
-              { json: true }
-            );
-            if (persistError) {
-              console.warn(
-                '[App] Native Auto stock converged but JS stock mirror persist failed:',
-                persistError
-              );
-            }
-          }
-        } else {
-          // Do not block app hydration on a native stock read failure. The
-          // existing exact-auto reconciliation path remains fail-closed and
-          // will retry on startup/resume rather than fabricating a balance.
-          setMedications(loadedMedications);
-          console.warn(
-            '[App] Native Auto stock convergence failed during hydration:',
-            native.error
-          );
-        }
-      }
-    }).catch((err) => {
-      console.warn('[App] Native Auto stock hydration failed:', err);
-      if (!isFirstEverOpen && loadedMedications.length > 0) {
-        setMedications(loadedMedications);
-      }
-    }).finally(() => {
-      // hydrated means storage + permissions + native bridge + initial Native
-      // stock convergence finished — not that onboarding completed.
-      setHydrated(true);
-      // First-run Auto prompt is eligible only after hydration completes.
-      if (shouldShowAutoDeductPrompt) {
-        setIsAutoDeductPromptOpen(true);
-      }
-    });
-  }, [
-    setMedications,
-    setLogs,
-    setPharmacySettings,
-    setHydrated,
-    setIsFirstRun,
-    setIsAutoDeductPromptOpen,
-    setSoundEnabled,
-    setNotificationsEnabled,
-    setCriticalStockAlertsEnabled,
-    setExactAlarmPermission,
-    setGlobalAutoDeductEnabled,
-    setFontScale,
-    setIsCompactView,
-  ]);
-
+      initializeAppPermissions(setters),
+      initializeNativeRuntime(setters.setNotificationsEnabled).catch((err) => {
+        console.warn('[App] Native bridge init failed:', err);
+      }),
+    ])
+      .then(() => convergeHydratedStock(persistedState, setters.setMedications))
+      .catch((err) => {
+        // Keep the coordinator fault-tolerant if a future phase ever adds an
+        // uncaught failure; readiness still follows the existing contract.
+        console.warn('[App] App hydration phase failed:', err);
+      })
+      .finally(() => {
+        publishHydrationReadiness(
+          setters.setHydrated,
+          persistedState.shouldShowAutoDeductPrompt,
+          setters.setIsAutoDeductPromptOpen
+        );
+      });
+  }, [setters]);
 }

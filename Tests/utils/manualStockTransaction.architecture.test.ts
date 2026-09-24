@@ -30,6 +30,10 @@ const familyModules = {
     path.join(ROOT, 'src/utils/manualStockMutationPreferences.ts'),
     'utf8'
   ),
+  notifications: fs.readFileSync(
+    path.join(ROOT, 'src/utils/manualStockMutationNotifications.ts'),
+    'utf8'
+  ),
 } as const;
 
 describe('Manual Stock transaction architecture', () => {
@@ -51,6 +55,8 @@ describe('Manual Stock transaction architecture', () => {
       preferences: [
         'runGatedAutoDeductToggle',
         'runGatedGlobalAutoDeductToggle',
+      ],
+      notifications: [
         'runGatedMedicationNotificationToggle',
       ],
     };
@@ -77,5 +83,17 @@ describe('Manual Stock transaction architecture', () => {
     expect(transactionSource).toContain('function buildNativeStockDeltas');
     expect(transactionSource).toContain('applyForegroundAutoStockDeltas(');
     expect(transactionSource).toContain('commitDurableAutoStockState(');
+  });
+
+  it('keeps consume policy out of the shared native coordinator', () => {
+    expect(
+      fs.readFileSync(
+        path.join(ROOT, 'src/utils/manualStockMutationShared.ts'),
+        'utf8'
+      )
+    ).not.toMatch(/shouldDismissAlarmAfterManualTake|resolveConsumeDoseId/);
+    expect(
+      familyModules.consumeRestore
+    ).toMatch(/shouldDismissAlarmAfterManualTake|resolveConsumeDoseId/);
   });
 });

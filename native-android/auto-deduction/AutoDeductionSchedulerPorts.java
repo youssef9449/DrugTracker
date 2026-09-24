@@ -238,8 +238,8 @@ final class AutoDeductionSchedulerPorts {
                 return scheduler.markSuccessorObligationStockApplied(
                         medicationId, doseId, calendarDate);
             }
-            @Override public boolean clearIndependentFireRetryEvidenceLocked(String occurrenceKey) {
-                return scheduler.clearIndependentFireRetryEvidenceLocked(occurrenceKey);
+            @Override public void clearIndependentFireRetryEvidenceLocked(String occurrenceKey) {
+                scheduler.clearIndependentFireRetryEvidenceLocked(occurrenceKey);
             }
             @Override public boolean isRecurrenceGenerationAuthorizedLocked(
                     String medicationId, String doseId, long expectedGeneration) {
@@ -341,9 +341,9 @@ final class AutoDeductionSchedulerPorts {
                 return scheduler.scheduleNextOccurrenceFromIndependentEvidenceLocked(
                         medicationId, doseId, calendarDate, evidence);
             }
-            @Override public boolean clearSuccessorObligation(
+            @Override public void clearSuccessorObligation(
                     String medicationId, String doseId, String calendarDate) {
-                return scheduler.clearSuccessorObligation(
+                scheduler.clearSuccessorObligation(
                         medicationId, doseId, calendarDate);
             }
         };

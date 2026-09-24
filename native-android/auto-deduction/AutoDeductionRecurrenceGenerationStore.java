@@ -59,7 +59,13 @@ final class AutoDeductionRecurrenceGenerationStore {
         return g;
     }
 
-    /** Durable generation bump under the caller's lock. */
+    /**
+     * Durable generation bump under the caller's lock (#493): the synchronous
+     * outcome is part of the authorization state machine — a lost bump would
+     * leave a revoked/invalidated generation still authorized, letting an
+     * in-flight operation re-schedule a cancelled recurrence chain. Callers
+     * check the result and treat failure as an authorization-boundary error.
+     */
     boolean commitLocked(String medicationId, String doseId, long nextGeneration) {
         return prefs.edit()
                 .putLong(recurrenceAuthKey(medicationId, doseId), nextGeneration)

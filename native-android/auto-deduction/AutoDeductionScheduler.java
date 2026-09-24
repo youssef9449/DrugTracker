@@ -102,8 +102,8 @@ public final class AutoDeductionScheduler {
     AutoDeductionEventStore eventStore() {
         return new AutoDeductionEventStore(appContext, failurePolicy);
     }
-    boolean clearSuccessorObligation(String medicationId, String doseId, String calendarDate) {
-        return successorObligationStore.clear(medicationId, doseId, calendarDate);
+    void clearSuccessorObligation(String medicationId, String doseId, String calendarDate) {
+        successorObligationStore.clear(medicationId, doseId, calendarDate);
     }
     boolean markSuccessorObligationStockApplied(
             String medicationId, String doseId, String calendarDate) {
@@ -862,7 +862,7 @@ public final class AutoDeductionScheduler {
                 operationVersion,
                 nextRetryCount);
     }
-    boolean clearIndependentFireRetryEvidenceLocked(String occurrenceKey) { return retryService.clearIndependentFireRetryEvidenceLocked(occurrenceKey); }
+    void clearIndependentFireRetryEvidenceLocked(String occurrenceKey) { retryService.clearIndependentFireRetryEvidenceLocked(occurrenceKey); }
     void clearIndependentFireRetryEvidenceAfterStock(String medicationId,String doseId,String calendarDate) { retryService.clearIndependentFireRetryEvidenceAfterStock(medicationId,doseId,calendarDate); }
     public FireResult recoverFireFromIndependentEvidence(String medicationId,String doseId,String calendarDate) { return retryService.recoverFireFromIndependentEvidence(medicationId,doseId,calendarDate); }
     AutoDeductionPersistenceModels.RetryEvidenceRecord getIndependentFireRetryEvidence(

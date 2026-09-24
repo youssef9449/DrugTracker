@@ -82,6 +82,11 @@ final class AutoDeductionEventCompaction {
                 removed++;
             }
             if (editor != null) {
+                // Synchronous commit (#493): the explicit outcome is part of
+                // the CompactionResult contract — a failed terminal-state
+                // sweep must be observable to the caller instead of being
+                // reported as a successful no-op. Runs under the store lock
+                // on background paths only.
                 if (!failurePolicy.allowTerminalStateCompactionCommit()
                         || !editor.commit()) {
                     return AutoDeductionEventStore.CompactionResult.failure(

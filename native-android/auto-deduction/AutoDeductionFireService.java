@@ -23,7 +23,7 @@ final class AutoDeductionFireService {
         Context appContext();
         boolean markSuccessorObligationStockApplied(
                 String medicationId, String doseId, String calendarDate);
-        boolean clearIndependentFireRetryEvidenceLocked(String occurrenceKey);
+        void clearIndependentFireRetryEvidenceLocked(String occurrenceKey);
         boolean isRecurrenceGenerationAuthorizedLocked(
                 String medicationId, String doseId, long expectedGeneration);
     }

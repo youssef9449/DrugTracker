@@ -88,9 +88,17 @@ final class ExactAlarmStore {
     }
 
     /**
-     * Synchronous commit (#493): ownership-safe rollback must restore the
-     * previous durable record synchronously so a rollback failure is
-     * observable to the schedule transaction. Background executor only.
+     * Synchronous commit (#493): durability serves two distinct callers.
+     * Ownership-safe rollback restores the pre-transaction durable record so
+     * that after a failed AlarmManager install the durable state never
+     * describes a schedule the platform does not hold — an asynchronously
+     * restored rollback could be lost in a crash and leave rollback ambiguity
+     * between operation versions. The same write is the durable
+     * delivery-accepted evidence (markOneShotDelivered): a delivery receiver
+     * can be killed as soon as onReceive work ends, so a lost marker would
+     * replay the delivery. The explicit outcome is consumed by both callers
+     * (rollback failure log / delivery-evidence gate). Background executor or
+     * goAsync receiver thread only — never a UI thread.
      */
     boolean writeScheduleRawLocked(
             String featureStorageKey,
@@ -151,10 +159,15 @@ final class ExactAlarmStore {
     }
 
     /**
-     * Synchronous commit (#493): clearing a superseded tombstone is
-     * best-effort (a leftover tombstone is reconciled by ordering), but the
-     * explicit outcome drives the diagnostic log and avoids racing the
-     * immediately-following ownership reads. Background executor only.
+     * Synchronous commit (#493): the removal outcome is part of the recovery
+     * state machine — AutoDeductionFireService's compensation recovery
+     * refuses (fail-closed) to resurrect an occurrence while its durable
+     * cancellation tombstone cannot be confirmed durably cleared; superseded-
+     * tombstone cleanup callers consume the outcome only for diagnostics.
+     * A leftover tombstone is reconciled by ordering, but the compensation
+     * gate needs the confirmed outcome, so apply() would silently disable
+     * that fail-closed check. Background executor or goAsync receiver thread
+     * only — never a UI thread.
      */
     boolean removeCancellationTombstoneLocked(
             String featureStorageKey) {

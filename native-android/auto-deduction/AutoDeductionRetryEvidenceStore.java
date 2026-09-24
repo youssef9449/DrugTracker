@@ -35,6 +35,12 @@ final class AutoDeductionRetryEvidenceStore {
         }
     }
 
+    /**
+     * Synchronous commit (#493): the evidence record is the crash-recovery
+     * proof that a fire delivery reached the Auto boundary, so it must be
+     * durably written before the caller schedules the retry that depends on
+     * it; the outcome drives the retry-scheduling decision.
+     */
     boolean save(
             AutoDeductionPersistenceModels.RetryEvidenceRecord record,
             AutoDeductionFailurePolicy failurePolicy) {
@@ -50,11 +56,19 @@ final class AutoDeductionRetryEvidenceStore {
         }
     }
 
-    boolean clear(String occurrenceKey) {
-        if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
+    /**
+     * Asynchronous cleanup (#493): invoked only after the occurrence's
+     * completion is already durably recorded (FIRED row / idempotency marker /
+     * successor chain), so the evidence is redundant. No outcome is reported:
+     * a record that survives a crash is re-processed idempotently by recovery
+     * (ownership/generation guards plus the occurrence-level idempotency
+     * markers) and re-cleaned there.
+     */
+    void clear(String occurrenceKey) {
+        if (occurrenceKey == null || occurrenceKey.isEmpty()) return;
         String key = KEY_PREFIX + occurrenceKey;
-        if (!prefs.contains(key)) return true;
-        return prefs.edit().remove(key).commit();
+        if (!prefs.contains(key)) return;
+        prefs.edit().remove(key).apply();
     }
 
     static final class ListResult {

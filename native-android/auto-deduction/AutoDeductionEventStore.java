@@ -122,6 +122,10 @@ public final class AutoDeductionEventStore {
                 }
 
                 if (written) {
+                    // Stale pending-marker cleanup (#493): the FIRED row is
+                    // already durable, so the removal is asynchronous; a
+                    // marker that survives a crash is re-cleaned idempotently
+                    // by the next promotion pass.
                     persistence.removePending(KEY_PENDING_PREFIX + key);
                     return new InsertFiredResult(
                             InsertFiredResult.Status.CREATED);
@@ -238,9 +242,12 @@ public final class AutoDeductionEventStore {
                 }
             }
 
-            if (!persistence.removePendingKeys(toRemove)) {
-                Log.w(TAG, "pending-fire cleanup commit failed");
-            }
+            // Batched pending cleanup (#493): every promoted FIRED row (or
+            // already-existing FIRED row) is durable before its marker is
+            // removed, so the cleanup outcome needs no failure signal — a
+            // removal lost to a crash is re-cleaned idempotently by the next
+            // promotion pass because promotion re-checks containsEvent.
+            persistence.removePendingKeys(toRemove);
         }
 
         return promotionFailed
@@ -251,8 +258,11 @@ public final class AutoDeductionEventStore {
 
     /**
      * Preserve malformed crash-recovery evidence in a separate durable namespace.
-     * The original live pending key is removed only in the same successful commit
-     * that creates its quarantine record.
+     * The quarantine record and the removal of the original live pending key
+     * are one atomic editor transaction, and the synchronous commit outcome is
+     * part of the fail-closed promotion contract (#493): a quarantine that
+     * cannot be durably written must fail the promotion pass instead of
+     * silently dropping the malformed evidence.
      */
     private boolean quarantineMalformedPendingLocked(
             String pendingKey,
@@ -668,6 +678,12 @@ public final class AutoDeductionEventStore {
         }
     }
 
+    /**
+     * Synchronous batched terminalization commit (#493): malformed FIRED rows
+     * are rewritten to durable REJECTED evidence before the read reports
+     * success, so the explicit outcome drives the fail-closed
+     * {@code rejected_persist_failed} contract of listFiredEventsResult.
+     */
     private boolean commitEditor(SharedPreferences.Editor editor) {
         return editor != null
                 && failurePolicy.allowEventCommit()

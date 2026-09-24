@@ -214,21 +214,33 @@ public class AutoDeductionPlugin extends Plugin {
     }
     @PluginMethod
     public void listFiredEvents(PluginCall call) {
-        AutoDeductionEventStore store = new AutoDeductionEventStore(getContext());
-        AutoDeductionEventStore.FiredEventsResult result = store.listFiredEventsResult();
-        JSArray arr = new JSArray();
-        for (AutoDeductionPersistenceModels.EventRecord record : result.records) {
+        // #493: listFiredEventsResult reaches synchronous commit() work
+        // (pending promotion, terminalization, quarantine), so the store work
+        // is dispatched off the Capacitor plugin thread.
+        app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
             try {
-                arr.put(toJSObject(AutoDeductionPersistenceCodec.encodeEvent(record)));
+                AutoDeductionEventStore store = new AutoDeductionEventStore(getContext());
+                AutoDeductionEventStore.FiredEventsResult result = store.listFiredEventsResult();
+                JSArray arr = new JSArray();
+                for (AutoDeductionPersistenceModels.EventRecord record : result.records) {
+                    try {
+                        arr.put(toJSObject(AutoDeductionPersistenceCodec.encodeEvent(record)));
+                    } catch (Exception e) {
+                        Log.w(TAG, "skip event", e);
+                    }
+                }
+                JSObject ret = new JSObject();
+                ret.put("ok", result.ok);
+                ret.put("events", arr);
+                if (result.error != null) ret.put("error", result.error);
+                call.resolve(ret);
             } catch (Exception e) {
-                Log.w(TAG, "skip event", e);
+                Log.e(TAG, "listFiredEvents failed", e);
+                call.reject(e.getMessage() != null
+                        ? e.getMessage()
+                        : "list_fired_events_failed");
             }
-        }
-        JSObject ret = new JSObject();
-        ret.put("ok", result.ok);
-        ret.put("events", arr);
-        if (result.error != null) ret.put("error", result.error);
-        call.resolve(ret);
+        });
     }
 
     @PluginMethod
@@ -236,13 +248,24 @@ public class AutoDeductionPlugin extends Plugin {
         String medicationId = call.getString("medicationId");
         String doseId = call.getString("doseId");
         String calendarDate = call.getString("calendarDate");
-        AutoDeductionEventStore store = new AutoDeductionEventStore(getContext());
-        AutoDeductionEventStore.MarkResult result = store.markReconciled(medicationId, doseId, calendarDate);
-        new AutoDeductionScheduler(getContext()).compactTerminalState();
-        JSObject ret = new JSObject();
-        ret.put("ok", result.ok);
-        ret.put("changed", result.changed);
-        call.resolve(ret);
+        // #493: markReconciled commits the FIRED → RECONCILED transition and
+        // runs terminal-state compaction — dispatch off the plugin thread.
+        app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
+            try {
+                AutoDeductionEventStore store = new AutoDeductionEventStore(getContext());
+                AutoDeductionEventStore.MarkResult result = store.markReconciled(medicationId, doseId, calendarDate);
+                new AutoDeductionScheduler(getContext()).compactTerminalState();
+                JSObject ret = new JSObject();
+                ret.put("ok", result.ok);
+                ret.put("changed", result.changed);
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "markReconciled failed", e);
+                call.reject(e.getMessage() != null
+                        ? e.getMessage()
+                        : "mark_reconciled_failed");
+            }
+        });
     }
     @PluginMethod
     public void restoreFutureSchedules(PluginCall call) {
@@ -279,34 +302,39 @@ public class AutoDeductionPlugin extends Plugin {
      */
     @PluginMethod
     public void listScheduledOccurrences(PluginCall call) {
-        try {
-            AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-            java.util.List<AutoDeductionPersistenceModels.ScheduledOccurrenceRecord> rows =
-                    scheduler.listScheduledOccurrences();
-            JSArray arr = new JSArray();
-            for (AutoDeductionPersistenceModels.ScheduledOccurrenceRecord row : rows) {
-                AutoDeductionPersistenceModels.ScheduleRecord o = row.schedule;
-                JSObject js = new JSObject();
-                js.put("medicationId", o.occurrence.medicationId);
-                js.put("doseId", o.occurrence.doseId);
-                js.put("calendarDate", o.occurrence.calendarDate);
-                js.put("timeHhmm", o.timeHhmm);
-                js.put("amount", o.amount);
-                js.put("scheduledAtEpochMs", o.scheduledAtEpochMs);
-                if (row.fireRetryCount > 0) {
-                    js.put("fireRetryCount", row.fireRetryCount);
+        // #493: the malformed-metadata quarantine path inside the listing can
+        // cancel an occurrence (tombstone + metadata commits) — dispatch off
+        // the plugin thread.
+        app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
+            try {
+                AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+                java.util.List<AutoDeductionPersistenceModels.ScheduledOccurrenceRecord> rows =
+                        scheduler.listScheduledOccurrences();
+                JSArray arr = new JSArray();
+                for (AutoDeductionPersistenceModels.ScheduledOccurrenceRecord row : rows) {
+                    AutoDeductionPersistenceModels.ScheduleRecord o = row.schedule;
+                    JSObject js = new JSObject();
+                    js.put("medicationId", o.occurrence.medicationId);
+                    js.put("doseId", o.occurrence.doseId);
+                    js.put("calendarDate", o.occurrence.calendarDate);
+                    js.put("timeHhmm", o.timeHhmm);
+                    js.put("amount", o.amount);
+                    js.put("scheduledAtEpochMs", o.scheduledAtEpochMs);
+                    if (row.fireRetryCount > 0) {
+                        js.put("fireRetryCount", row.fireRetryCount);
+                    }
+                    arr.put(js);
                 }
-                arr.put(js);
+                JSObject ret = new JSObject();
+                ret.put("schedules", arr);
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "listScheduledOccurrences failed", e);
+                call.reject(e.getMessage() != null
+                        ? e.getMessage()
+                        : "list_schedules_failed");
             }
-            JSObject ret = new JSObject();
-            ret.put("schedules", arr);
-            call.resolve(ret);
-        } catch (Exception e) {
-            Log.e(TAG, "listScheduledOccurrences failed", e);
-            call.reject(e.getMessage() != null
-                    ? e.getMessage()
-                    : "list_schedules_failed");
-        }
+        });
     }
     /**
      * Initialize Native stock for the currently persisted JS medications.
@@ -317,48 +345,52 @@ public class AutoDeductionPlugin extends Plugin {
     @PluginMethod
     public void initializeStock(PluginCall call) {
         JSArray medications = call.getArray("medications");
-        List<AutoDeductionStockStore.StockSeed> seeds =
-                new ArrayList<AutoDeductionStockStore.StockSeed>();
-        try {
-            if (medications != null) {
-                for (int i = 0; i < medications.length(); i++) {
-                    JSONObject obj = medications.optJSONObject(i);
-                    if (obj == null) continue;
-                    String medicationId = obj.optString("medicationId", "").trim();
-                    double currentPills = obj.optDouble("currentPills", Double.NaN);
-                    if (medicationId.isEmpty()
-                            || !Double.isFinite(currentPills)
-                            || currentPills < 0.0) {
-                        continue;
+        // #493: ensureMissingAndRead performs the synchronous baseline commit
+        // that gates lifecycle recovery — dispatch off the plugin thread.
+        app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
+            List<AutoDeductionStockStore.StockSeed> seeds =
+                    new ArrayList<AutoDeductionStockStore.StockSeed>();
+            try {
+                if (medications != null) {
+                    for (int i = 0; i < medications.length(); i++) {
+                        JSONObject obj = medications.optJSONObject(i);
+                        if (obj == null) continue;
+                        String medicationId = obj.optString("medicationId", "").trim();
+                        double currentPills = obj.optDouble("currentPills", Double.NaN);
+                        if (medicationId.isEmpty()
+                                || !Double.isFinite(currentPills)
+                                || currentPills < 0.0) {
+                            continue;
+                        }
+                        seeds.add(new AutoDeductionStockStore.StockSeed(
+                                medicationId, currentPills));
                     }
-                    seeds.add(new AutoDeductionStockStore.StockSeed(
-                            medicationId, currentPills));
                 }
+                AutoDeductionStockStore.SnapshotResult result =
+                        new AutoDeductionStockStore(getContext()).ensureMissingAndRead(seeds);
+                JSObject ret = new JSObject();
+                ret.put("ok", result.ok);
+                JSArray stocks = new JSArray();
+                for (Map.Entry<String, Double> entry : result.stocks.entrySet()) {
+                    JSObject stock = new JSObject();
+                    stock.put("medicationId", entry.getKey());
+                    stock.put("currentPills", entry.getValue());
+                    stocks.put(stock);
+                }
+                ret.put("stocks", stocks);
+                if (result.error != null) ret.put("error", result.error);
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "initializeStock failed", e);
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("stocks", new JSArray());
+                ret.put("error", e.getMessage() != null
+                        ? e.getMessage()
+                        : "stock_init_failed");
+                call.resolve(ret);
             }
-            AutoDeductionStockStore.SnapshotResult result =
-                    new AutoDeductionStockStore(getContext()).ensureMissingAndRead(seeds);
-            JSObject ret = new JSObject();
-            ret.put("ok", result.ok);
-            JSArray stocks = new JSArray();
-            for (Map.Entry<String, Double> entry : result.stocks.entrySet()) {
-                JSObject stock = new JSObject();
-                stock.put("medicationId", entry.getKey());
-                stock.put("currentPills", entry.getValue());
-                stocks.put(stock);
-            }
-            ret.put("stocks", stocks);
-            if (result.error != null) ret.put("error", result.error);
-            call.resolve(ret);
-        } catch (Exception e) {
-            Log.e(TAG, "initializeStock failed", e);
-            JSObject ret = new JSObject();
-            ret.put("ok", false);
-            ret.put("stocks", new JSArray());
-            ret.put("error", e.getMessage() != null
-                    ? e.getMessage()
-                    : "stock_init_failed");
-            call.resolve(ret);
-        }
+        });
     }
     /**
      * Apply foreground signed stock deltas idempotently by mutationSeq.
@@ -370,73 +402,78 @@ public class AutoDeductionPlugin extends Plugin {
         Long mutationSeqObj = call.getLong("mutationSeq");
         long mutationSeq = mutationSeqObj != null ? mutationSeqObj : 0L;
         JSArray rawDeltas = call.getArray("deltas");
-        List<AutoDeductionStockStore.StockDelta> deltas =
-                new ArrayList<AutoDeductionStockStore.StockDelta>();
-        try {
-            if (rawDeltas != null) {
-                for (int i = 0; i < rawDeltas.length(); i++) {
-                    JSONObject obj = rawDeltas.optJSONObject(i);
-                    if (obj == null) continue;
-                    deltas.add(new AutoDeductionStockStore.StockDelta(
-                            obj.optString("medicationId", "").trim(),
-                            obj.optDouble("delta", Double.NaN)));
-                }
-            }
-            List<AutoDeductionStockStore.OccurrenceResolution> resolutions =
-                    new ArrayList<AutoDeductionStockStore.OccurrenceResolution>();
-            JSArray rawResolutions = call.getArray("occurrenceResolutions");
-            if (rawResolutions != null) {
-                for (int i = 0; i < rawResolutions.length(); i++) {
-                    JSONObject obj = rawResolutions.optJSONObject(i);
-                    if (obj == null) continue;
-                    String type = obj.optString("type", "").trim().toUpperCase();
-                    AutoDeductionStockStore.OccurrenceResolution.Type resolutionType;
-                    try {
-                        resolutionType =
-                                AutoDeductionStockStore.OccurrenceResolution.Type.valueOf(type);
-                    } catch (IllegalArgumentException e) {
-                        JSObject ret = new JSObject();
-                        ret.put("ok", false);
-                        ret.put("alreadyApplied", false);
-                        ret.put("stocks", new JSArray());
-                        ret.put("error", "invalid_occurrence_resolution");
-                        call.resolve(ret);
-                        return;
+        JSArray rawResolutions = call.getArray("occurrenceResolutions");
+        // #493: applyForegroundDeltas commits deltas + the idempotency
+        // sequence and then runs terminal-state compaction — dispatch off the
+        // plugin thread.
+        app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
+            List<AutoDeductionStockStore.StockDelta> deltas =
+                    new ArrayList<AutoDeductionStockStore.StockDelta>();
+            try {
+                if (rawDeltas != null) {
+                    for (int i = 0; i < rawDeltas.length(); i++) {
+                        JSONObject obj = rawDeltas.optJSONObject(i);
+                        if (obj == null) continue;
+                        deltas.add(new AutoDeductionStockStore.StockDelta(
+                                obj.optString("medicationId", "").trim(),
+                                obj.optDouble("delta", Double.NaN)));
                     }
-                    resolutions.add(new AutoDeductionStockStore.OccurrenceResolution(
-                            obj.optString("medicationId", "").trim(),
-                            obj.optString("doseId", "").trim(),
-                            obj.optString("calendarDate", ""),
-                            resolutionType));
                 }
+                List<AutoDeductionStockStore.OccurrenceResolution> resolutions =
+                        new ArrayList<AutoDeductionStockStore.OccurrenceResolution>();
+                if (rawResolutions != null) {
+                    for (int i = 0; i < rawResolutions.length(); i++) {
+                        JSONObject obj = rawResolutions.optJSONObject(i);
+                        if (obj == null) continue;
+                        String type = obj.optString("type", "").trim().toUpperCase();
+                        AutoDeductionStockStore.OccurrenceResolution.Type resolutionType;
+                        try {
+                            resolutionType =
+                                    AutoDeductionStockStore.OccurrenceResolution.Type.valueOf(type);
+                        } catch (IllegalArgumentException e) {
+                            JSObject ret = new JSObject();
+                            ret.put("ok", false);
+                            ret.put("alreadyApplied", false);
+                            ret.put("stocks", new JSArray());
+                            ret.put("error", "invalid_occurrence_resolution");
+                            call.resolve(ret);
+                            return;
+                        }
+                        resolutions.add(new AutoDeductionStockStore.OccurrenceResolution(
+                                obj.optString("medicationId", "").trim(),
+                                obj.optString("doseId", "").trim(),
+                                obj.optString("calendarDate", ""),
+                                resolutionType));
+                    }
+                }
+                AutoDeductionStockStore.ForegroundApplyResult result =
+                        new AutoDeductionStockStore(getContext()).applyForegroundDeltas(
+                                mutationSeq, deltas, resolutions);
+                new AutoDeductionScheduler(getContext()).compactTerminalState();
+                JSObject ret = new JSObject();
+                ret.put("ok", result.ok);
+                ret.put("alreadyApplied", result.alreadyApplied);
+                JSArray stocks = new JSArray();
+                for (Map.Entry<String, Double> entry : result.stocks.entrySet()) {
+                    JSObject stock = new JSObject();
+                    stock.put("medicationId", entry.getKey());
+                    stock.put("currentPills", entry.getValue());
+                    stocks.put(stock);
+                }
+                ret.put("stocks", stocks);
+                if (result.error != null) ret.put("error", result.error);
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "applyForegroundStockDeltas failed", e);
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("alreadyApplied", false);
+                ret.put("error", e.getMessage() != null
+                        ? e.getMessage()
+                        : "foreground_stock_failed");
+                call.resolve(ret);
             }
-            AutoDeductionStockStore.ForegroundApplyResult result =
-                    new AutoDeductionStockStore(getContext()).applyForegroundDeltas(
-                            mutationSeq, deltas, resolutions);
-            new AutoDeductionScheduler(getContext()).compactTerminalState();
-            JSObject ret = new JSObject();
-            ret.put("ok", result.ok);
-            ret.put("alreadyApplied", result.alreadyApplied);
-            JSArray stocks = new JSArray();
-            for (Map.Entry<String, Double> entry : result.stocks.entrySet()) {
-                JSObject stock = new JSObject();
-                stock.put("medicationId", entry.getKey());
-                stock.put("currentPills", entry.getValue());
-                stocks.put(stock);
-            }
-            ret.put("stocks", stocks);
-            if (result.error != null) ret.put("error", result.error);
-            call.resolve(ret);
-        } catch (Exception e) {
-            Log.e(TAG, "applyForegroundStockDeltas failed", e);
-            JSObject ret = new JSObject();
-            ret.put("ok", false);
-            ret.put("alreadyApplied", false);
-            ret.put("error", e.getMessage() != null
-                    ? e.getMessage()
-                    : "foreground_stock_failed");
-            call.resolve(ret);
-        }
+        });
     }
     /**
      * Repair/apply one exact Auto occurrence on the Native stock authority.
@@ -462,20 +499,24 @@ public class AutoDeductionPlugin extends Plugin {
         String calendarDate = call.getString("calendarDate");
         Double amountObj = call.getDouble("amount");
         double amount = amountObj != null ? amountObj : Double.NaN;
-        AutoDeductionStockStore store = new AutoDeductionStockStore(getContext());
-        AutoDeductionStockStore.AutoApplyResult result =
-                recovery
-                        ? store.applyAutoDeductionForRecovery(
-                                medicationId, doseId, calendarDate, amount)
-                        : store.applyAutoDeduction(
-                                medicationId, doseId, calendarDate, amount);
-        JSObject ret = new JSObject();
-        ret.put("ok", result.ok);
-        ret.put("applied", result.applied);
-        ret.put("actualDeducted", result.actualDeducted);
-        ret.put("currentPills", result.currentPills);
-        if (result.error != null) ret.put("error", result.error);
-        call.resolve(ret);
+        // #493: the stock apply path performs the synchronous atomic
+        // balance+marker commit — dispatch off the plugin thread.
+        app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
+            AutoDeductionStockStore store = new AutoDeductionStockStore(getContext());
+            AutoDeductionStockStore.AutoApplyResult result =
+                    recovery
+                            ? store.applyAutoDeductionForRecovery(
+                                    medicationId, doseId, calendarDate, amount)
+                            : store.applyAutoDeduction(
+                                    medicationId, doseId, calendarDate, amount);
+            JSObject ret = new JSObject();
+            ret.put("ok", result.ok);
+            ret.put("applied", result.applied);
+            ret.put("actualDeducted", result.actualDeducted);
+            ret.put("currentPills", result.currentPills);
+            if (result.error != null) ret.put("error", result.error);
+            call.resolve(ret);
+        });
     }
     @PluginMethod
     public void getOccurrenceSnapshot(PluginCall call) {
@@ -488,25 +529,30 @@ public class AutoDeductionPlugin extends Plugin {
             call.reject("missing_params");
             return;
         }
-        try {
-            AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
-            AutoDeductionScheduler.OccurrenceSnapshot snap =
-                    scheduler.getOccurrenceSnapshot(medicationId, doseId, calendarDate);
-            JSObject ret = new JSObject();
-            ret.put("ok", snap.ok);
-            if (!snap.ok) {
-                ret.put("error", snap.error != null ? snap.error : "snapshot_failed");
+        // #493: the snapshot path runs pending-fire promotion first, which
+        // can commit FIRED rows / quarantine records — dispatch off the
+        // plugin thread.
+        app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
+            try {
+                AutoDeductionScheduler scheduler = new AutoDeductionScheduler(getContext());
+                AutoDeductionScheduler.OccurrenceSnapshot snap =
+                        scheduler.getOccurrenceSnapshot(medicationId, doseId, calendarDate);
+                JSObject ret = new JSObject();
+                ret.put("ok", snap.ok);
+                if (!snap.ok) {
+                    ret.put("error", snap.error != null ? snap.error : "snapshot_failed");
+                    call.resolve(ret);
+                    return;
+                }
+                ret.put("status", snap.status.name());
+                if (snap.amount != null) {
+                    ret.put("amount", snap.amount.doubleValue());
+                }
                 call.resolve(ret);
-                return;
+            } catch (Exception e) {
+                call.reject(e.getMessage() != null ? e.getMessage() : "snapshot_failed");
             }
-            ret.put("status", snap.status.name());
-            if (snap.amount != null) {
-                ret.put("amount", snap.amount.doubleValue());
-            }
-            call.resolve(ret);
-        } catch (Exception e) {
-            call.reject(e.getMessage() != null ? e.getMessage() : "snapshot_failed");
-        }
+        });
     }
     private static JSObject toJSObject(JSONObject o) {
         JSObject js = new JSObject();

@@ -66,6 +66,12 @@ final class AutoSuccessorObligationStore {
                         medicationId, doseId, calendarDate);
     }
 
+    /**
+     * Synchronous commit (#493): the obligation is the crash-recovery journal
+     * persisted before a fire reports success to the receiver — a lost record
+     * would drop the successor chain after process death. The outcome drives
+     * the caller's FAILED recovery result.
+     */
     boolean save(
             AutoDeductionPersistenceModels.SuccessorObligationRecord record) {
         try {
@@ -79,13 +85,22 @@ final class AutoSuccessorObligationStore {
         }
     }
 
-    boolean clear(
+    /**
+     * Asynchronous cleanup (#493): invoked by callers only after the successor
+     * chain is known to be installed or terminally complete, so a removal that
+     * never lands (crash before the async write flushes) leaves an obligation
+     * that the next recovery boundary re-processes idempotently — generation,
+     * cancellation, ownership, and create-if-absent install guards all re-run
+     * before anything is mutated. No outcome is reported because no caller
+     * depends on the removal result.
+     */
+    void clear(
             String medicationId,
             String doseId,
             String calendarDate) {
-        return prefs.edit()
+        prefs.edit()
                 .remove(key(medicationId, doseId, calendarDate))
-                .commit();
+                .apply();
     }
 
     boolean markStockApplied(
@@ -108,6 +123,11 @@ final class AutoSuccessorObligationStore {
                         true,
                         current.createdAtEpochMs);
         try {
+            // Synchronous commit (#493): the stockApplied marker is the
+            // recovery-time guard against a second Native stock application
+            // for the same obligation, and the outcome drives the caller's
+            // FAILED recovery result — a lost marker could double-deduct
+            // stock on the next recovery pass.
             return prefs.edit()
                     .putString(
                             key(updated),

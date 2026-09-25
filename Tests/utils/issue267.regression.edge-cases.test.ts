@@ -137,8 +137,8 @@ describe('#267 regression 12 — Multiple dose isolation', () => {
     expect(take.outcome).toBe('applied');
     const pillsAfterD1 = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
     expect(pillsAfterD1).toBe(29); // 30 - 1 (d1)
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd2', TODAY)).toBe(false);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd2', TODAY)).toBe(false);
 
     // Auto FIRED d2 → applied independently (no double from d1).
     const recon = await runAutoDeductionReconciliation({
@@ -161,7 +161,7 @@ describe('#267 regression 12 — Multiple dose isolation', () => {
     });
     expect(recon.details[0]?.outcome).toBe('applied');
     expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterD1 - 1); // 28 (d2 deducted 1)
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd2', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd2', TODAY)).toBe(true);
   });
 
   it('Take d1 then Restore d1 leaves d2 untouched (unit)', () => {

@@ -30,7 +30,7 @@ import app.drugtracker.dosereminder.DoseReminderAlarmAdapter;
 import app.drugtracker.dosereminder.DoseReminderAlarmReceiver;
 
 /**
- * Phase 9 runtime coexistence proof for the three native exact-alarm features.
+ * Runtime coexistence proof for the three native exact-alarm features.
  *
  * Same medication:
  *   Dose Reminder 08:00
@@ -43,7 +43,7 @@ import app.drugtracker.dosereminder.DoseReminderAlarmReceiver;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 33)
 public class CrossFeatureAlarmIsolationTest {
-    private static final String MEDICATION_ID = "med-phase9";
+    private static final String MEDICATION_ID = "med-alarm-isolation";
     private static final String DOSE_ID = "dose-08";
     private static final String DATE = "2100-01-01";
     private static final long TRIGGER_AT = 4_102_473_600_000L;
@@ -89,7 +89,7 @@ public class CrossFeatureAlarmIsolationTest {
                 DOSE_ID,
                 "08:00",
                 1.0,
-                "Phase 9 Medicine",
+                "Alarm Isolation Medicine",
                 "قرص",
                 null,
                 true,
@@ -98,7 +98,7 @@ public class CrossFeatureAlarmIsolationTest {
 
         assertTrue(critical.schedule(
                 MEDICATION_ID,
-                "Phase 9 Medicine",
+                "Alarm Isolation Medicine",
                 TRIGGER_AT,
                 "قرص",
                 "Critical title",
@@ -146,7 +146,7 @@ public class CrossFeatureAlarmIsolationTest {
                 DOSE_ID,
                 "08:00",
                 1.0,
-                "Phase 9 Medicine",
+                "Alarm Isolation Medicine",
                 "قرص",
                 null,
                 true,
@@ -212,7 +212,7 @@ public class CrossFeatureAlarmIsolationTest {
                 DOSE_ID,
                 "08:00",
                 1.0,
-                "Phase 9 Medicine",
+                "Alarm Isolation Medicine",
                 "قرص",
                 null,
                 true,
@@ -285,7 +285,7 @@ public class CrossFeatureAlarmIsolationTest {
                 DOSE_ID,
                 "08:00",
                 1.0,
-                "Phase 9 Medicine",
+                "Alarm Isolation Medicine",
                 "قرص",
                 null,
                 true,
@@ -310,7 +310,7 @@ public class CrossFeatureAlarmIsolationTest {
                 DOSE_ID,
                 "08:00",
                 1.0,
-                "Phase 9 Medicine",
+                "Alarm Isolation Medicine",
                 "قرص",
                 TRIGGER_AT,
                 true,
@@ -345,7 +345,7 @@ public class CrossFeatureAlarmIsolationTest {
                 DOSE_ID,
                 "08:00",
                 1.0,
-                "Phase 9 Medicine",
+                "Alarm Isolation Medicine",
                 "قرص",
                 TRIGGER_AT,
                 true,
@@ -361,7 +361,7 @@ public class CrossFeatureAlarmIsolationTest {
                 DOSE_ID,
                 "08:00",
                 1.0,
-                "Phase 9 Medicine",
+                "Alarm Isolation Medicine",
                 "قرص",
                 TRIGGER_AT + 60_000L,
                 true,
@@ -463,10 +463,10 @@ public class CrossFeatureAlarmIsolationTest {
                 TRIGGER_AT, 1L, null).ok);
         assertTrue(doseAdapter().scheduleOccurrence(
                 MEDICATION_ID, DOSE_ID, "08:00", 1.0,
-                "Phase 9 Medicine", "قرص", null, true,
+                "Alarm Isolation Medicine", "قرص", null, true,
                 TRIGGER_AT, null).ok);
         assertTrue(criticalAdapter().schedule(
-                MEDICATION_ID, "Phase 9 Medicine", TRIGGER_AT, "قرص",
+                MEDICATION_ID, "Alarm Isolation Medicine", TRIGGER_AT, "قرص",
                 "Critical title", "Critical body", null).ok);
         assertEquals("all three features must arm at the exact same epoch", 3, scheduledAlarms().size());
         for (ShadowAlarmManager.ScheduledAlarm alarm : scheduledAlarms()) {

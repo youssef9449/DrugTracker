@@ -11,6 +11,7 @@
  */
 
 import type { ConsumptionLog, Medication } from '../types';
+import type { ApplyForegroundStockDeltasResult } from './autoDeductionNativeTypes';
 import {
   commitDurableAutoStockState,
   type AutoStockDurableState,

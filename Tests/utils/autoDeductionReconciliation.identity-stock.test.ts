@@ -81,7 +81,7 @@ describe('stock gate — fresh durable state', () => {
     await withAutoStockMutationGate((fresh) => {
       expect(requireDefined(fresh.medications[0], 'fresh.medications[0]').currentPills).toBe(10);
       const next = {
-        ...fresh.medications[0],
+        ...requireDefined(fresh.medications[0], 'fresh.medications[0]'),
         currentPills: 8,
       };
       commitDurableAutoStockState({ medications: [next], logs: fresh.logs });

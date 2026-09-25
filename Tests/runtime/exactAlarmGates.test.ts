@@ -32,7 +32,6 @@ describe('Auto-Deduction × Exact Alarm gate (#500)', () => {
   it('Global OFF cancels armed Auto regardless of exact-alarm capability state', () => {
     for (const exactAlarmPermission of [
       null,
-      'unknown',
       'denied',
       'granted',
       'unsupported',

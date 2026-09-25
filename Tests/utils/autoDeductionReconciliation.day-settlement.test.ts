@@ -62,7 +62,7 @@ describe('exact event day must not be double-settled', () => {
         }),
       ]
     );
-    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('applied');
+    expect(requireDefined(requireDefined(r.details[0], 'r.details[0]'), 'requireDefined(r.details[0], 'r.details[0]')').outcome).toBe('applied');
     expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
   });
 
@@ -152,7 +152,7 @@ describe('exact event day must not be double-settled', () => {
         }),
       ]
     );
-    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('applied');
+    expect(requireDefined(requireDefined(r.details[0], 'r.details[0]'), 'requireDefined(r.details[0], 'r.details[0]')').outcome).toBe('applied');
     expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
     // Exactly one exact log (the FIRED occurrence); no second day-based settlement log.
     expect(r.newExactLogs).toHaveLength(1);
@@ -218,7 +218,7 @@ describe('exact event day must not be double-settled', () => {
       ],
       { globalAutoDeductEnabled: false }
     );
-    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('applied');
+    expect(requireDefined(requireDefined(r.details[0], 'r.details[0]'), 'requireDefined(r.details[0], 'r.details[0]')').outcome).toBe('applied');
     expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
     expect(r.toAcknowledge).toHaveLength(1);
   });
@@ -243,7 +243,7 @@ describe('exact event day must not be double-settled', () => {
       ],
       { globalAutoDeductEnabled: true }
     );
-    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('applied');
+    expect(requireDefined(requireDefined(r.details[0], 'r.details[0]'), 'requireDefined(r.details[0], 'r.details[0]')').outcome).toBe('applied');
     expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
   });
 
@@ -261,8 +261,8 @@ describe('exact event day must not be double-settled', () => {
     });
     const r1 = reconcileFiredEvents([med], [], [e]);
     const r2 = reconcileFiredEvents(r1.medications, r1.logs, [e]);
-    expect(requireDefined(r1.medications[0], 'r1.medications[0]').currentPills).toBe(8);
-    expect(requireDefined(r2.medications[0], 'r2.medications[0]').currentPills).toBe(8);
+    expect(requireDefined(requireDefined(r1.medications[0], 'r1.medications[0]'), 'requireDefined(r1.medications[0], 'r1.medications[0]')').currentPills).toBe(8);
+    expect(requireDefined(requireDefined(r2.medications[0], 'r2.medications[0]'), 'requireDefined(r2.medications[0], 'r2.medications[0]')').currentPills).toBe(8);
     expect(requireDefined(r2.details[0], 'r2.details[0]').outcome).toBe('already_applied');
   });
 

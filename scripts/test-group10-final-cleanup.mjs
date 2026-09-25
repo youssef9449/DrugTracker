@@ -47,7 +47,8 @@ assert(manifest.start_url === './' && manifest.scope === './', '#356: manifest r
 assert(manifest.icons.every((icon) => icon.src.startsWith('./')), '#356: manifest icon paths must be relative');
 assert(manifest.shortcuts.every((shortcut) => shortcut.url.startsWith('./')), '#356: manifest shortcut paths must be relative');
 assert(sw.includes('const APP_BASE_URL = new URL(\'./\''), '#356: Service Worker must derive its deployment base from its own URL');
-assert(sw.includes('const PRECACHE_ASSETS = [];'), '#357: Service Worker source must expose the Vite precache injection placeholder');
+assert(sw.includes('const PRECACHE_ASSETS = /* __PRECACHE_ASSETS__ */ [];'), '#357: Service Worker source must expose the Vite precache injection placeholder');
+assert(sw.includes("drug-tracker-__CACHE_VERSION__"), '#543: Service Worker source must expose the cache-version placeholder');
 
 // #430 — do not send non-Chromium browsers to a chrome:// settings URL.
 const webNotifications = read('src/utils/notifications/webNotifications.ts');

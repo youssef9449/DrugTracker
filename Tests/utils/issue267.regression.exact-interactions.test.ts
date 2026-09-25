@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 /**
  * Issue #267 regression tests — manual stock mutations have no
@@ -135,7 +136,7 @@ describe('#267 regression 6 — Exact Auto → Manual Take: no double deduction'
       saveEnvelope: () => null,
     });
     expect(recon.details[0]?.outcome).toBe('applied');
-    const pillsAfterAuto = durable.medications[0].currentPills;
+    const pillsAfterAuto = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
     expect(pillsAfterAuto).toBe(29); // 30 - 1
 
     // Now Manual Take for d1: should be already_consumed (no second deduction).
@@ -147,7 +148,7 @@ describe('#267 regression 6 — Exact Auto → Manual Take: no double deduction'
       getOccurrenceSnapshot: async () => ({ ok: true, status: 'ABSENT' }),
     });
     expect(take.outcome).toBe('already_consumed');
-    expect(durable.medications[0].currentPills).toBe(pillsAfterAuto); // unchanged
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterAuto); // unchanged
   });
 });
 
@@ -166,7 +167,7 @@ describe('#267 regression 7 — Manual Take → Exact Auto: same occurrence not 
       getOccurrenceSnapshot: async () => ({ ok: true, status: 'ABSENT' }),
     });
     expect(take.outcome).toBe('applied');
-    const pillsAfterTake = durable.medications[0].currentPills;
+    const pillsAfterTake = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
     expect(pillsAfterTake).toBe(29); // 30 - 1
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
 
@@ -190,7 +191,7 @@ describe('#267 regression 7 — Manual Take → Exact Auto: same occurrence not 
       saveEnvelope: () => null,
     });
     expect(recon.details[0]?.outcome).toBe('already_applied');
-    expect(durable.medications[0].currentPills).toBe(pillsAfterTake); // unchanged (no second deduction)
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterTake); // unchanged (no second deduction)
   });
 });
 
@@ -218,7 +219,7 @@ describe('#267 regression 8 — Exact Auto → Restore: amount = exact active lo
     expect(r.outcome).toBe('applied');
     // Restored amount = abs(exact_auto log amount) = 2 (the exact FIRED amount).
     expect(r.restoredAmount).toBe(2);
-    expect(durable.medications[0].currentPills).toBe(30); // 28 + 2
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(30); // 28 + 2
     // The restore (skipped_day) log links to the reversed exact_auto log.
     const restoreLog = durable.logs.find((l) => l.id === 'restore-1');
     expect(restoreLog?.type).toBe('skipped_day');
@@ -253,7 +254,7 @@ describe('#267 regression 9 — Manual Take → Restore: amount = dose_taken amo
     expect(r.outcome).toBe('applied');
     // Restored amount = abs(dose_taken log amount) = 3 (NOT current schedule amount 1).
     expect(r.restoredAmount).toBe(3);
-    expect(durable.medications[0].currentPills).toBe(30); // 27 + 3
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(30); // 27 + 3
   });
 
   it('unit-level: restoreDose returns the dose_taken log amount', () => {
@@ -341,7 +342,7 @@ describe('#267 regression 11 — Schedule removed after Exact FIRED: FIRED still
       saveEnvelope: () => null,
     });
     expect(recon1.details[0]?.outcome).toBe('applied');
-    const pillsAfterAuto = durable.medications[0].currentPills;
+    const pillsAfterAuto = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
     expect(pillsAfterAuto).toBe(29); // 30 - 1
 
     // Now: schedule edit removes d1 (empty schedule) + sets dailyDose=5.
@@ -365,7 +366,7 @@ describe('#267 regression 11 — Schedule removed after Exact FIRED: FIRED still
     });
     expect(edit.outcome).toBe('applied');
     // currentPills unchanged by the dose edit (no settlement).
-    expect(durable.medications[0].currentPills).toBe(pillsAfterAuto);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterAuto);
 
     // Second reconciliation: FIRED d1 is still listed. The exact_auto log
     // already exists for (med-1, d1, TODAY) → already_applied (no fallback
@@ -390,6 +391,6 @@ describe('#267 regression 11 — Schedule removed after Exact FIRED: FIRED still
     });
     // The reconciliation is authoritative — already_applied (no dailyDose fallback).
     expect(recon2.details[0]?.outcome).toBe('already_applied');
-    expect(durable.medications[0].currentPills).toBe(pillsAfterAuto); // unchanged
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterAuto); // unchanged
   });
 });

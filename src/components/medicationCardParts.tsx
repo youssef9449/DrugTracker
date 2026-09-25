@@ -340,7 +340,12 @@ export const MedicationCardDoseActions: FC<MedicationCardDoseActionsProps> = ({
   onConsumeDose,
   onRestoreDose,
 }) => {
-  const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
+  const doseToggle = getCardDoseToggleTarget(
+    medication,
+    new Date(),
+    getTodayDateString(),
+    isAutoActive
+  );
   const todayStr = getTodayDateString();
   const manualRestoreAmount = getHistoricalRestoreDisplayAmount(
     logs,

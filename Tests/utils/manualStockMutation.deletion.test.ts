@@ -34,7 +34,7 @@ beforeEach(() => {
 });
 // findPending used indirectly via runGatedManualConsume
 
-describe('Phase 4 — durable deletion', () => {
+describe('durable deletion', () => {
   let durable: AutoStockDurableState;
 
   beforeEach(() => {

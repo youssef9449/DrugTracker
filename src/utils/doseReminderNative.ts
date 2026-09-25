@@ -16,29 +16,29 @@ interface DoseReminderPlugin {
     amount: number;
     medicationName: string;
     unit: string;
-    doseDescription?: string;
-    allowManualTakeAction?: boolean;
+    doseDescription?: string | undefined;
+    allowManualTakeAction?: boolean | undefined;
     triggerAtEpochMs: number;
-    treatmentEndDate?: string;
+    treatmentEndDate?: string | undefined;
   }): Promise<{ ok: boolean; error?: string }>;
   cancel(options: {
     medicationId: string;
     doseId: string;
   }): Promise<{
     ok: boolean;
-    status?: 'SUCCESS' | 'ALREADY_ABSENT' | 'FAILED';
-    error?: string;
+    status?: 'SUCCESS' | 'ALREADY_ABSENT' | 'FAILED' | undefined;
+    error?: string | undefined;
   }>;
   scheduleSnooze(options: {
     medicationId: string;
     doseId: string;
-    reminderTime?: string;
+    reminderTime?: string | undefined;
     amount: number;
     medicationName: string;
     unit: string;
-    allowManualTakeAction?: boolean;
+    allowManualTakeAction?: boolean | undefined;
     triggerAtEpochMs: number;
-    doseDescription?: string;
+    doseDescription?: string | undefined;
   }): Promise<{ ok: boolean; error?: string }>;
   cancelSnooze(options: {
     medicationId: string;
@@ -187,7 +187,7 @@ export type DoseReminderScheduledResult =
   | {
       ok: true;
       scheduled: boolean;
-      triggerAtEpochMs?: number;
+      triggerAtEpochMs?: number | undefined;
     }
   | NativeBoundaryFailure;
 

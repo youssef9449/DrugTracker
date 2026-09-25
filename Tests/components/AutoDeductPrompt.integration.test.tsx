@@ -4,6 +4,7 @@ import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/re
 import App from '@/App';
 import { initNativeBridge, registerBackButtonHandler } from '@/native';
 import * as manualStockMutation from '@/utils/manualStockMutation';
+import * as storage from '@/utils/storage';
 
 vi.mock('@/native', () => ({
   initNativeBridge: vi.fn(() => Promise.resolve()),
@@ -98,7 +99,7 @@ describe('Auto-Deduction First Run Prompt Integration', () => {
       expect(screen.getByText('تفعيل الخصم التلقائي للأدوية؟')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /نعم \\(تفعيل\\)/ }));
+    fireEvent.click(screen.getByRole('button', { name: /نعم \(تفعيل\)/ }));
 
     await waitFor(() => {
       expect(screen.queryByText('تفعيل الخصم التلقائي للأدوية؟')).not.toBeInTheDocument();
@@ -146,15 +147,10 @@ describe('Auto-Deduction First Run Prompt Integration', () => {
     expect(localStorage.getItem(GLOBAL_KEY)).toBe('false');
   });
 
-  it('keeps prompt open and does not mark prompted when durable toggle fails', async () => {
-    const spy = vi
-      .spyOn(manualStockMutation, 'runGatedGlobalAutoDeductToggle')
-      .mockResolvedValue({
-        outcome: 'persist_failed',
-        enable: true,
-        medications: [],
-        logs: [],
-      } as never);
+  it('keeps prompt open and does not mark prompted when first-run preference persistence fails', async () => {
+    const spy = vi.spyOn(storage, 'persist').mockImplementation((key) =>
+      key === GLOBAL_KEY ? 'preference_persist_failed' : null
+    );
 
     render(<App />);
 
@@ -165,10 +161,10 @@ describe('Auto-Deduction First Run Prompt Integration', () => {
     fireEvent.click(screen.getByRole('button', { name: /نعم \(تفعيل\)/ }));
 
     await waitFor(() => {
-      expect(spy).toHaveBeenCalled();
+      expect(screen.getByText('تفعيل الخصم التلقائي للأدوية؟')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('تفعيل الخصم التلقائي للأدوية؟')).toBeInTheDocument();
+    expect(spy).toHaveBeenCalled();
     expect(localStorage.getItem(PROMPTED_KEY)).toBeNull();
     spy.mockRestore();
   });
@@ -205,14 +201,9 @@ describe('Auto-Deduction First Run Prompt Integration', () => {
       return () => {};
     });
 
-    const spy = vi
-      .spyOn(manualStockMutation, 'runGatedGlobalAutoDeductToggle')
-      .mockResolvedValue({
-        outcome: 'persist_failed',
-        enable: false,
-        medications: [],
-        logs: [],
-      } as never);
+    const spy = vi.spyOn(storage, 'persist').mockImplementation((key) =>
+      key === GLOBAL_KEY ? 'preference_persist_failed' : null
+    );
 
     render(<App />);
 
@@ -223,10 +214,10 @@ describe('Auto-Deduction First Run Prompt Integration', () => {
     backHandler!();
 
     await waitFor(() => {
-      expect(spy).toHaveBeenCalled();
+      expect(screen.getByText('تفعيل الخصم التلقائي للأدوية؟')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('تفعيل الخصم التلقائي للأدوية؟')).toBeInTheDocument();
+    expect(spy).toHaveBeenCalled();
     expect(localStorage.getItem(PROMPTED_KEY)).toBeNull();
     spy.mockRestore();
   });

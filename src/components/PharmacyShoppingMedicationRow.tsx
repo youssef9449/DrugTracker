@@ -110,13 +110,18 @@ export const PharmacyShoppingMedicationRow: FC<Props> = ({
                 })}
               </div>
             ) : (
-              selectedUnits.map((unit) => {
+              (selectedUnits.length > 0 ? selectedUnits : availableUnits.slice(0, 1)).map((unit) => {
                 const inputValue = getCustomQuantityInputValue(med, unit, suggestedPills);
                 const boxLabel = med.unit === 'مل' ? 'عبوة' : 'علبة';
                 const label = unit === 'pills' ? med.unit : unit === 'boxes' ? boxLabel : 'شريط';
                 return (
                   <input key={unit} type="number" min="1" value={inputValue}
-                    onChange={(event) => onCustomQuantityChange(med, unit, event.target.value)}
+                    onChange={(event) => {
+                      if (selectedUnits.length === 0) {
+                        onToggleOrderUnit(med, unit, suggestedPills);
+                      }
+                      onCustomQuantityChange(med, unit, event.target.value);
+                    }}
                     className="w-[3.75rem] shrink-0 box-border rounded-md border border-slate-300 bg-white px-1 py-0.5 text-center font-mono font-bold text-xs focus:ring-1 focus:ring-teal-500"
                     aria-label={`كمية ${med.name} ${label}`} />
                 );

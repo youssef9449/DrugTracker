@@ -166,7 +166,7 @@ describe('#539 pre-delivery revalidation (state changed before delivery starts)'
     await flush();
 
     expect(sendMock).toHaveBeenCalledTimes(1);
-    expect(requireDefined(sendMock.mock.calls[0], 'sendMock.mock.calls[0]')[1]).toBe('New Name');
+    expect(requireDefined(requireDefined(sendMock.mock.calls[0], 'sendMock.mock.calls[0]'), 'requireDefined(sendMock.mock.calls[0], 'sendMock.mock.calls[0]')')[1]).toBe('New Name');
     expect(requireDefined(sendMock.mock.calls[0], 'sendMock.mock.calls[0]')[3]).toBe(8);
   });
 });

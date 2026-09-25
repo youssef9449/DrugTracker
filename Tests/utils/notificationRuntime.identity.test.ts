@@ -84,8 +84,12 @@ describe('notification logical identity boundary', () => {
 
     expect(mocks.schedule).toHaveBeenCalledTimes(2);
 
-    const first = requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].requireDefined(notifications[0], 'notifications[0]');
-    const second = requireDefined(mocks.schedule.mock.calls[1], 'mocks.schedule.mock.calls[1]')[0].requireDefined(notifications[0], 'notifications[0]');
+    const firstCall = requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]');
+    const secondCall = requireDefined(mocks.schedule.mock.calls[1], 'mocks.schedule.mock.calls[1]');
+    const firstRequest = requireDefined(firstCall[0], 'firstCall[0]');
+    const secondRequest = requireDefined(secondCall[0], 'secondCall[0]');
+    const first = requireDefined(firstRequest.notifications[0], 'firstRequest.notifications[0]');
+    const second = requireDefined(secondRequest.notifications[0], 'secondRequest.notifications[0]');
 
     expect(first.id).toBe(second.id);
     expect(first.extra.namespace).toBe('dose-reminder');
@@ -128,7 +132,15 @@ describe('notification logical identity boundary', () => {
 
     await scheduleNotification(baseOptions);
     const scheduledId =
-      requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].requireDefined(notifications[0], 'notifications[0]').id;
+      requireDefined(
+        requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0],
+        'schedule request'
+      ).notifications[0]
+        ? requireDefined(
+            requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].notifications[0],
+            'scheduled notification'
+          ).id
+        : (() => { throw new Error('scheduled notification is missing'); })();
 
     await cancelNotification(
       baseOptions.namespace,

@@ -30,6 +30,104 @@ const mockSettings: PharmacySettings = {
   selectedWhatsappAddressIds: [],
 };
 
+describe('AppSettingsModal — Global Auto kill switch', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  afterEach(() => cleanup());
+
+  it('settings Auto toggle is a global draft and Save commits the master switch without per-med bulk mutation', async () => {
+    const onApplyAppPreferences = vi.fn();
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[
+          {
+            id: 'med-on',
+            name: 'Auto On',
+            currentPills: 10,
+            dailyDose: 1,
+            unit: 'قرص',
+            warningThresholdDays: 5,
+            colorTag: 'teal',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            autoDeductEnabled: true,
+            doseSchedule: [{ id: 'd1', amount: 1, time: '20:00' }],
+          },
+          {
+            id: 'med-off',
+            name: 'Auto Off',
+            currentPills: 20,
+            dailyDose: 1,
+            unit: 'قرص',
+            warningThresholdDays: 5,
+            colorTag: 'teal',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            autoDeductEnabled: false,
+            doseSchedule: [{ id: 'd1', amount: 1, time: '20:00' }],
+          },
+        ]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        autoDeductEnabled={true}
+        onApplyAppPreferences={onApplyAppPreferences}
+      />
+    );
+
+    const autoSwitch = screen.getByRole('switch', {
+      name: 'تبديل المفتاح العام للخصم التلقائي',
+    });
+    expect(autoSwitch).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(autoSwitch);
+    expect(autoSwitch).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByText(/إعداد كل دواء/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'حفظ الإعدادات' }));
+    await waitFor(() => {
+      expect(onApplyAppPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ autoDeductEnabled: false })
+      );
+    });
+  });
+
+  it('settings Auto toggle defaults to the durable global state and does not infer it from medication settings', () => {
+    render(
+      <AppSettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={mockSettings}
+        medications={[
+          {
+            id: 'med-on',
+            name: 'Auto On',
+            currentPills: 10,
+            dailyDose: 1,
+            unit: 'قرص',
+            warningThresholdDays: 5,
+            colorTag: 'teal',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            autoDeductEnabled: true,
+          },
+        ]}
+        onSaveSettings={vi.fn()}
+        soundEnabled={true}
+        notificationsEnabled={false}
+        criticalStockAlertsEnabled={false}
+        autoDeductEnabled={false}
+      />
+    );
+    const autoSwitch = screen.getByRole('switch', {
+      name: 'تبديل المفتاح العام للخصم التلقائي',
+    });
+    expect(autoSwitch).toHaveAttribute('aria-checked', 'false');
+  });
+});
+
 describe('AppSettingsModal — Notification Controls', () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -20,8 +20,10 @@ import { loadDurableGlobalAutoDeductEnabled } from './autoDeductionStockGate';
 
 export function runGatedAddMedication(opts: {
   medication: Medication;
+  reconcileExactBeforeMutation?: boolean;
 }): Promise<GatedAddMedicationResult> {
   return runManualStockTransaction({
+      reconcileExactBeforeMutation: opts.reconcileExactBeforeMutation,
       onFailure: (failure) => ({
         outcome: 'persist_failed' as const,
         medications: failure.state.medications,
@@ -185,9 +187,11 @@ export function runGatedMedicationUpdate(opts: {
   todayStr?: string;
   now?: Date;
   globalAutoDeductEnabled?: boolean;
+  reconcileExactBeforeMutation?: boolean;
 }): Promise<GatedMedicationUpdateResult> {
   return runManualStockTransaction({
       todayStr: opts.todayStr, now: opts.now,
+      reconcileExactBeforeMutation: opts.reconcileExactBeforeMutation,
       onFailure: (failure) => ({
         outcome: failure.kind === 'reconciliation' ? 'native_list_failed' as const : 'persist_failed' as const,
         medications: failure.state.medications,

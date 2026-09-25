@@ -39,6 +39,9 @@ export function useMedicationCrudHandlers(deps: MedicationHandlersDeps, state: M
         editId,
         medData,
         globalAutoDeductEnabled: globalAutoDeductEnabledRef.current,
+        // Configuration save; Exact-event reconciliation is an independent
+        // lifecycle task and must not block saving the medication.
+        reconcileExactBeforeMutation: false,
       });
       if (result.outcome !== 'applied') {
         if (result.outcome !== 'persist_failed') {
@@ -74,7 +77,12 @@ export function useMedicationCrudHandlers(deps: MedicationHandlersDeps, state: M
       criticalStockAlertsEnabled: medData.criticalStockAlertsEnabled !== false,
     };
     const firstDoseTime = getDoseScheduleForUI(newMed)[0]?.time;
-    const result = await runGatedAddMedication({ medication: newMed });
+    const result = await runGatedAddMedication({
+      medication: newMed,
+      // The add itself applies the signed Native stock delta; do not gate the
+      // save on an unrelated Exact-event reconciliation pass.
+      reconcileExactBeforeMutation: false,
+    });
     if (result.outcome !== 'applied') {
       showToast(STORAGE_ERRORS.generic);
       return false;

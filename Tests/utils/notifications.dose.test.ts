@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Use vi.hoisted so the mocks are available inside vi.mock factories.
@@ -67,7 +68,7 @@ function lastDoseSchedulePayload(): {
 } {
   expect(mocks.schedule).toHaveBeenCalled();
   const call = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
-  const n = call[0].notifications[0];
+  const n = requireDefined(call, 'call')[0].notifications[0];
   return {
     at: n.schedule.at as Date,
     // Phase 2: dose reminders are ONE-SHOT (no Capacitor repeats/every —
@@ -117,7 +118,7 @@ describe('Android Phase 6 scheduling boundary', () => {
     expect(mocks.nativeSchedule).toHaveBeenCalledTimes(1);
     expect(mocks.schedule).not.toHaveBeenCalled();
 
-    const options = mocks.nativeSchedule.mock.calls[0][0];
+    const options = requireDefined(mocks.nativeSchedule.mock.calls[0], 'mocks.nativeSchedule.mock.calls[0]')[0];
     expect(options.medicationId).toBe('med-android');
     expect(options.doseId).toBe('d1');
     expect(options.reminderTime).toBe('20:00');
@@ -131,7 +132,7 @@ describe('Android Phase 6 scheduling boundary', () => {
       doseDescription: 'بعد الإفطار',
     });
 
-    const options = mocks.nativeSchedule.mock.calls[0][0];
+    const options = requireDefined(mocks.nativeSchedule.mock.calls[0], 'mocks.nativeSchedule.mock.calls[0]')[0];
     expect(options.doseDescription).toBe('بعد الإفطار');
   });
 
@@ -243,7 +244,7 @@ describe('Dose Reminder notification action and presentation', () => {
       doseDescription: 'بعد الإفطار',
     });
 
-    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    const notif = requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].requireDefined(notifications[0], 'notifications[0]');
     expect(notif.body).toContain('طريقة تناول الجرعة: بعد الإفطار');
   });
 
@@ -252,7 +253,7 @@ describe('Dose Reminder notification action and presentation', () => {
       doseDescription: '   ',
     });
 
-    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    const notif = requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].requireDefined(notifications[0], 'notifications[0]');
     expect(notif.body).toBe('موعد الجرعة الساعة 08:00 م. جرعتك المقررة: 1 قرص.');
     expect(notif.body).not.toContain('طريقة تناول الجرعة:');
   });
@@ -262,7 +263,7 @@ describe('Dose Reminder notification action and presentation', () => {
       allowManualTakeAction: true,
     });
 
-    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    const notif = requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].requireDefined(notifications[0], 'notifications[0]');
     expect(notif.actionTypeId).toBe('take_dose');
     expect(notif.title).toBe('حان موعد دواء: Test');
     expect(notif.title).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
@@ -273,7 +274,7 @@ describe('Dose Reminder notification action and presentation', () => {
       allowManualTakeAction: false,
     });
 
-    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    const notif = requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].requireDefined(notifications[0], 'notifications[0]');
     expect(notif.actionTypeId).toBeUndefined();
   });
 
@@ -289,7 +290,7 @@ describe('Dose Reminder notification action and presentation', () => {
       true,
     );
 
-    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    const notif = requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].requireDefined(notifications[0], 'notifications[0]');
     expect(notif.actionTypeId).toBe('take_dose');
     expect(notif.title).toBe('تذكير مجدد: Test');
     expect(notif.title).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
@@ -308,7 +309,7 @@ describe('Dose Reminder notification action and presentation', () => {
       'قبل النوم',
     );
 
-    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    const notif = requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].requireDefined(notifications[0], 'notifications[0]');
     expect(notif.body).toContain('طريقة تناول الجرعة: قبل النوم');
   });
 
@@ -324,7 +325,7 @@ describe('Dose Reminder notification action and presentation', () => {
       false,
     );
 
-    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    const notif = requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].requireDefined(notifications[0], 'notifications[0]');
     expect(notif.actionTypeId).toBeUndefined();
   });
 });
@@ -333,7 +334,7 @@ describe('Phase 4 — doseId in notification extra', () => {
   it('scheduleDoseReminder embeds doseId in extra for multi-dose slots', async () => {
     await scheduleDoseReminder('med-x', 'Drug', '14:00', 1, 'قرص', 'd2');
     expect(mocks.schedule).toHaveBeenCalled();
-    const notif = mocks.schedule.mock.calls[0][0].notifications[0];
+    const notif = requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].requireDefined(notifications[0], 'notifications[0]');
     expect(notif.extra.medicationId).toBe('med-x');
     expect(notif.extra.doseId).toBe('d2');
     expect(notif.extra.namespace).toBe('dose-reminder');

@@ -123,7 +123,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('App multi-dose manual consumption (real wiring, Phase 3A)', () => {
+describe('App multi-dose manual consumption (real wiring)', () => {
   it('missing doseId opens SelectDoseModal; selecting d2 consumes only d2 via App path', async () => {
     // d1=1, d2=2 so selecting d2 proves amount is slot amount, not dailyDose (4)
     localStorage.setItem(

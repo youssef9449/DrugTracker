@@ -3,8 +3,11 @@ export function formatTimeArabic(timeStr?: string): string {
   const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(timeStr);
   if (!match) return timeStr;
 
-  const hour = parseInt(match[1], 10);
-  const minute = parseInt(match[2], 10);
+  const hourPart = match[1];
+  const minutePart = match[2];
+  if (hourPart === undefined || minutePart === undefined) return timeStr;
+  const hour = parseInt(hourPart, 10);
+  const minute = parseInt(minutePart, 10);
   const hour12 = hour % 12 === 0 ? 12 : hour % 12;
   return `${hour12}:${String(minute).padStart(2, '0')} ${hour >= 12 ? 'م' : 'ص'}`;
 }

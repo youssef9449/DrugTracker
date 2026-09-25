@@ -96,7 +96,9 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
     schedule.length > 0 &&
     schedule.every((d) => {
       if (!isRestore) {
-        return isDoseCompletedToday(medication, d, today, now, isAutoActive);
+        // Manual Take is available regardless of Auto state. For this list,
+        // only an existing durable consumption marker makes a dose complete.
+        return isDoseConsumedOnDate(medication, d.id, today);
       }
       // Restore requires durable evidence; a pure projection is never presented as restorable.
       const skipped = isDoseSkippedOnDate(medication, d.id, today);
@@ -184,19 +186,14 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 ? `${dayLabel} • ${timeLabel} (${dose.description})`
                 : `${dayLabel} • ${timeLabel}`;
               if (isManage) {
-                // Effective Auto-Deduction state = isAutoActive (single source:
-                // isMedicationAutoDeductActive). Auto OFF = manual mode; restored
-                // doses become takeable again (Take ↔ Restore cycle, unbounded).
-                // Auto ON = auto manages the dose; a restored/skipped dose waits
-                // for auto to re-deduct when due (no manual Take offered).
+                // Auto controls background deduction only; it does not remove
+                // Manual Take. Any unconsumed dose remains manually takeable,
+                // regardless of Auto state or scheduled time.
                 //
                 // Per-dose contract:
-                //   consumed (manual)            → تم التناول     + استرجاع الجرعة  (both auto states)
-                //   Auto ON + auto-deducted      → تم الخصم تلقائيًا + استرجاع الجرعة
-                //   Auto ON + future (!elapsed)  → لم يحن وقتها  (no action)
-                //   Auto ON + restored/skipped   → لم يتم التناول (no action — auto re-handles)
-                //   Auto OFF (any state incl.    → لم يتم التناول + تناول الجرعة
-                //     future/restored) = manual    (user is the source of truth)
+                //   consumed (manual)       → تم التناول + استرجاع الجرعة
+                //   Auto-consumed           → تم الخصم تلقائيًا + استرجاع الجرعة
+                //   any other unconsumed    → لم يتم التناول + تناول الجرعة
                 // Actions always carry the exact dose.id + dose.amount from doseSchedule.
                 let statusText: string;
                 let action: 'take' | 'restore' | null;
@@ -218,20 +215,8 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                   statusText = 'تم التناول';
                   action = null;
                   actionLabel = '';
-                } else if (isAutoActive && !elapsed) {
-                  // Auto ON + future slot: not yet due, no action available.
-                  statusText = 'لم يحن وقتها';
-                  action = null;
-                  actionLabel = '';
-                } else if (isAutoActive && skipped) {
-                  // Auto ON + restored/skipped: auto will re-deduct when due; no manual Take.
-                  statusText = 'لم يتم التناول';
-                  action = null;
-                  actionLabel = '';
                 } else {
-                  // Auto OFF (any state: future, restored, previously-auto, never-taken)
-                  // → manual mode, allow Take. Restored doses are takeable again.
-                  // (Also covers Auto ON + elapsed-but-not-yet-deducted transient.)
+                  // Manual Take is always available for an unconsumed dose.
                   statusText = 'لم يتم التناول';
                   action = 'take';
                   actionLabel = 'تناول الجرعة';

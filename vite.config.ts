@@ -14,14 +14,29 @@ import { defineConfig, type PluginOption } from 'vite';
  */
 function swCacheVersionPlugin(): PluginOption {
   const swTemplatePath = path.resolve(__dirname, 'public', 'sw.js');
+  const cacheVersionToken = '__CACHE_VERSION__';
+  const precacheToken = '/* __PRECACHE_ASSETS__ */ []';
   let swTemplate = '';
+
+  function replaceRequiredToken(
+    source: string,
+    token: string,
+    replacement: string,
+    label: string
+  ): string {
+    const count = source.split(token).length - 1;
+    if (count !== 1) {
+      throw new Error(
+        `Service Worker template must contain exactly one ${label} placeholder; found ${count}`
+      );
+    }
+    return source.replace(token, replacement);
+  }
 
   return {
     name: 'sw-cache-version',
     apply: 'build',
     buildStart() {
-      // Read the source template before Rollup output exists. The generated
-      // Service Worker itself is emitted through Rollup in generateBundle.
       swTemplate = readFileSync(swTemplatePath, 'utf-8');
       this.addWatchFile(swTemplatePath);
     },
@@ -41,15 +56,27 @@ function swCacheVersionPlugin(): PluginOption {
         .digest('hex')
         .slice(0, 12);
 
-      const source = swTemplate
-        .replace(
-          "const CACHE_NAME = 'drug-tracker-v5';",
-          `const CACHE_NAME = 'drug-tracker-${cacheVersion}';`
-        )
-        .replace(
-          'const PRECACHE_ASSETS = [];',
-          `const PRECACHE_ASSETS = ${JSON.stringify(productionAssets)};`
+      let source = replaceRequiredToken(
+        swTemplate,
+        cacheVersionToken,
+        cacheVersion,
+        'cache-version'
+      );
+      source = replaceRequiredToken(
+        source,
+        precacheToken,
+        JSON.stringify(productionAssets),
+        'precache-assets'
+      );
+
+      if (
+        source.includes(cacheVersionToken) ||
+        source.includes('__PRECACHE_ASSETS__')
+      ) {
+        throw new Error(
+          'Service Worker template placeholders were not completely resolved'
         );
+      }
 
       this.emitFile({
         type: 'asset',

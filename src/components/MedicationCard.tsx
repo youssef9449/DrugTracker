@@ -143,10 +143,26 @@ export const MedicationCard: FC<MedicationCardProps> = ({
         medication.warningThresholdDays * VISUAL_RANGE_MULTIPLIER,
         MIN_VISUAL_RANGE_DAYS
       );
-  const percentLeft = Math.min(
-    100,
-    Math.max(0, Math.round((statusInfo.daysLeft / maxVisualRange) * 100))
-  );
+  const courseRequiredPills =
+    isTemporaryCourse && medication.dailyDose > 0
+      ? medication.dailyDose * medication.durationDays!
+      : 0;
+  const percentLeft = isTemporaryCourse
+    ? Math.min(
+        100,
+        Math.max(
+          0,
+          Math.round(
+            courseRequiredPills > 0
+              ? (currentPills / courseRequiredPills) * 100
+              : 0
+          )
+        )
+      )
+    : Math.min(
+        100,
+        Math.max(0, Math.round((statusInfo.daysLeft / maxVisualRange) * 100))
+      );
   const progressColor =
     statusInfo.status === 'out_of_stock'
       ? 'bg-red-500'

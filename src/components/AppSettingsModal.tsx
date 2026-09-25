@@ -23,16 +23,16 @@ import { PharmacySettingsSection } from './settings/PharmacySettingsSection';
 export interface AppSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  mode?: 'all' | 'pharmacy';
+  mode?: 'all' | 'pharmacy' | undefined;
   settings: PharmacySettings;
   medications: Medication[];
-  activeOrderItems?: OrderItem[];
+  activeOrderItems?: OrderItem[] | undefined;
   onSaveSettings: (newSettings: PharmacySettings) => void;
   soundEnabled: boolean;
-  notificationsEnabled?: boolean;
-  criticalStockAlertsEnabled?: boolean;
-  onSendTestNotification?: () => void;
-  autoDeductEnabled?: boolean;
+  notificationsEnabled?: boolean | undefined;
+  criticalStockAlertsEnabled?: boolean | undefined;
+  onSendTestNotification?: () => void | undefined;
+  autoDeductEnabled?: boolean | undefined;
   /**
    * Apply app preference toggles only when the user confirms with حفظ الإعدادات.
    * Closing the modal without save discards draft changes.
@@ -47,14 +47,14 @@ export interface AppSettingsModalProps {
    *  on Android 12+. When false, dose reminders CANNOT be guaranteed
    *  to fire on time — the UI shows a warning + a button to open the
    *  Android exact-alarm settings. */
-  exactAlarmPermission?: ExactAlarmPermission | null;
+  exactAlarmPermission?: ExactAlarmPermission | null | undefined;
   /** Open the Android settings screen to grant exact-alarm permission. */
-  onOpenExactAlarmSettings?: () => void;
+  onOpenExactAlarmSettings?: () => void | undefined;
   /**
    * Optional toast for permission-denial feedback when turning notification
    * toggles ON. Same message as the home notification toggle.
    */
-  showToast?: (message: string) => void;
+  showToast?: (message: string) => void | undefined;
 }
 export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   isOpen,

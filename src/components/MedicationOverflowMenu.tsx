@@ -13,8 +13,8 @@ export interface MedicationOverflowMenuProps {
   medication: Medication;
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
-  onOpenHistory?: (medication: Medication) => void | undefined;
-  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void | undefined;
+  onOpenHistory?: ((medication: Medication) => void) | undefined;
+  onRegisterBackHandler?: ((id: string, close: () => void, priority?: number) => () => void) | undefined;
   size?: 'xs' | 'sm' | 'md' | undefined;
   className?: string | undefined;
 }

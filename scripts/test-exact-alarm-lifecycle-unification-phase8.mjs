@@ -183,8 +183,9 @@ const prepare = read('scripts/prepare-android.mjs');
 const sharedName =
   'app.drugtracker.alarmruntime.DrugTrackerAlarmSystemReceiver';
 assert(
-  (prepare.match(new RegExp(sharedName.replace(/\\./g, '\\\\.'), 'g')) || []).length === 2,
-  'prepare-android must contain one shared receiver name registration plus one upsert lookup'
+  prepare.includes("androidName: '" + sharedName + "'")
+    && prepare.includes('upsertReceiver(application, doc'),
+  'prepare-android must structurally upsert the shared system receiver'
 );
 assert(
   prepare.includes('app.drugtracker.EXACT_ALARM_FEATURE_ADAPTERS'),
@@ -202,7 +203,7 @@ for (const adapter of [
 }
 assert(
   prepare.includes('AutoDeductionSystemReceiver')
-    && prepare.includes('removeReceiverByName'),
+    && prepare.includes('removeReceiver('),
   'prepare-android must explicitly remove the legacy Auto system receiver if it exists'
 );
 

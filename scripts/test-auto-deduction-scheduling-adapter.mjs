@@ -169,8 +169,9 @@ assert(
 );
 
 assert(
-  prepare.includes("'AutoDeductionSchedulingAdapter.java'"),
-  'Android preparation must copy the scheduling adapter source'
+  prepare.includes("path.join(root, 'native-android', 'auto-deduction')") &&
+    prepare.includes("syncJavaSourceSet("),
+  'Android preparation must synchronize the complete Auto-Deduction source directory'
 );
 assert(
   gradle.includes('fileTree("../auto-deduction")') &&

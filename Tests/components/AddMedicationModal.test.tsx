@@ -254,7 +254,7 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     expect(durationInput.type).toBe('text');
   });
 
-  it('defaults stock notifications and auto-deduction off and places them below the dose reminder', () => {
+  it('defaults stock notifications and auto-deduction off, keeps all three toggles as cards, and places color last', () => {
     const onSave = vi.fn();
     render(<AddMedicationModal {...baseProps({ onSave })} />);
 
@@ -271,11 +271,36 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     expect(stockToggle).toHaveAttribute('aria-checked', 'false');
     expect(autoToggle).toHaveAttribute('aria-checked', 'false');
 
+    expect(reminderToggle.closest('.rounded-2xl')).toHaveClass(
+      'bg-slate-50',
+      'border',
+      'border-slate-200'
+    );
+    expect(stockToggle.closest('.rounded-2xl')).toHaveClass(
+      'bg-slate-50',
+      'border',
+      'border-slate-200'
+    );
+    expect(autoToggle.closest('.rounded-2xl')).toHaveClass(
+      'bg-slate-50',
+      'border',
+      'border-slate-200'
+    );
+
+    const colorLabel = screen.getByText('لون البطاقة');
     expect(
       reminderToggle.compareDocumentPosition(stockToggle) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     expect(
       stockToggle.compareDocumentPosition(autoToggle) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      autoToggle.compareDocumentPosition(colorLabel) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    const saveButton = screen.getByText('إضافة الدواء');
+    expect(
+      colorLabel.compareDocumentPosition(saveButton) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
 
     const thresholdInput = screen.getByPlaceholderText('مثال: 5') as HTMLInputElement;
@@ -431,14 +456,14 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
 describe('AddMedicationModal — stock helper fields allow empty mid-edit', () => {
   afterEach(() => cleanup());
 
-  it('علب كاملة / أشرطة إضافية / حبات منفردة can be cleared then retyped', () => {
+  it('علب كاملة / أشرطة إضافية / أقراص منفردة can be cleared then retyped', () => {
     render(<AddMedicationModal {...baseProps()} />);
 
     fireEvent.click(screen.getByText(/احسب من العلب والأشرطة المتوفرة/));
     expect(screen.getByText('علب كاملة')).toBeInTheDocument();
     expect(screen.getByText('أشرطة إضافية')).toBeInTheDocument();
     expect(screen.getByText('حبات منفردة')).toBeInTheDocument();
-    expect(screen.queryByText('حبات فَرط')).not.toBeInTheDocument();
+    expect(screen.getByText('أقراص منفردة')).toBeInTheDocument();
 
     for (const label of ['علب كاملة', 'أشرطة إضافية', 'حبات منفردة'] as const) {
       const labelEl = screen.getByText(label);

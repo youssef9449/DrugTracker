@@ -8,6 +8,7 @@ import { AddMedicationStockSettings } from './AddMedicationStockSettings';
 import { AddMedicationBasicsSection } from './AddMedicationBasicsSection';
 import { AddMedicationPackagingSection } from './AddMedicationPackagingSection';
 import { AddMedicationDetailsSection } from './AddMedicationDetailsSection';
+import { AddMedicationColorSection } from './AddMedicationColorSection';
 import { useAddMedicationForm } from '../hooks/useAddMedicationForm';
 
 interface AddMedicationModalProps {
@@ -120,8 +121,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
             resizeDoseSchedule={resizeDoseSchedule}
             category={category}
             setCategory={setCategory}
-            colorTag={colorTag}
-            setColorTag={setColorTag}
           />
           <MedicationCourseAndSchedule
             isChronic={isChronic}
@@ -145,6 +144,10 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
             setWarningThresholdDays={setWarningThresholdDays}
             autoDeductEnabled={autoDeductEnabled}
             setAutoDeductEnabled={setAutoDeductEnabled}
+          />
+          <AddMedicationColorSection
+            colorTag={colorTag}
+            setColorTag={setColorTag}
           />
           <button
             type="submit"

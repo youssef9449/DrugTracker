@@ -46,7 +46,10 @@ export function UpdatePrompt() {
       if (reg.waiting && isMounted) setWaitingWorker(reg.waiting);
     };
 
-    const serviceWorkerUrl = new URL('./sw.js', window.location.href).href;
+    // Vite emits this production module under the deployment base's assets
+    // directory. Resolve the worker from the module URL so nested routes
+    // cannot change the worker location.
+    const serviceWorkerUrl = new URL('../sw.js', import.meta.url).href;
 
     navigator.serviceWorker
       .getRegistration(serviceWorkerUrl)

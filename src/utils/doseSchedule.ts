@@ -213,6 +213,13 @@ export function validateAndNormalizeDoseSchedule(
   const seenTimes = new Set<string>();
   for (let i = 0; i < schedule.length; i++) {
     const row = schedule[i];
+    if (!row) {
+      return {
+        ok: false,
+        error: 'invalid_amount',
+        message: 'كمية الجرعة ' + (i + 1) + ' غير صالحة',
+      };
+    }
     const amount = Number(row.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       return {
@@ -416,10 +423,16 @@ export function getCardDoseToggleTarget(
   }
   // 3) All completed via auto-deduct only — no fake restore
   const nominal = sorted[0];
-  return {
-    doseId: nominal?.id,
-    amount: Number(nominal?.amount) || 0,
-    canTake: false,
-    canRestore: false,
-  };
+  return nominal
+    ? {
+        doseId: nominal.id,
+        amount: Number(nominal.amount) || 0,
+        canTake: false,
+        canRestore: false,
+      }
+    : {
+        amount: 0,
+        canTake: false,
+        canRestore: false,
+      };
 }

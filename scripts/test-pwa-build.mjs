@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import vm from 'node:vm';
 
 const root = process.cwd();
 const swPath = path.join(root, 'dist', 'sw.js');
@@ -52,3 +53,99 @@ console.log(
   'PWA verification passed: ' + expected.length +
     ' JS/CSS assets are pre-cached by emitted sw.js.'
 );
+
+
+async function verifyServiceWorkerInstallFailureBoundary() {
+  const installHandlers = [];
+  const criticalCache = {
+    addAll: async () => {
+      throw new Error('critical cache failure');
+    },
+    add: async () => {
+      throw new Error('optional cache failure');
+    },
+  };
+
+  const criticalContext = {
+    URL,
+    console,
+    caches: {
+      open: async () => criticalCache,
+      keys: async () => [],
+      delete: async () => true,
+    },
+    self: {
+      location: { href: 'https://example.test/' },
+      clients: { claim() {} },
+      skipWaiting() {},
+      addEventListener(type, handler) {
+        if (type === 'install') installHandlers.push(handler);
+      },
+    },
+  };
+
+  vm.runInNewContext(sw, criticalContext);
+  assert(
+    installHandlers.length === 1,
+    'Generated Service Worker must register exactly one install handler'
+  );
+
+  const waits = [];
+  installHandlers[0]({ waitUntil: (promise) => waits.push(promise) });
+  assert(waits.length === 1, 'Install handler must register one lifecycle promise');
+
+  let rejected = false;
+  try {
+    await waits[0];
+  } catch {
+    rejected = true;
+  }
+  assert(
+    rejected,
+    'Critical precache failure must reject the Service Worker install transaction'
+  );
+
+  const optionalCalls = [];
+  const optionalCache = {
+    addAll: async (urls) => {
+      optionalCalls.push({ kind: 'critical', urls });
+    },
+    add: async (url) => {
+      optionalCalls.push({ kind: 'optional', url });
+      throw new Error('optional cache failure');
+    },
+  };
+  const optionalHandlers = [];
+  const optionalContext = {
+    URL,
+    console,
+    caches: {
+      open: async () => optionalCache,
+      keys: async () => [],
+      delete: async () => true,
+    },
+    self: {
+      location: { href: 'https://example.test/' },
+      clients: { claim() {} },
+      skipWaiting() {},
+      addEventListener(type, handler) {
+        if (type === 'install') optionalHandlers.push(handler);
+      },
+    },
+  };
+
+  vm.runInNewContext(sw, optionalContext);
+  const optionalWaits = [];
+  optionalHandlers[0]({ waitUntil: (promise) => optionalWaits.push(promise) });
+  await optionalWaits[0];
+  assert(
+    optionalCalls.some((call) => call.kind === 'critical'),
+    'Install must attempt critical precache through cache.addAll'
+  );
+  assert(
+    optionalCalls.some((call) => call.kind === 'optional'),
+    'Install must attempt optional resources independently'
+  );
+}
+
+await verifyServiceWorkerInstallFailureBoundary();

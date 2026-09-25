@@ -1,13 +1,13 @@
 package app.drugtracker.autodeduction;
 
-import static app.drugtracker.autodeduction.Phase2TestSupport.cancelKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.cancelPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
-import static app.drugtracker.autodeduction.Phase2TestSupport.evtKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.eventPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.newScheduler;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.cancelKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.cancelPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.clearAllDurableState;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.evtKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.eventPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.newScheduler;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schedulePrefs;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
@@ -70,8 +70,8 @@ public class OccurrenceSnapshotPersistFailureTest {
         try {
             AutoDeductionScheduler.OccurrenceSnapshot snap =
                     new AutoDeductionScheduler(
-                            Phase2TestSupport.appContext(),
-                            Phase2TestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
+                            AutoDeductionTestSupport.appContext(),
+                            AutoDeductionTestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
             assertFalse(
                     "persistence failure must surface as an explicit failure",
                     snap.ok);
@@ -107,8 +107,8 @@ public class OccurrenceSnapshotPersistFailureTest {
         try {
             AutoDeductionScheduler.OccurrenceSnapshot snap =
                     new AutoDeductionScheduler(
-                            Phase2TestSupport.appContext(),
-                            Phase2TestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
+                            AutoDeductionTestSupport.appContext(),
+                            AutoDeductionTestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
             assertFalse(
                     "schedule metadata must not mask a ledger persistence failure",
                     snap.ok);
@@ -132,8 +132,8 @@ public class OccurrenceSnapshotPersistFailureTest {
         try {
             AutoDeductionScheduler.OccurrenceSnapshot snap =
                     new AutoDeductionScheduler(
-                            Phase2TestSupport.appContext(),
-                            Phase2TestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
+                            AutoDeductionTestSupport.appContext(),
+                            AutoDeductionTestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
             assertFalse(
                     "cancellation must not mask a ledger persistence failure",
                     snap.ok);
@@ -153,8 +153,8 @@ public class OccurrenceSnapshotPersistFailureTest {
         try {
             AutoDeductionScheduler.OccurrenceSnapshot snap =
                     new AutoDeductionScheduler(
-                            Phase2TestSupport.appContext(),
-                            Phase2TestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
+                            AutoDeductionTestSupport.appContext(),
+                            AutoDeductionTestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
             assertFalse(snap.ok);
             assertEquals("rejected_persist_failed", snap.error);
         } catch (Exception e) {
@@ -165,7 +165,7 @@ public class OccurrenceSnapshotPersistFailureTest {
         // the snapshot reports an ordinary safe ABSENT (no schedule present).
         AutoDeductionScheduler.OccurrenceSnapshot snap =
                 new AutoDeductionScheduler(
-                        Phase2TestSupport.appContext())
+                        AutoDeductionTestSupport.appContext())
                         .getOccurrenceSnapshot("med", "dose", date);
         assertTrue(snap.ok);
         assertEquals(

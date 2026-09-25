@@ -72,6 +72,9 @@ jobs:
       - name: Install committed dependency graph
         run: npm ci
 
+      - name: Build web assets for clean Capacitor generation
+        run: npm run build
+
       - name: Generate a clean Capacitor Android project
         run: npx cap add android
 

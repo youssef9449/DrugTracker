@@ -36,9 +36,9 @@ export const AddMedicationPackagingSection: FC<Props> = ({
           <Checkbox
             checked={noStrips}
             onChange={(e) => setNoStrips(e.target.checked)}
-            aria-label="بدون أشرطة (أقراص فرط في العلبة)"
+            aria-label="بدون أشرطة (أقراص منفردة في العلبة)"
           />
-          <span className="text-[11px] font-bold text-slate-700">بدون أشرطة (أقراص فرط في العلبة)</span>
+          <span className="text-[11px] font-bold text-slate-700">بدون أشرطة (أقراص منفردة في العلبة)</span>
         </label>
         {noStrips ? (
           <div>

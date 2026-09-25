@@ -12,8 +12,8 @@ interface PharmacyShoppingViewProps {
   settings: PharmacySettings;
   onUpdateSettings: (newSettings: PharmacySettings) => void;
   showToast: (message: string) => void;
-  onOpenUserContactsSettings?: () => void | undefined;
-  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void | undefined;
+  onOpenUserContactsSettings?: (() => void) | undefined;
+  onRegisterBackHandler?: ((id: string, close: () => void, priority?: number) => () => void) | undefined;
 }
 
 export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({

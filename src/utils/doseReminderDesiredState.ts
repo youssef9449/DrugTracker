@@ -21,7 +21,7 @@ export interface DoseReminderReconciliationOptions {
   hydrated: boolean;
   isFirstRun: boolean;
   exactAlarmPermission: ExactAlarmPermission | null;
-  lifecycleTick?: number;
+  lifecycleTick?: number | undefined;
 }
 
 export interface DoseReminderConsumptionReconciliationOptions {
@@ -31,7 +31,7 @@ export interface DoseReminderConsumptionReconciliationOptions {
   hydrated: boolean;
   isFirstRun: boolean;
   exactAlarmPermission: ExactAlarmPermission | null;
-  resumeTick?: number;
+  resumeTick?: number | undefined;
 }
 
 export interface DesiredDoseReminderSlot {
@@ -42,10 +42,10 @@ export interface DesiredDoseReminderSlot {
   amount: number;
   name: string;
   unit: string;
-  description?: string;
+  description?: string | undefined;
   slotConsumedToday: boolean;
   allowManualTakeAction: boolean;
-  treatmentEndDate?: string;
+  treatmentEndDate?: string | undefined;
   sig: string;
 }
 

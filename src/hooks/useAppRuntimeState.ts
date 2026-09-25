@@ -61,15 +61,10 @@ export function useAppRuntimeState(): AppRuntimeState {
   const allowManualTakeActionByMedicationId = useMemo(() => {
     const result = new Map<string, boolean>();
     for (const medication of medications) {
-      // Global OFF makes Auto inactive at runtime while preserving each
-      // medication's persisted Auto preference.
-      result.set(
-        medication.id,
-        globalAutoDeductEnabled === false || medication.autoDeductEnabled === false
-      );
+      result.set(medication.id, medication.autoDeductEnabled === false);
     }
     return result;
-  }, [medications, globalAutoDeductEnabled]);
+  }, [medications]);
 
   return {
     medications,

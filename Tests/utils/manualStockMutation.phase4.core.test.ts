@@ -81,7 +81,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
     expect(r.outcome).toBe('applied');
     expect(r.doseAmount).toBe(1);
     expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBeLessThan(10);
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
   });
 
   it('Auto-Deduction after Manual Take is already_applied (one deduction)', async () => {
@@ -192,7 +192,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
     const appliedTake = take.outcome === 'applied' ? 1 : 0;
     const appliedRecon = recon.details.some((d) => d.outcome === 'applied') ? 1 : 0;
     expect(appliedTake + appliedRecon).toBe(1);
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
     // 10 - 1 = 9 (d1 amount); not 8.
     expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
   });
@@ -229,8 +229,8 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
 
     expect(recon.details[0]?.outcome).toBe('applied');
     expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(afterD1 - 1);
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd2', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd2', TODAY)).toBe(true);
   });
 
   it('Manual Restore after Take is idempotent on second Restore (stock + logs)', async () => {
@@ -617,7 +617,7 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
     });
     expect(take.outcome).toBe('applied');
     expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
 
     // Stale React snapshot would show skip=true / consumed=false (outdated UI).
     // Handler no longer consults that snapshot for business decisions — only

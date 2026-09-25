@@ -15,8 +15,22 @@ export function calculateMedicationStatus(
     return { daysLeft: 0, status: 'out_of_stock' };
   }
 
-  if (dailyScheduleAmount(med) <= 0) {
+  const dailyAmount = dailyScheduleAmount(med);
+  if (dailyAmount <= 0) {
     return { daysLeft: NEVER_DEPLETES_DAYS, status: 'sufficient' };
+  }
+
+  // A fixed treatment course is safe only when the current stock covers
+  // the selected course duration. Chronic medications retain the existing
+  // warning-threshold logic.
+  if (
+    med.isChronic === false &&
+    typeof med.durationDays === 'number' &&
+    med.durationDays > 0
+  ) {
+    return days >= med.durationDays
+      ? { daysLeft: days, status: 'sufficient' }
+      : { daysLeft: days, status: 'critical' };
   }
 
   return days <= getCriticalThresholdDays(med)

@@ -3,10 +3,10 @@ import { requireDefined } from '../helpers/requireDefined';
 /**
  * Auto-deduct Restore button on MedicationCard — real App wiring.
  *
- * Contract (Issue #267):
- * - isAutoActive → no Manual Take button
+ * Contract:
+ * - Manual Take remains available whenever the dose is unconsumed, regardless of Auto state
  * - Restore requires durable deduction evidence (no pure-projection Auto Restore)
- * - manual Take/Restore when auto inactive
+ * - Auto-deducted or manually consumed doses expose the appropriate Restore action
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readPersistedMedications } from '../helpers/persistedMedications';
@@ -228,7 +228,7 @@ describe('MedicationCard Manual Take is independent of Auto state', () => {
   });
 });
 
-describe('MedicationCard Manual Take → Restore (auto OFF)', () => {
+describe('MedicationCard Manual Take → Restore', () => {
   it('Take then manual Restore works; pure-projection auto-restore never appears', async () => {
     localStorage.setItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'false');
     vi.setSystemTime(new Date(`${TEST_DATE}T10:00:00`));

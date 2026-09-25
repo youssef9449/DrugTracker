@@ -1,11 +1,11 @@
 package app.drugtracker.autodeduction;
 
-import static app.drugtracker.autodeduction.Phase2TestSupport.appContext;
-import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
-import static app.drugtracker.autodeduction.Phase2TestSupport.evtKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.eventPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.appContext;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.clearAllDurableState;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.evtKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.eventPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schedulePrefs;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -28,7 +28,7 @@ import java.util.TimeZone;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 33)
-public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixture {
+public class SuccessorObligationRecoveryTest extends AutoReliabilityFixture {
 
     @Test
     public void firedWithoutSuccessorObligation_recoveryRebuildsJournalAndContinues()
@@ -55,7 +55,7 @@ public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixtur
         // Recovery is modeled after today's 23:59 slot, so the next occurrence
         // is deterministically tomorrow rather than depending on wall-clock time.
         long recoveryNow = epoch(localDateOffset(0), "23:59") + 1_000L;
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newSchedulerAt(recoveryNow);
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newSchedulerAt(recoveryNow);
         AutoDeductionScheduler.RestoreResult stockRecovery =
                 scheduler.recoverFiredStockPass();
         assertTrue(stockRecovery.ok);
@@ -101,7 +101,7 @@ public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixtur
                 java.util.Collections.singletonList(
                         new AutoDeductionStockStore.StockSeed(med, 100.0))).ok);
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         AutoDeductionScheduler.FireResult fired =
                 scheduler.fireOccurrenceIfNotCancelled(
                         med,
@@ -120,7 +120,7 @@ public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixtur
 
         // The receiver would normally schedule the next occurrence after this return.
         // Recreate the native scheduler instead to model process death in that window.
-        AutoDeductionScheduler restarted = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler restarted = AutoDeductionTestSupport.newScheduler();
         assertTrue(restarted.recoverSuccessorObligations());
 
         assertTrue(
@@ -152,7 +152,7 @@ public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixtur
                 java.util.Collections.singletonList(
                         new AutoDeductionStockStore.StockSeed(med, 50.0))).ok);
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         assertTrue(scheduler.scheduleOccurrence(
                 med, dose, successorDate, time, 2.0,
                 epoch(successorDate, time)).ok);
@@ -187,7 +187,7 @@ public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixtur
         assertTrue(stock.ensureMissingAndRead(
                 java.util.Collections.singletonList(
                         new AutoDeductionStockStore.StockSeed(med, 30.0))).ok);
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         assertTrue(scheduler.persistSuccessorObligation(
                 med, dose, sourceDate, "23:59", 2.0, "", "v408-disabled", generation));
         assertTrue(scheduler.invalidateRecurrenceAuthorization(med, dose).ok);
@@ -216,7 +216,7 @@ public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixtur
         assertTrue(stock.ensureMissingAndRead(
                 java.util.Collections.singletonList(
                         new AutoDeductionStockStore.StockSeed(med, 30.0))).ok);
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         assertTrue(scheduler.persistSuccessorObligation(
                 med, dose, sourceDate, "23:59", 1.0, "", "v408-old", generation));
 
@@ -250,7 +250,7 @@ public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixtur
                 java.util.Collections.singletonList(
                         new AutoDeductionStockStore.StockSeed(med, 50.0))).ok);
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         AutoDeductionScheduler.ScheduleResult installed =
                 scheduler.scheduleOccurrence(
                         med, dose, futureDate, time, 1.0,
@@ -289,7 +289,7 @@ public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixtur
                 java.util.Collections.singletonList(
                         new AutoDeductionStockStore.StockSeed(med, 100.0))).ok);
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         assertTrue("source occurrence must be durably FIRED before successor scheduling",
                 new AutoDeductionEventStore(appContext()).insertFiredIfAbsent(
                         med, dose, start, epoch(start, time), 1.0).isCreated());
@@ -398,7 +398,7 @@ public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixtur
                 java.util.Collections.singletonList(
                         new AutoDeductionStockStore.StockSeed(med, 20.0))).ok);
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         String overdueDate = AutoDeductionScheduler.nextCalendarDate(sourceDate);
 
         // Equivalent durable state to a process death immediately after an overdue
@@ -424,7 +424,7 @@ public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixtur
                         schKey(occurrenceKey(med, dose, overdueDate))));
 
         // Recreate the scheduler as the native process would after restart.
-        AutoDeductionScheduler restarted = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler restarted = AutoDeductionTestSupport.newScheduler();
         assertTrue("restart recovery must continue from the durable obligation",
                 restarted.recoverSuccessorObligations());
 
@@ -466,7 +466,7 @@ public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixtur
         assertTrue(stock.applyAutoDeduction(med, dose, firstDue, 2.0).ok);
         double before = stock.readAll().stocks.get(med);
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         assertTrue(scheduler.scheduleNextOccurrenceIfAbsent(
                 med, dose, start, time, 2.0, generation).ok);
 
@@ -500,14 +500,14 @@ public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixtur
                 java.util.Collections.singletonList(
                         new AutoDeductionStockStore.StockSeed(med, 100.0))).ok);
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         AutoDeductionScheduler.FireResult fired =
                 scheduler.fireOccurrenceIfNotCancelled(
                         med, dose, date, epoch(date, "23:59"), 2.0,
                         "v408-end", generation);
         assertTrue(fired.allowsRecurrence());
 
-        AutoDeductionScheduler restarted = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler restarted = AutoDeductionTestSupport.newScheduler();
         assertTrue(restarted.recoverSuccessorObligations());
 
         AutoDeductionPersistenceModels.ScheduleRecord successor =

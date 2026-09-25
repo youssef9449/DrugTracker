@@ -1,11 +1,11 @@
 package app.drugtracker.autodeduction;
 
-import static app.drugtracker.autodeduction.Phase2TestSupport.appContext;
-import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
-import static app.drugtracker.autodeduction.Phase2TestSupport.evtKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.eventPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.appContext;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.clearAllDurableState;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.evtKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.eventPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schedulePrefs;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -28,7 +28,7 @@ import java.util.TimeZone;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 33)
-public class CancellationReliabilityTest extends Group2AutoReliabilityFixture {
+public class CancellationReliabilityTest extends AutoReliabilityFixture {
 
     @Test
     public void rollbackCompensation_recoversPastOccurrenceThroughNativeCatchUp()
@@ -55,7 +55,7 @@ public class CancellationReliabilityTest extends Group2AutoReliabilityFixture {
                 java.util.Collections.singletonList(
                         new AutoDeductionStockStore.StockSeed(med, 50.0))).ok);
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         AutoDeductionScheduler.FireResult result =
                 scheduler.recoverMissedOccurrenceForCompensation(
                         med, dose, date, epoch(date, time), 3.0, generation, "", time);
@@ -78,7 +78,7 @@ public class CancellationReliabilityTest extends Group2AutoReliabilityFixture {
         String time = "10:00";
         double amount = 1.0;
 
-        AutoDeductionScheduler setup = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler setup = AutoDeductionTestSupport.newScheduler();
         assertTrue(setup.scheduleOccurrence(
                 med, dose, date1, time, amount, epoch(date1, time)).ok);
         assertTrue(setup.scheduleOccurrence(
@@ -86,12 +86,12 @@ public class CancellationReliabilityTest extends Group2AutoReliabilityFixture {
 
         String key1 = occurrenceKey(med, dose, date1);
         String key2 = occurrenceKey(med, dose, date2);
-        long oldGeneration = Phase2TestSupport.readAuthGeneration(med, dose);
+        long oldGeneration = AutoDeductionTestSupport.readAuthGeneration(med, dose);
         assertTrue(schedulePrefs().contains(schKey(key1)));
         assertTrue(schedulePrefs().contains(schKey(key2)));
 
-        AutoDeductionScheduler failing = Phase2TestSupport.newScheduler(
-                Phase2TestSupport.failScheduleMetadataRemovalAfter(1));
+        AutoDeductionScheduler failing = AutoDeductionTestSupport.newScheduler(
+                AutoDeductionTestSupport.failScheduleMetadataRemovalAfter(1));
         AutoDeductionScheduler.InvalidateResult result =
                 failing.invalidateRecurrenceAuthorization(med, dose);
 
@@ -101,7 +101,7 @@ public class CancellationReliabilityTest extends Group2AutoReliabilityFixture {
                 result.schedulesCancelled);
         assertEquals("generation must remain the old authorized generation",
                 oldGeneration,
-                Phase2TestSupport.readAuthGeneration(med, dose));
+                AutoDeductionTestSupport.readAuthGeneration(med, dose));
         assertTrue("first canceled schedule must be restored",
                 schedulePrefs().contains(schKey(key1)));
         assertTrue("second partially-canceled schedule must be restored",
@@ -117,11 +117,11 @@ public class CancellationReliabilityTest extends Group2AutoReliabilityFixture {
         String time = "10:00";
         double amount = 1.0;
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         assertTrue(scheduler.scheduleOccurrence(
                 med, dose, date, time, amount, epoch(date, time)).ok);
 
-        long oldGeneration = Phase2TestSupport.readAuthGeneration(med, dose);
+        long oldGeneration = AutoDeductionTestSupport.readAuthGeneration(med, dose);
         assertTrue(oldGeneration > 0L);
         String key = occurrenceKey(med, dose, date);
         assertTrue(schedulePrefs().contains(schKey(key)));
@@ -134,7 +134,7 @@ public class CancellationReliabilityTest extends Group2AutoReliabilityFixture {
                     }
                 };
         AutoDeductionScheduler failing =
-                Phase2TestSupport.newScheduler(failCancellation);
+                AutoDeductionTestSupport.newScheduler(failCancellation);
 
         AutoDeductionScheduler.InvalidateResult invalidation =
                 failing.invalidateRecurrenceAuthorization(med, dose);
@@ -143,13 +143,13 @@ public class CancellationReliabilityTest extends Group2AutoReliabilityFixture {
         assertEquals(
                 "failed cancellation must leave the prior generation authorized",
                 oldGeneration,
-                Phase2TestSupport.readAuthGeneration(med, dose));
+                AutoDeductionTestSupport.readAuthGeneration(med, dose));
         assertTrue(
                 "failed cancellation must leave the existing schedule untouched",
                 schedulePrefs().contains(schKey(key)));
 
         AutoDeductionScheduler.RestoreResult restored =
-                Phase2TestSupport.newScheduler().restoreFutureSchedules();
+                AutoDeductionTestSupport.newScheduler().restoreFutureSchedules();
         assertTrue("a failed cancellation is safe to retry from the unchanged schedule",
                 restored.ok);
         assertTrue(

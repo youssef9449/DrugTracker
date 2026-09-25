@@ -1,13 +1,13 @@
 package app.drugtracker.autodeduction;
 
-import static app.drugtracker.autodeduction.Phase2TestSupport.appContext;
-import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
-import static app.drugtracker.autodeduction.Phase2TestSupport.evtKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.eventPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.newScheduler;
-import static app.drugtracker.autodeduction.Phase2TestSupport.newSchedulerAt;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.appContext;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.clearAllDurableState;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.evtKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.eventPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.newScheduler;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.newSchedulerAt;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schedulePrefs;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;

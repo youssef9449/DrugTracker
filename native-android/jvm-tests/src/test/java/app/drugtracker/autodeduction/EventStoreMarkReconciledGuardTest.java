@@ -1,9 +1,9 @@
 package app.drugtracker.autodeduction;
 
-import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
-import static app.drugtracker.autodeduction.Phase2TestSupport.evtKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.eventPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.newEventStore;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.clearAllDurableState;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.evtKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.eventPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.newEventStore;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -188,7 +188,7 @@ public class EventStoreMarkReconciledGuardTest {
         writeRow(evtKey(key), firedRow("med-B", "dose-2", "2026-09-15", 1.0));
 
         AutoDeductionEventStore.MarkResult r =
-                newEventStore(Phase2TestSupport.denyEventCommit()).markReconciled("med-A", "dose-1", "2026-09-15");
+                newEventStore(AutoDeductionTestSupport.denyEventCommit()).markReconciled("med-A", "dose-1", "2026-09-15");
 
         assertFalse("failed terminalization must remain retryable", r.ok);
         assertFalse(r.changed);

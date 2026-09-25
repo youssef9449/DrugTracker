@@ -12,12 +12,12 @@ import java.util.Locale;
 import java.util.TimeZone;
 
 /**
- * Shared helpers for Phase 2 JVM tests. Uses Robolectric application context
+ * Shared helpers for Auto-Deduction JVM tests. Uses Robolectric application context
  * and the real SharedPreferences names from {@link AutoDeductionContract}.
  */
-final class Phase2TestSupport {
+final class AutoDeductionTestSupport {
 
-    private Phase2TestSupport() {}
+    private AutoDeductionTestSupport() {}
 
     static Context appContext() {
         return RuntimeEnvironment.getApplication();

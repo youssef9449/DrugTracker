@@ -1,10 +1,10 @@
 package app.drugtracker.autodeduction;
 
-import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
-import static app.drugtracker.autodeduction.Phase2TestSupport.evtKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.eventPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.pendingPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.newEventStore;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.clearAllDurableState;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.evtKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.eventPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.pendingPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.newEventStore;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -131,7 +131,7 @@ public class EventStoreRejectedTest {
 
         try {
             AutoDeductionEventStore.FiredEventsResult result =
-                    newEventStore(Phase2TestSupport.denyEventCommit()).listFiredEventsResult();
+                    newEventStore(AutoDeductionTestSupport.denyEventCommit()).listFiredEventsResult();
             assertFalse(result.ok);
             assertTrue(result.records.isEmpty());
             assertEquals("rejected_persist_failed", result.error);
@@ -181,7 +181,7 @@ public class EventStoreRejectedTest {
         eventPrefs().edit().putString(evtKey(key), "not-valid-json{{{").commit();
 
         try {
-            AutoDeductionEventStore store = newEventStore(Phase2TestSupport.denyEventCommit());
+            AutoDeductionEventStore store = newEventStore(AutoDeductionTestSupport.denyEventCommit());
             assertTrue(store.listFiredEventsResult().records.isEmpty());
             // Commit failed → storage still holds original corrupt value (retryable)
             String raw = eventPrefs().getString(evtKey(key), null);
@@ -240,7 +240,7 @@ public class EventStoreRejectedTest {
 
         try {
             AutoDeductionEventStore.EventLookupResult result =
-                    newEventStore(Phase2TestSupport.denyEventCommit()).getFiredUnreconciledEvent(
+                    newEventStore(AutoDeductionTestSupport.denyEventCommit()).getFiredUnreconciledEvent(
                             "med", "dose", "2026-09-14");
             assertFalse(result.ok);
             assertNull(result.record);
@@ -275,7 +275,7 @@ public class EventStoreRejectedTest {
 
         try {
             AutoDeductionEventStore.EventLookupResult result =
-                    newEventStore(Phase2TestSupport.denyEventCommit()).getFiredUnreconciledEvent(
+                    newEventStore(AutoDeductionTestSupport.denyEventCommit()).getFiredUnreconciledEvent(
                             "med", "dose", date);
             assertFalse(result.ok);
             assertNull(result.record);
@@ -304,7 +304,7 @@ public class EventStoreRejectedTest {
 
         try {
             AutoDeductionEventStore.FiredEventsResult result =
-                    newEventStore(Phase2TestSupport.denyEventCommit()).listFiredEventsResult();
+                    newEventStore(AutoDeductionTestSupport.denyEventCommit()).listFiredEventsResult();
             assertFalse(result.ok);
             assertTrue(result.records.isEmpty());
             assertEquals("pending_promotion_failed", result.error);

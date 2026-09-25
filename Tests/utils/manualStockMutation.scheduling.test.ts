@@ -56,7 +56,7 @@ describe('shouldDismissAlarmAfterManualTake', () => {
   });
 });
 
-describe('Phase 4 — native recurrence invalidation is the config-change ordering barrier', () => {
+describe('native recurrence invalidation is the config-change ordering barrier', () => {
   let durable: AutoStockDurableState;
   const invalidated: string[] = [];
 

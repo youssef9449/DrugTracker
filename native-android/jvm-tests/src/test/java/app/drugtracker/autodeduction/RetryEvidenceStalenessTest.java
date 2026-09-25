@@ -1,11 +1,11 @@
 package app.drugtracker.autodeduction;
 
-import static app.drugtracker.autodeduction.Phase2TestSupport.appContext;
-import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
-import static app.drugtracker.autodeduction.Phase2TestSupport.evtKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.eventPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.appContext;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.clearAllDurableState;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.evtKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.eventPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schedulePrefs;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -28,7 +28,7 @@ import java.util.TimeZone;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 33)
-public class RetryEvidenceStalenessTest extends Group2AutoReliabilityFixture {
+public class RetryEvidenceStalenessTest extends AutoReliabilityFixture {
 
     @Test
     public void staleRetryEvidence_afterScheduleReplacement_cannotMutateStock()
@@ -46,7 +46,7 @@ public class RetryEvidenceStalenessTest extends Group2AutoReliabilityFixture {
                 java.util.Collections.singletonList(
                         new AutoDeductionStockStore.StockSeed(med, 100.0))).ok);
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         synchronized (AutoDeductionScheduler.class) {
             assertTrue(scheduler.recordIndependentFireRetryEvidenceLocked(
                     med, dose, date, epoch(date, time), 2.0, time, "",
@@ -88,7 +88,7 @@ public class RetryEvidenceStalenessTest extends Group2AutoReliabilityFixture {
                 java.util.Collections.singletonList(
                         new AutoDeductionStockStore.StockSeed(med, 100.0))).ok);
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         synchronized (AutoDeductionScheduler.class) {
             assertTrue(scheduler.recordIndependentFireRetryEvidenceLocked(
                     med, dose, date, epoch(date, time), 2.0, time, "",
@@ -132,7 +132,7 @@ public class RetryEvidenceStalenessTest extends Group2AutoReliabilityFixture {
                 java.util.Collections.singletonList(
                         new AutoDeductionStockStore.StockSeed(med, 50.0))).ok);
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         AutoDeductionScheduler.FireResult result =
                 scheduler.recoverMissedOccurrenceForCompensation(
                         med, dose, date, epoch(date, "08:00"), 3.0, 1L, "", "08:00");
@@ -161,9 +161,9 @@ public class RetryEvidenceStalenessTest extends Group2AutoReliabilityFixture {
                 med, dose, date, epoch(date, "08:00"), 2.0).isCreated());
         assertTrue(stock.applyAutoDeduction(med, dose, date, 2.0).ok);
         assertTrue(events.markReconciled(med, dose, date).ok);
-        assertTrue(Phase2TestSupport.newScheduler().compactTerminalState());
+        assertTrue(AutoDeductionTestSupport.newScheduler().compactTerminalState());
 
-        AutoDeductionScheduler replay = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler replay = AutoDeductionTestSupport.newScheduler();
         AutoDeductionScheduler.FireResult result = replay.fireOccurrenceIfNotCancelled(
                 med, dose, date, epoch(date, "08:00"), 2.0, "old-version", 1L);
         assertEquals(
@@ -181,7 +181,7 @@ public class RetryEvidenceStalenessTest extends Group2AutoReliabilityFixture {
         seedGeneration(med, dose, 1L);
         putSchedule(med, dose, start, time, 1.0, "v-cancel", 1L);
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         assertTrue(scheduler.invalidateRecurrenceAuthorization(med, dose).ok);
 
         AutoDeductionScheduler.ScheduleResult result =

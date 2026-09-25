@@ -48,7 +48,7 @@ const TODAY = '2026-09-16';
 
 
 
-describe('Phase 4 — Restore semantics through the durable gate', () => {
+describe('Restore semantics through the durable gate', () => {
   let durable: AutoStockDurableState;
   let manualEnvelope: TestManualStockEnvelope | null;
   let failLogs: boolean;

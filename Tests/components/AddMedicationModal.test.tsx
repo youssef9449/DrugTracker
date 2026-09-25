@@ -225,7 +225,7 @@ describe('ConsumptionLogView — onAddLog prop removed (#32)', () => {
   });
 });
 
-describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
+describe('AddMedicationModal — multi-dose schedule', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

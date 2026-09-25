@@ -46,10 +46,10 @@ export function UpdatePrompt() {
       if (reg.waiting && isMounted) setWaitingWorker(reg.waiting);
     };
 
-    // Vite emits this production module under the deployment base's assets
-    // directory. Resolve the worker from the module URL so nested routes
-    // cannot change the worker location.
-    const serviceWorkerUrl = new URL('../sw.js', import.meta.url).href;
+    // Match the registration path used by src/main.tsx. Resolving from the
+    // current page URL preserves root and arbitrary sub-path deployments,
+    // including launches with query parameters.
+    const serviceWorkerUrl = new URL('./sw.js', window.location.href).href;
 
     navigator.serviceWorker
       .getRegistration(serviceWorkerUrl)

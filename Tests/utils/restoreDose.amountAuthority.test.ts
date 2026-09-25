@@ -25,7 +25,7 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
-describe('restoreDose durable amount authority (Phase 4)', () => {
+describe('restoreDose durable amount authority', () => {
   it('exact Auto amount wins over current schedule after schedule edit', () => {
     const med = makeMed({
       doseSchedule: [

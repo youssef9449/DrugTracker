@@ -1,9 +1,9 @@
 package app.drugtracker.autodeduction;
 
-import static app.drugtracker.autodeduction.Phase2TestSupport.appContext;
-import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
-import static app.drugtracker.autodeduction.Phase2TestSupport.futureCalendarDate;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.appContext;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.clearAllDurableState;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.futureCalendarDate;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schedulePrefs;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -35,7 +35,7 @@ import java.util.List;
 public abstract class FireRetryFixtureSupport {
 
     protected static String localDateOffset(int days) {
-        return Phase2TestSupport.futureCalendarDate(days);
+        return AutoDeductionTestSupport.futureCalendarDate(days);
     }
 
 
@@ -105,7 +105,7 @@ public abstract class FireRetryFixtureSupport {
                 ExactAlarmContract.FIELD_OPERATION_VERSION, "");
         assertFalse("schedule must contain operationVersion",
                 operationVersion.isEmpty());
-        long generation = Phase2TestSupport.appContext()
+        long generation = AutoDeductionTestSupport.appContext()
                 .getSharedPreferences(
                         AutoDeductionContract.PREFS_RECURRENCE_AUTH, 0)
                 .getLong(

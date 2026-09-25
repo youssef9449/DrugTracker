@@ -14,8 +14,8 @@ export interface NotificationSettingsSectionProps {
   onToggleNotifications: () => void;
   onToggleCritical: () => void;
   exactAlarmPermission?: ExactAlarmPermission | null | undefined;
-  onOpenExactAlarmSettings?: () => void | undefined;
-  onSendTestNotification?: () => void | undefined;
+  onOpenExactAlarmSettings?: (() => void) | undefined;
+  onSendTestNotification?: (() => void) | undefined;
 }
 
 /** Notification + critical-stock + exact-alarm settings workflow. */

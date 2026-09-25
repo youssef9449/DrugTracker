@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 /// <reference types="@testing-library/jest-dom/vitest" />
 /**
  * Auto-deduct Restore button on MedicationCard — real App wiring.

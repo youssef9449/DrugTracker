@@ -314,7 +314,8 @@ describe('runGatedGlobalAutoDeductToggle exact-before-mutation', () => {
     expect(result.enable).toBe(false);
     // exact-first → 8; mutation-first would yield 7
     expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBe(8);
-    expect(requireDefined(result.medications[0], 'result.medications[0]').autoDeductEnabled).toBe(false);
+    // Global OFF must not rewrite the per-medication Auto preference.
+    expect(requireDefined(result.medications[0], 'result.medications[0]').autoDeductEnabled).toBe(true);
     const exactLogs = result.logs.filter(
       (l) => l.id === exactAutoLogId('med-1', 'd1', '2026-09-14')
     );
@@ -322,7 +323,7 @@ describe('runGatedGlobalAutoDeductToggle exact-before-mutation', () => {
     expect(requireDefined(exactLogs[0], 'exactLogs[0]').amount).toBe(-2);
   });
 
-  it('global ON: settlement uses durable state after exact; stock stays 8', async () => {
+  it('global ON: exact reconciliation stays first; stock remains 8 and per-med Auto preference stays OFF', async () => {
     const callOrder: string[] = [];
     // Start from disabled durable with exact already reflected
     durable.medications = [
@@ -366,7 +367,9 @@ describe('runGatedGlobalAutoDeductToggle exact-before-mutation', () => {
     expect(result.outcome).toBe('applied');
     expect(result.enable).toBe(true);
     expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBe(8);
-    expect(requireDefined(result.medications[0], 'result.medications[0]').autoDeductEnabled).toBe(true);
+    // Global ON restores the master switch only; it does not turn an
+    // individually disabled medication ON.
+    expect(requireDefined(result.medications[0], 'result.medications[0]').autoDeductEnabled).toBe(false);
   });
 });
 

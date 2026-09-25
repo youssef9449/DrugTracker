@@ -21,8 +21,8 @@ export interface UseAddMedicationFormOptions {
     medData: Omit<Medication, 'id' | 'createdAt'>,
     editId?: string
   ) => Promise<boolean>;
-  initialData?: Medication | null;
-  defaultAutoDeductEnabled?: boolean;
+  initialData?: Medication | null | undefined;
+  defaultAutoDeductEnabled?: boolean | undefined;
 }
 
 /**

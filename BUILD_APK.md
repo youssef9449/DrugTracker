@@ -73,8 +73,8 @@ Quick summary:
      -alias nagnagh \
      -keyalg RSA -keysize 2048 \
      -validity 36500 \
-     -storepass nagnagh2024release \
-     -keypass nagnagh2024release \
+        -storepass "$RELEASE_KEYSTORE_PASSWORD" \
+        -keypass "$RELEASE_KEY_PASSWORD" \
      -dname "CN=Нагнаг Drug Tracker, OU=Mobile, O=Youssef9449, L=Cairo, ST=Cairo, C=EG"
    ```
 
@@ -83,9 +83,9 @@ Quick summary:
    signingConfigs {
        release {
            storeFile file('<absolute-path-to>/nagnagh-release.keystore')
-           storePassword 'nagnagh2024release'
+            storePassword System.getenv('RELEASE_KEYSTORE_PASSWORD')
            keyAlias 'nagnagh'
-           keyPassword 'nagnagh2024release'
+            keyPassword System.getenv('RELEASE_KEY_PASSWORD')
        }
    }
    buildTypes {
@@ -227,9 +227,9 @@ android {
     signingConfigs {
         release {
             storeFile keystorePath
-            storePassword 'nagnagh2024release'
+            storePassword System.getenv('RELEASE_KEYSTORE_PASSWORD')
             keyAlias 'nagnagh'
-            keyPassword 'nagnagh2024release'
+            keyPassword System.getenv('RELEASE_KEY_PASSWORD')
             enableV1Signing true
             enableV2Signing true
             enableV3Signing false

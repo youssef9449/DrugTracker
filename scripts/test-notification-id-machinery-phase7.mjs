@@ -44,8 +44,8 @@ assert(runtimeInterface.includes('namespace: string;') && runtimeInterface.inclu
   'Notification Runtime API must require logical namespace + identity');
 assert(!/\bid:\s*number\b/.test(runtimeInterface),
   'Notification Runtime feature contract must not expose numeric ids');
-assert((runtime.match(/function iosPlatformNotificationId\(/g) || []).length === 1,
-  'iOS platform numeric conversion must have exactly one private implementation');
+assert((runtime.match(/function resolveIosPlatformNotificationId\(/g) || []).length === 1,
+  'iOS platform numeric conversion must have exactly one private implementation (durable mapping resolver)');
 assert(!runtime.includes('DOSE_REMINDER_CHANNEL_ID')
   && !runtime.includes('DOSE_REMINDER_FOREGROUND_CHANNEL_ID')
   && !runtime.includes('LOW_STOCK_CHANNEL_ID'),
@@ -95,7 +95,6 @@ for (const rel of sourceFiles('src')) {
 }
 
 const featureFiles = [
-  'src/utils/notifications/stockNotifications.ts',
   'src/utils/notifications/criticalStockNotifications.ts',
   'src/utils/notifications/doseReminderNotifications.ts',
   'src/utils/doseReminderScheduling.ts',
@@ -118,8 +117,6 @@ for (const rel of featureFiles) {
   }
 }
 
-assert(read('src/utils/notifications/stockNotifications.ts').includes("import { scheduleNotification } from '../notificationRuntime';"),
-  'stock notification feature must call the shared Notification Runtime directly');
 assert(read('src/utils/notifications/criticalStockNotifications.ts').includes("import { scheduleNotification } from '../notificationRuntime';"),
   'critical notification feature must call the shared Notification Runtime directly');
 assert(read('src/utils/notifications/doseReminderNotifications.ts').includes("from '../notificationRuntime';"),

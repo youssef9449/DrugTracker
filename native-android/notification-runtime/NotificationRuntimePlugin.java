@@ -1,5 +1,6 @@
 package app.drugtracker.notificationruntime;
 
+import app.drugtracker.alarmruntime.NativeErrorCodes;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -122,6 +123,14 @@ public final class NotificationRuntimePlugin extends Plugin {
         ret.put("ok", result.accepted);
         if (result.error != null) {
             ret.put("error", result.error);
+            // #534: structured machine code; the raw message stays in `error`.
+            ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+            // #511: distinguish "delivery failed, retry evidence stored" from
+            // "delivery failed AND retry evidence could not be stored".
+            if (result.retryEvidence == NotificationRuntime.PostResult.RetryEvidenceState.FAILED) {
+                ret.put("code", "retry_persist_failed");
+                ret.put("retryPersistFailed", true);
+            }
         }
         call.resolve(ret);
     }
@@ -136,6 +145,14 @@ public final class NotificationRuntimePlugin extends Plugin {
         ret.put("ok", result.accepted);
         if (result.error != null) {
             ret.put("error", result.error);
+            // #534: structured machine code; the raw message stays in `error`.
+            ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+            // #511: distinguish "delivery failed, retry evidence stored" from
+            // "delivery failed AND retry evidence could not be stored".
+            if (result.retryEvidence == NotificationRuntime.PostResult.RetryEvidenceState.FAILED) {
+                ret.put("code", "retry_persist_failed");
+                ret.put("retryPersistFailed", true);
+            }
         }
         call.resolve(ret);
     }
@@ -145,6 +162,40 @@ public final class NotificationRuntimePlugin extends Plugin {
         int retried = new NotificationRuntime(getContext()).retryPersistedFailures();
         JSObject ret = new JSObject();
         ret.put("retried", retried);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void ensureChannel(PluginCall call) {
+        // #503: startup channel bootstrap before capability gating.
+        String channelId = call.getString("channelId", "");
+        String channelName = call.getString("channelName", channelId);
+        Integer importance = call.getInt("channelImportance", 4);
+        Integer visibility = call.getInt("channelVisibility", 1);
+        JSObject ret = new JSObject();
+        if (channelId == null || channelId.isEmpty()) {
+            ret.put("ok", false);
+            ret.put("error", "invalid_request");
+            ret.put("code", "invalid_request");
+            call.resolve(ret);
+            return;
+        }
+        try {
+            new NotificationRuntime(getContext()).createChannelIfAbsent(
+                    channelId,
+                    channelName,
+                    importance == null ? 4 : importance,
+                    visibility == null ? 1 : visibility);
+            ret.put("ok", true);
+        } catch (Exception e) {
+            ret.put("ok", false);
+            // #534: the raw diagnostic stays in `error`; the stable machine
+            // code crosses separately and never depends on message wording.
+            ret.put("error", e.getMessage() != null
+                    ? e.getMessage()
+                    : "channel_bootstrap_failed");
+            ret.put("code", "channel_bootstrap_failed");
+        }
         call.resolve(ret);
     }
 

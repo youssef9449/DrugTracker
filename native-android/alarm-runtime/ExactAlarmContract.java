@@ -115,9 +115,9 @@ public final class ExactAlarmContract {
     /**
      * Single generic native identity encoder.
      *
-     * <p>The caller supplies its feature-neutral URI scheme/authority/path
-     * segments. The shared contract owns validation and encoding; it does not
-     * know Auto, Dose, or Critical namespaces.</p>
+     * <p>The caller supplies its own URI scheme/authority/path
+     * segments. The shared contract owns validation and encoding; it knows
+     * nothing about any caller's feature namespaces.</p>
      */
     public static Uri buildIdentityUri(
             String scheme,

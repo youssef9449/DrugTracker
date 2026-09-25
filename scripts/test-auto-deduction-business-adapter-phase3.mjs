@@ -28,6 +28,7 @@ const productionJavaFiles = fs
   .map((name) => path.join(autoDir, name));
 
 const scheduler = read('native-android/auto-deduction/AutoDeductionScheduler.java');
+const schedulerPorts = read('native-android/auto-deduction/AutoDeductionSchedulerPorts.java');
 const adapter = read('native-android/auto-deduction/AutoDeductionSchedulingAdapter.java');
 const receiver = read('native-android/auto-deduction/AutoDeductionReceiver.java');
 const runtime = read('native-android/alarm-runtime/ExactAlarmRuntime.java');
@@ -93,6 +94,7 @@ assert(
 );
 
 const recurrence = read('native-android/auto-deduction/AutoDeductionRecurrence.java');
+const generationStore = read('native-android/auto-deduction/AutoDeductionRecurrenceGenerationStore.java');
 const cancellation = read('native-android/auto-deduction/AutoDeductionCancellation.java');
 const retry = read('native-android/auto-deduction/AutoDeductionRetry.java');
 
@@ -107,9 +109,15 @@ const retryEvidenceStore =
   read('native-android/auto-deduction/AutoDeductionRetryEvidenceStore.java');
 
 assert(
-  (recurrence.match(/getSharedPreferences\(/g) || []).length === 1
-    && recurrence.includes('AutoDeductionContract.PREFS_RECURRENCE_AUTH'),
-  'recurrence authorization persistence must be owned by AutoDeductionRecurrence'
+  (generationStore.match(/getSharedPreferences\(/g) || []).length === 1
+    && generationStore.includes('AutoDeductionContract.PREFS_RECURRENCE_AUTH')
+    && !generationStore.includes('AutoDeductionRecurrence.'),
+  'recurrence authorization persistence must be owned by AutoDeductionRecurrenceGenerationStore'
+);
+assert(
+  recurrence.includes('new AutoDeductionRecurrenceGenerationStore(')
+    && (recurrence.match(/getSharedPreferences\(/g) || []).length === 0,
+  'AutoDeductionRecurrence must consume the extracted generation store (no direct prefs access)'
 );
 assert(
   (retryEvidenceStore.match(/getSharedPreferences\(/g) || []).length === 1
@@ -153,10 +161,20 @@ const requiredHosts = [
 ];
 for (const hostContract of requiredHosts) {
   assert(
-    scheduler.includes(hostContract),
-    'scheduler facade must provide collaborator host contract: ' + hostContract
+    schedulerPorts.includes(hostContract),
+    'scheduler port adapters must implement the collaborator host contract: ' + hostContract
   );
 }
+assert(
+  scheduler.includes('AutoDeductionSchedulerPorts.recurrenceHost(this)')
+    && scheduler.includes('AutoDeductionSchedulerPorts.recoveryHost(this)')
+    && scheduler.includes('AutoDeductionSchedulerPorts.fireHost(this)')
+    && scheduler.includes('AutoDeductionSchedulerPorts.cancellationHost(this)')
+    && scheduler.includes('AutoDeductionSchedulerPorts.occurrenceStateHost(this)')
+    && scheduler.includes('AutoDeductionSchedulerPorts.retryHost(this)')
+    && !scheduler.includes('AutoDeductionScheduler.this'),
+  'scheduler facade must wire the extracted port adapters and keep no inner-class glue'
+);
 assert(
   adapter.includes('import app.drugtracker.alarmruntime.ExactAlarmRuntime;'),
   'adapter must own the ExactAlarmRuntime dependency'

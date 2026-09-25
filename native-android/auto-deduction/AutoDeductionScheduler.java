@@ -1,6 +1,5 @@
 package app.drugtracker.autodeduction;
 import android.content.Context;
-import android.util.Log;
 import java.util.Map;
 /**
  * Auto Deduction facade/orchestrator. Feature business responsibilities are
@@ -103,8 +102,8 @@ public final class AutoDeductionScheduler {
     AutoDeductionEventStore eventStore() {
         return new AutoDeductionEventStore(appContext, failurePolicy);
     }
-    boolean clearSuccessorObligation(String medicationId, String doseId, String calendarDate) {
-        return successorObligationStore.clear(medicationId, doseId, calendarDate);
+    void clearSuccessorObligation(String medicationId, String doseId, String calendarDate) {
+        successorObligationStore.clear(medicationId, doseId, calendarDate);
     }
     boolean markSuccessorObligationStockApplied(
             String medicationId, String doseId, String calendarDate) {
@@ -124,320 +123,21 @@ public final class AutoDeductionScheduler {
                 : failurePolicy;
         this.schedulingAdapter = new AutoDeductionSchedulingAdapter(
                 appContext, this.failurePolicy);
-        this.recurrenceService = new AutoDeductionRecurrence(recurrenceHost());
-        this.cancellationService = new AutoDeductionCancellation(cancellationHost());
-        this.fireService = new AutoDeductionFireService(fireHost());
-        this.retryService = new AutoDeductionRetry(retryHost());
-        this.recoveryService = new AutoDeductionRecovery(recoveryHost());
-        this.occurrenceState = new AutoDeductionOccurrenceState(occurrenceStateHost());
+        this.recurrenceService = new AutoDeductionRecurrence(
+                AutoDeductionSchedulerPorts.recurrenceHost(this));
+        this.cancellationService = new AutoDeductionCancellation(
+                AutoDeductionSchedulerPorts.cancellationHost(this));
+        this.fireService = new AutoDeductionFireService(
+                AutoDeductionSchedulerPorts.fireHost(this));
+        this.retryService = new AutoDeductionRetry(
+                AutoDeductionSchedulerPorts.retryHost(this));
+        this.recoveryService = new AutoDeductionRecovery(
+                AutoDeductionSchedulerPorts.recoveryHost(this));
+        this.occurrenceState = new AutoDeductionOccurrenceState(
+                AutoDeductionSchedulerPorts.occurrenceStateHost(this));
         this.successorObligationStore = new AutoSuccessorObligationStore(appContext);
         this.retryEvidenceStore = new AutoDeductionRetryEvidenceStore(appContext);
     }
-    private AutoDeductionRecurrence.Host recurrenceHost() {
-        return new AutoDeductionRecurrence.Host() {
-            @Override public Context appContext() { return AutoDeductionScheduler.this.appContext; }
-            @Override public AutoSuccessorObligationStore successorObligationStore() {
-                return AutoDeductionScheduler.this.successorObligationStore;
-            }
-            @Override public CancelResult cancelAllSchedulesForDoseLocked(String medicationId, String doseId) {
-                return AutoDeductionScheduler.this.cancelAllSchedulesForDoseLocked(medicationId, doseId);
-            }
-            @Override public AutoDeductionFailurePolicy failurePolicy() {
-                return AutoDeductionScheduler.this.failurePolicy;
-            }
-            @Override public boolean removeScheduleMetadataIfVersionLocked(String prefKey, String expectedVersion) {
-                return AutoDeductionScheduler.this.removeScheduleMetadataIfVersionLocked(prefKey, expectedVersion);
-            }
-            @Override public AutoDeductionSchedulingAdapter schedulingAdapter() {
-                return AutoDeductionScheduler.this.schedulingAdapter;
-            }
-            @Override public boolean isOccurrenceCancelledKey(String occurrenceKey) {
-                return AutoDeductionScheduler.this.isOccurrenceCancelledKey(occurrenceKey);
-            }
-            @Override public AutoDeductionEventStore eventStore() {
-                return AutoDeductionScheduler.this.eventStore();
-            }
-            @Override public long recoveryNowForService() {
-                return AutoDeductionScheduler.this.recoveryNowForService();
-            }
-            @Override public FireResult recoverMissedOccurrence(
-                    String medicationId, String doseId, String calendarDate,
-                    long scheduledAt, double amount, long generation,
-                    String treatmentEndDate, String fallbackTimeHhmm) {
-                return AutoDeductionScheduler.this.recoverMissedOccurrence(
-                        medicationId, doseId, calendarDate, scheduledAt, amount, generation,
-                        treatmentEndDate, fallbackTimeHhmm);
-            }
-            @Override public boolean markSuccessorObligationStockApplied(
-                    String medicationId, String doseId, String calendarDate) {
-                return AutoDeductionScheduler.this.markSuccessorObligationStockApplied(
-                        medicationId, doseId, calendarDate);
-            }
-        };
-    }
-
-    private AutoDeductionRecovery.Host recoveryHost() {
-        return new AutoDeductionRecovery.Host() {
-            @Override public boolean isRecurrenceGenerationAuthorizedLocked(
-                    String medicationId, String doseId, long expected) {
-                return AutoDeductionScheduler.this.isRecurrenceGenerationAuthorizedLocked(
-                        medicationId, doseId, expected);
-            }
-            @Override public boolean removeScheduleMetadataIfVersionLocked(
-                    String prefKey, String expectedVersion) {
-                return AutoDeductionScheduler.this.removeScheduleMetadataIfVersionLocked(
-                        prefKey, expectedVersion);
-            }
-            @Override public long recoveryNowForService() {
-                return AutoDeductionScheduler.this.recoveryNowForService();
-            }
-            @Override public AutoDeductionSchedulingAdapter schedulingAdapter() {
-                return AutoDeductionScheduler.this.schedulingAdapter;
-            }
-            @Override public ScheduleResult installFutureSuccessorIfGenerationHolds(
-                    String medicationId, String doseId, String futureDate, String timeHhmm,
-                    double amount, long triggerAt, long expectedGen,
-                    String pastPrefKey, String observedVersion, String treatmentEndDateOverride) {
-                return AutoDeductionScheduler.this.installFutureSuccessorIfGenerationHolds(
-                        medicationId, doseId, futureDate, timeHhmm, amount, triggerAt,
-                        expectedGen, pastPrefKey, observedVersion, treatmentEndDateOverride);
-            }
-            @Override public FireResult recoverMissedOccurrence(
-                    String medicationId, String doseId, String calendarDate,
-                    long scheduledAt, double amount, long generation,
-                    String treatmentEndDate, String fallbackTimeHhmm) {
-                return AutoDeductionScheduler.this.recoverMissedOccurrence(
-                        medicationId, doseId, calendarDate, scheduledAt, amount, generation,
-                        treatmentEndDate, fallbackTimeHhmm);
-            }
-            @Override public boolean removeScheduleMetadataIfVersion(
-                    String prefKey, String expectedVersion) {
-                return AutoDeductionScheduler.this.removeScheduleMetadataIfVersion(
-                        prefKey, expectedVersion);
-            }
-            @Override public ScheduleResult scheduleNextOccurrenceIfSnapshotOwnsPast(
-                    String medicationId, String doseId, String fromDate, String timeHhmm,
-                    double amount, String pastPrefKey, String observedVersion) {
-                return AutoDeductionScheduler.this.scheduleNextOccurrenceIfSnapshotOwnsPast(
-                        medicationId, doseId, fromDate, timeHhmm, amount,
-                        pastPrefKey, observedVersion);
-            }
-            @Override public Context appContext() { return AutoDeductionScheduler.this.appContext; }
-            @Override public AutoDeductionEventStore eventStore() {
-                return AutoDeductionScheduler.this.eventStore();
-            }
-            @Override public long getRecurrenceGenerationLocked(String medicationId, String doseId) {
-                return AutoDeductionScheduler.this.getRecurrenceGenerationLocked(medicationId, doseId);
-            }
-            @Override public boolean persistSuccessorObligation(
-                    String medicationId, String doseId, String calendarDate, String timeHhmm,
-                    double amount, String treatmentEndDate, String operationVersion,
-                    long recurrenceGeneration) {
-                return AutoDeductionScheduler.this.persistSuccessorObligation(
-                        medicationId, doseId, calendarDate, timeHhmm, amount,
-                        treatmentEndDate, operationVersion, recurrenceGeneration);
-            }
-            @Override public AutoSuccessorObligationStore successorObligationStore() {
-                return AutoDeductionScheduler.this.successorObligationStore;
-            }
-            @Override public boolean markSuccessorObligationStockApplied(
-                    String medicationId, String doseId, String calendarDate) {
-                return AutoDeductionScheduler.this.markSuccessorObligationStockApplied(
-                        medicationId, doseId, calendarDate);
-            }
-            @Override public AutoDeductionRetryEvidenceStore retryEvidenceStore() {
-                return AutoDeductionScheduler.this.retryEvidenceStore;
-            }
-            @Override public FireResult recoverFireFromIndependentEvidence(
-                    String medicationId, String doseId, String calendarDate) {
-                return AutoDeductionScheduler.this.recoverFireFromIndependentEvidence(
-                        medicationId, doseId, calendarDate);
-            }
-            @Override public boolean scheduleFireRetry(
-                    String medicationId, String doseId, String calendarDate, long scheduledAt,
-                    double amount, String timeHhmm, long generation, String operationVersion,
-                    int nextRetryCount) {
-                return AutoDeductionScheduler.this.scheduleFireRetry(
-                        medicationId, doseId, calendarDate, scheduledAt, amount, timeHhmm,
-                        generation, operationVersion, nextRetryCount);
-            }
-            @Override public boolean recoverSuccessorObligations() {
-                return AutoDeductionScheduler.this.recoverSuccessorObligations();
-            }
-            @Override public AutoDeductionFailurePolicy failurePolicy() {
-                return AutoDeductionScheduler.this.failurePolicy;
-            }
-            @Override public Map<String, String> getAllScheduleMetadata() {
-                return AutoDeductionScheduler.this.getAllScheduleMetadata();
-            }
-            @Override public boolean isOccurrenceCancelledKey(String occurrenceKey) {
-                return AutoDeductionScheduler.this.isOccurrenceCancelledKey(occurrenceKey);
-            }
-            @Override public boolean hasCancellationTombstone(String occurrenceKey) {
-                return AutoDeductionScheduler.this.hasCancellationTombstone(occurrenceKey);
-            }
-            @Override public boolean clearCancellationTombstoneLocked(String occurrenceKey) {
-                return AutoDeductionScheduler.this.clearCancellationTombstoneLocked(occurrenceKey);
-            }
-            @Override public ScheduleResult scheduleOccurrenceLocked(
-                    String prefKey, AutoDeductionPersistenceModels.ScheduleRecord record,
-                    String requiredVersion) {
-                return AutoDeductionScheduler.this.scheduleOccurrenceLocked(
-                        prefKey, record, requiredVersion);
-            }
-            @Override public boolean compactTerminalState() {
-                return AutoDeductionScheduler.this.compactTerminalState();
-            }
-        };
-    }
-
-    private AutoDeductionFireService.Host fireHost() {
-        return new AutoDeductionFireService.Host() {
-            @Override public boolean isOccurrenceCancelledKey(String occurrenceKey) {
-                return AutoDeductionScheduler.this.isOccurrenceCancelledKey(occurrenceKey);
-            }
-            @Override public AutoDeductionSchedulingAdapter schedulingAdapter() {
-                return AutoDeductionScheduler.this.schedulingAdapter;
-            }
-            @Override public long getRecurrenceGenerationLocked(String medicationId, String doseId) {
-                return AutoDeductionScheduler.this.getRecurrenceGenerationLocked(medicationId, doseId);
-            }
-            @Override public AutoDeductionEventStore eventStore() {
-                return AutoDeductionScheduler.this.eventStore();
-            }
-            @Override public boolean persistSuccessorObligation(
-                    String medicationId, String doseId, String calendarDate, String timeHhmm,
-                    double amount, String treatmentEndDate, String operationVersion,
-                    long recurrenceGeneration) {
-                return AutoDeductionScheduler.this.persistSuccessorObligation(
-                        medicationId, doseId, calendarDate, timeHhmm, amount,
-                        treatmentEndDate, operationVersion, recurrenceGeneration);
-            }
-            @Override public boolean recordIndependentFireRetryEvidenceLocked(
-                    String medicationId, String doseId, String calendarDate, long scheduledAt,
-                    double amount, String timeHhmm, String treatmentEndDate, long generation,
-                    String operationVersion, int nextRetryCount) {
-                return AutoDeductionScheduler.this.recordIndependentFireRetryEvidenceLocked(
-                        medicationId, doseId, calendarDate, scheduledAt, amount, timeHhmm,
-                        treatmentEndDate, generation, operationVersion, nextRetryCount);
-            }
-            @Override public Context appContext() { return AutoDeductionScheduler.this.appContext; }
-            @Override public boolean markSuccessorObligationStockApplied(
-                    String medicationId, String doseId, String calendarDate) {
-                return AutoDeductionScheduler.this.markSuccessorObligationStockApplied(
-                        medicationId, doseId, calendarDate);
-            }
-            @Override public boolean clearIndependentFireRetryEvidenceLocked(String occurrenceKey) {
-                return AutoDeductionScheduler.this.clearIndependentFireRetryEvidenceLocked(occurrenceKey);
-            }
-            @Override public boolean isRecurrenceGenerationAuthorizedLocked(
-                    String medicationId, String doseId, long expectedGeneration) {
-                return AutoDeductionScheduler.this.isRecurrenceGenerationAuthorizedLocked(
-                        medicationId, doseId, expectedGeneration);
-            }
-        };
-    }
-
-    private AutoDeductionCancellation.Host cancellationHost() {
-        return new AutoDeductionCancellation.Host() {
-            @Override public Map<String, String> getAllScheduleMetadata() {
-                return AutoDeductionScheduler.this.getAllScheduleMetadata();
-            }
-            @Override public AutoDeductionSchedulingAdapter schedulingAdapter() {
-                return AutoDeductionScheduler.this.schedulingAdapter;
-            }
-            @Override public boolean quarantineMalformedScheduleMetadata(
-                    String prefKey, String expectedRaw, String reason) {
-                return AutoDeductionScheduler.this.quarantineMalformedScheduleMetadata(
-                        prefKey, expectedRaw, reason);
-            }
-            @Override public boolean hasCancellationTombstoneStored(String occurrenceKey) {
-                return AutoDeductionScheduler.this.hasCancellationTombstoneStored(occurrenceKey);
-            }
-            @Override public boolean isEffectivelyCancelledStored(String occurrenceKey) {
-                return AutoDeductionScheduler.this.isEffectivelyCancelledStored(occurrenceKey);
-            }
-            @Override public boolean clearCancellationTombstoneStored(String occurrenceKey) {
-                return AutoDeductionScheduler.this.clearCancellationTombstoneStored(occurrenceKey);
-            }
-            @Override public long getRecurrenceGenerationLocked(String medicationId, String doseId) {
-                return AutoDeductionScheduler.this.getRecurrenceGenerationLocked(medicationId, doseId);
-            }
-        };
-    }
-
-    private AutoDeductionOccurrenceState.Host occurrenceStateHost() {
-        return new AutoDeductionOccurrenceState.Host() {
-            @Override public Context appContext() { return AutoDeductionScheduler.this.appContext; }
-            @Override public Map<String, String> getAllScheduleMetadata() {
-                return AutoDeductionScheduler.this.getAllScheduleMetadata();
-            }
-            @Override public AutoDeductionEventStore eventStore() {
-                return AutoDeductionScheduler.this.eventStore();
-            }
-            @Override public AutoDeductionRetryEvidenceStore retryEvidenceStore() {
-                return AutoDeductionScheduler.this.retryEvidenceStore;
-            }
-            @Override public AutoSuccessorObligationStore successorObligationStore() {
-                return AutoDeductionScheduler.this.successorObligationStore;
-            }
-            @Override public AutoDeductionFailurePolicy failurePolicy() {
-                return AutoDeductionScheduler.this.failurePolicy;
-            }
-            @Override public boolean isOccurrenceCancelledKey(String occurrenceKey) {
-                return AutoDeductionScheduler.this.isOccurrenceCancelledKey(occurrenceKey);
-            }
-            @Override public AutoDeductionSchedulingAdapter schedulingAdapter() {
-                return AutoDeductionScheduler.this.schedulingAdapter;
-            }
-        };
-    }
-
-    private AutoDeductionRetry.Host retryHost() {
-        return new AutoDeductionRetry.Host() {
-            @Override public Context appContext() { return AutoDeductionScheduler.this.appContext; }
-            @Override public boolean isOccurrenceCancelledKey(String occurrenceKey) {
-                return AutoDeductionScheduler.this.isOccurrenceCancelledKey(occurrenceKey);
-            }
-            @Override public AutoDeductionSchedulingAdapter schedulingAdapter() {
-                return AutoDeductionScheduler.this.schedulingAdapter;
-            }
-            @Override public long getRecurrenceGenerationLocked(String medicationId, String doseId) {
-                return AutoDeductionScheduler.this.getRecurrenceGenerationLocked(medicationId, doseId);
-            }
-            @Override public AutoDeductionFailurePolicy failurePolicy() {
-                return AutoDeductionScheduler.this.failurePolicy;
-            }
-            @Override public AutoDeductionEventStore eventStore() {
-                return AutoDeductionScheduler.this.eventStore();
-            }
-            @Override public boolean persistSuccessorObligation(
-                    String medicationId, String doseId, String calendarDate, String timeHhmm,
-                    double amount, String treatmentEndDate, String operationVersion,
-                    long recurrenceGeneration) {
-                return AutoDeductionScheduler.this.persistSuccessorObligation(
-                        medicationId, doseId, calendarDate, timeHhmm, amount,
-                        treatmentEndDate, operationVersion, recurrenceGeneration);
-            }
-            @Override public boolean markSuccessorObligationStockApplied(
-                    String medicationId, String doseId, String calendarDate) {
-                return AutoDeductionScheduler.this.markSuccessorObligationStockApplied(
-                        medicationId, doseId, calendarDate);
-            }
-            @Override public ScheduleResult scheduleNextOccurrenceFromIndependentEvidenceLocked(
-                    String medicationId, String doseId, String calendarDate,
-                    AutoDeductionPersistenceModels.RetryEvidenceRecord evidence) {
-                return AutoDeductionScheduler.this.scheduleNextOccurrenceFromIndependentEvidenceLocked(
-                        medicationId, doseId, calendarDate, evidence);
-            }
-            @Override public boolean clearSuccessorObligation(
-                    String medicationId, String doseId, String calendarDate) {
-                return AutoDeductionScheduler.this.clearSuccessorObligation(
-                        medicationId, doseId, calendarDate);
-            }
-        };
-    }
-
     // Collaborator implementations own recurrence, fire, recovery, retry, cancellation,
     // occurrence state, and the feature-to-shared exact-alarm scheduling boundary.
 
@@ -1039,7 +739,6 @@ public final class AutoDeductionScheduler {
                 observedVersion,
                 treatmentEndDateOverride);
     }
-    public ScheduleResult scheduleNextOccurrence(String medicationId,String doseId,String fromDate,String timeHhmm,double amount) { return recurrenceService.scheduleNextOccurrence(medicationId,doseId,fromDate,timeHhmm,amount); }
     public ScheduleResult scheduleNextOccurrenceIfAbsent(String medicationId,String doseId,String fromDate,String timeHhmm,double amount,long expectedGen) { return recurrenceService.scheduleNextOccurrenceIfAbsent(medicationId,doseId,fromDate,timeHhmm,amount,expectedGen); }
     boolean recoverSuccessorObligations() { return recurrenceService.recoverSuccessorObligations(); }
     ScheduleResult scheduleNextOccurrenceFromIndependentEvidenceLocked(
@@ -1163,7 +862,7 @@ public final class AutoDeductionScheduler {
                 operationVersion,
                 nextRetryCount);
     }
-    boolean clearIndependentFireRetryEvidenceLocked(String occurrenceKey) { return retryService.clearIndependentFireRetryEvidenceLocked(occurrenceKey); }
+    void clearIndependentFireRetryEvidenceLocked(String occurrenceKey) { retryService.clearIndependentFireRetryEvidenceLocked(occurrenceKey); }
     void clearIndependentFireRetryEvidenceAfterStock(String medicationId,String doseId,String calendarDate) { retryService.clearIndependentFireRetryEvidenceAfterStock(medicationId,doseId,calendarDate); }
     public FireResult recoverFireFromIndependentEvidence(String medicationId,String doseId,String calendarDate) { return retryService.recoverFireFromIndependentEvidence(medicationId,doseId,calendarDate); }
     AutoDeductionPersistenceModels.RetryEvidenceRecord getIndependentFireRetryEvidence(

@@ -10,8 +10,15 @@ import {
 } from './doseReminderNative';
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
 import { cancelNotification, getPendingNotificationResult, scheduleNotification } from './notificationRuntime';
-import { classifyNativeError, type NativeBoundaryFailure } from './nativeErrors';
-import { scheduleWebNotification } from './notifications/webNotifications';
+import {
+  classifyNativeError,
+  type NativeBoundaryFailure } from './nativeErrors';
+import {
+  scheduleWebNotification,
+  listWebScheduledNotificationIdentities,
+} from './notifications/webNotifications';
+import { isValidTimeHhmm } from './time';
+import { normalizeDoseId } from './doseIdentity';
 import {
   getDoseReminderChannelId,
   DOSE_REMINDER_TAKE_ACTION,
@@ -88,7 +95,10 @@ export async function cancelDoseReminder(
     }
     return;
   }
-  if (!isNativePlatform()) return;
+  // #546: Web must cancel through the same Notification Runtime identity
+  // used at scheduling time ('dose-reminder' + medId::doseId) — cancelNotification
+  // routes to the Web scheduler's durable record/timer cleanup. A silent
+  // early return would leave Web reminders scheduled after Take/disable/edit.
   try {
     const cancelled = await cancelNotification(
       'dose-reminder',
@@ -133,6 +143,25 @@ export async function cancelStaleDoseReminderAlarms(
       }
     }
     return { ok: true };
+  }
+  // #546: Web reconciliation removes stale Web scheduled reminders using the
+  // same namespace+identity scheme as scheduling. The durable Web scheduler
+  // record store is the source for discovering which identities exist.
+  const scheduledIdentities = listWebScheduledNotificationIdentities('dose-reminder');
+  for (const identity of scheduledIdentities) {
+    if (keepKeys.has(identity)) continue;
+    const separator = identity.indexOf('::');
+    if (separator <= 0) continue;
+    const medId = identity.slice(0, separator);
+    const doseId = identity.slice(separator + 2);
+    const cancelled = await cancelNotification('dose-reminder', medId + '::' + doseId);
+    if (!cancelled) {
+      return {
+        ok: false,
+        error: 'dose_reminder_notification_cancel_failed',
+        errorCode: 'platform_failure',
+      };
+    }
   }
   return { ok: true };
 }
@@ -201,11 +230,8 @@ export async function scheduleDoseReminder(
   doseId: string,
   options?: ScheduleDoseReminderOptions,
 ): Promise<void> {
-  const parts = reminderTime.split(':').map((n) => parseInt(n, 10));
-  const [hour, minute] = parts;
-  if (parts.length < 2 || Number.isNaN(hour) || Number.isNaN(minute)) return;
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return;
-  const id = typeof doseId === 'string' ? doseId.trim() : '';
+  if (!isValidTimeHhmm(reminderTime)) return;
+  const id = normalizeDoseId(doseId);
   if (!id || !(Number(doseAmount) > 0)) return;
   if (getNativePlatform() === 'android') {
     await scheduleDoseReminderNative(

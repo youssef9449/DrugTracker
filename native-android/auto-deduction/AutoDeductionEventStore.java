@@ -14,10 +14,12 @@ import java.util.Map;
 /**
  * Durable Auto-Deduction event ledger.
  *
- * <p>Business semantics live here: insert-if-absent, pending-fire promotion,
- * FIRED → RECONCILED transitions, and fail-closed malformed-row handling.
- * Raw SharedPreferences access is isolated in AutoDeductionEventPersistence,
- * while all JSON encoding/decoding is isolated in AutoDeductionPersistenceCodec.</p>
+ * <p>Responsibility split (#467): raw SharedPreferences access is isolated in
+ * AutoDeductionEventPersistence, all JSON encoding/decoding is isolated in
+ * AutoDeductionPersistenceCodec, and key-identity parsing / read-model
+ * classification live in AutoDeductionEventQueries. Business state
+ * transitions (insert-if-absent, pending-fire promotion, FIRED → RECONCILED,
+ * fail-closed terminalization) and terminal-state compaction live here.</p>
  */
 public final class AutoDeductionEventStore {
 
@@ -120,6 +122,10 @@ public final class AutoDeductionEventStore {
                 }
 
                 if (written) {
+                    // Stale pending-marker cleanup (#493): the FIRED row is
+                    // already durable, so the removal is asynchronous; a
+                    // marker that survives a crash is re-cleaned idempotently
+                    // by the next promotion pass.
                     persistence.removePending(KEY_PENDING_PREFIX + key);
                     return new InsertFiredResult(
                             InsertFiredResult.Status.CREATED);
@@ -236,9 +242,12 @@ public final class AutoDeductionEventStore {
                 }
             }
 
-            if (!persistence.removePendingKeys(toRemove)) {
-                Log.w(TAG, "pending-fire cleanup commit failed");
-            }
+            // Batched pending cleanup (#493): every promoted FIRED row (or
+            // already-existing FIRED row) is durable before its marker is
+            // removed, so the cleanup outcome needs no failure signal — a
+            // removal lost to a crash is re-cleaned idempotently by the next
+            // promotion pass because promotion re-checks containsEvent.
+            persistence.removePendingKeys(toRemove);
         }
 
         return promotionFailed
@@ -249,8 +258,11 @@ public final class AutoDeductionEventStore {
 
     /**
      * Preserve malformed crash-recovery evidence in a separate durable namespace.
-     * The original live pending key is removed only in the same successful commit
-     * that creates its quarantine record.
+     * The quarantine record and the removal of the original live pending key
+     * are one atomic editor transaction, and the synchronous commit outcome is
+     * part of the fail-closed promotion contract (#493): a quarantine that
+     * cannot be durably written must fail the promotion pass instead of
+     * silently dropping the malformed evidence.
      */
     private boolean quarantineMalformedPendingLocked(
             String pendingKey,
@@ -347,51 +359,17 @@ public final class AutoDeductionEventStore {
         }
     }
 
-    private static final class StorageIdentity {
-        final String medicationId;
-        final String doseId;
-        final String calendarDate;
 
-        StorageIdentity(
-                String medicationId,
-                String doseId,
-                String calendarDate) {
-            this.medicationId = medicationId;
-            this.doseId = doseId;
-            this.calendarDate = calendarDate;
-        }
-    }
 
-    private static final char OCCURRENCE_KEY_SEPARATOR = '\u001f';
-
-    private static StorageIdentity parseStorageKeyIdentity(String prefKey) {
-        if (prefKey == null || !prefKey.startsWith(KEY_EVENT_PREFIX)) return null;
-        String encoded = prefKey.substring(KEY_EVENT_PREFIX.length());
-        int first = encoded.indexOf(OCCURRENCE_KEY_SEPARATOR);
-        int second = first >= 0
-                ? encoded.indexOf(OCCURRENCE_KEY_SEPARATOR, first + 1)
-                : -1;
-        if (first <= 0 || second <= first + 1 || second >= encoded.length() - 1) {
-            return null;
-        }
-        if (encoded.indexOf(OCCURRENCE_KEY_SEPARATOR, second + 1) >= 0) {
-            return null;
-        }
-        return new StorageIdentity(
-                encoded.substring(0, first),
-                encoded.substring(first + 1, second),
-                encoded.substring(second + 1));
+    /** Key-identity parsing delegated to the query/validation collaborator (#467). */
+    private static AutoDeductionEventQueries.StorageIdentity parseStorageKeyIdentity(String prefKey) {
+        return AutoDeductionEventQueries.parseStorageKeyIdentity(KEY_EVENT_PREFIX, prefKey);
     }
 
     private static boolean storageIdentityMatchesPayload(
-            StorageIdentity identity,
+            AutoDeductionEventQueries.StorageIdentity identity,
             AutoDeductionPersistenceModels.EventRecord record) {
-        if (identity == null || record == null || record.occurrence == null) {
-            return false;
-        }
-        return identity.medicationId.equals(record.occurrence.medicationId)
-                && identity.doseId.equals(record.occurrence.doseId)
-                && identity.calendarDate.equals(record.occurrence.calendarDate);
+        return AutoDeductionEventQueries.storageIdentityMatchesPayload(identity, record);
     }
 
     private EventLookupResult terminalizeRejectedLocked(
@@ -471,7 +449,7 @@ public final class AutoDeductionEventStore {
                 return new MarkResult(false, false);
             }
 
-            StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
+            AutoDeductionEventQueries.StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
             if (!storageIdentityMatchesPayload(storageIdentity, record)) {
                 String reason = storageIdentity != null
                         && !storageIdentity.medicationId.equals(record.occurrence.medicationId)
@@ -559,81 +537,38 @@ public final class AutoDeductionEventStore {
                 AutoDeductionPersistenceCodec.DecodeResult decoded =
                         AutoDeductionPersistenceCodec.decodeEvent(raw);
 
-                if (AutoDeductionContract.STATUS_REJECTED.equals(decoded.status)) {
+                // Read-model classification lives in the query collaborator
+                // (#467): this loop only consumes its verdict and owns the
+                // fail-closed terminalization write for non-FIRED rows.
+                AutoDeductionEventQueries.FiredRowClassification classification =
+                        AutoDeductionEventQueries.classifyFiredRow(
+                                decoded,
+                                raw,
+                                parseStorageKeyIdentity(prefKey));
+                if (classification.isFired()) {
+                    firedRecords.add(classification.firedRecord);
                     continue;
                 }
-                // RECONCILED is a valid terminal event and must remain untouched.
-                // Only FIRED rows are candidates for the recovery read model.
-                if (decoded.isSuccess()
-                        && AutoDeductionContract.STATUS_RECONCILED.equals(decoded.record.status)) {
-                    continue;
-                }
-                if (decoded.isSuccess()
-                        && AutoDeductionContract.STATUS_FIRED.equals(decoded.record.status)
-                        && storageIdentityMatchesPayload(
-                                parseStorageKeyIdentity(prefKey),
-                                decoded.record)) {
-                    firedRecords.add(decoded.record);
+                if (classification.rejectionReason == null) {
+                    // REJECTED / RECONCILED terminal rows are left untouched.
                     continue;
                 }
 
+                final String rejected;
                 try {
-                    String rejectionReason;
-                    StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
-                    JSONObject rawObject = null;
-                    try {
-                        rawObject = new JSONObject(raw);
-                    } catch (JSONException ignored) {
-                        // Keep the invalid-json classification below.
-                    }
-                    String rawStatus = rawObject == null
-                            ? ""
-                            : rawObject.optString("status", "");
-                    String rawMedicationId = rawObject == null
-                            ? ""
-                            : rawObject.optString("medicationId", "").trim();
-                    String rawDoseId = rawObject == null
-                            ? ""
-                            : rawObject.optString("doseId", "").trim();
-                    String rawCalendarDate = rawObject == null
-                            ? ""
-                            : rawObject.optString("calendarDate", "").trim();
-                    double rawAmount = rawObject == null
-                            ? Double.NaN
-                            : rawObject.optDouble("amount", Double.NaN);
-
-                    boolean validIdentityPayload =
-                            AutoDeductionContract.STATUS_FIRED.equals(rawStatus)
-                                    && !rawMedicationId.isEmpty()
-                                    && !rawDoseId.isEmpty()
-                                    && AutoDeductionContract.isValidCalendarDate(rawCalendarDate)
-                                    && AutoDeductionContract.isValidAmount(rawAmount);
-
-                    if ("invalid_json".equals(decoded.error)) {
-                        rejectionReason = "invalid_json";
-                    } else if (validIdentityPayload
-                            && storageIdentity != null
-                            && !storageIdentity.medicationId.equals(rawMedicationId)) {
-                        // A valid FIRED payload stored under another medication's
-                        // key is specifically an identity corruption.
-                        rejectionReason = "identity_mismatch";
-                    } else {
-                        // Any well-formed FIRED row that reaches this branch has
-                        // either a malformed field set or a dose/date mismatch under
-                        // the same medication. Only a medication identity mismatch
-                        // is classified separately above.
-                        rejectionReason = "malformed_fields";
-                    }
-                    String rejected = AutoDeductionPersistenceCodec.encodeRejected(
+                    rejected = AutoDeductionPersistenceCodec.encodeRejected(
                             prefKey,
-                            rejectionReason,
+                            classification.rejectionReason,
                             System.currentTimeMillis());
-                    if (editor == null) editor = persistence.eventEditor();
-                    editor.putString(prefKey, rejected);
-                    needsTerminalization = true;
                 } catch (JSONException e) {
-                    return FiredEventsResult.failure("rejected_build_failed");
+                    // Same fail-closed contract as terminalizeRejectedLocked:
+                    // encodeRejected cannot throw for valid inputs, but a
+                    // failure must not silently skip terminalization.
+                    return FiredEventsResult.failure("rejected_persist_failed");
                 }
+                if (editor == null) editor = persistence.eventEditor();
+                editor.putString(prefKey, rejected);
+                needsTerminalization = true;
             }
 
             if (needsTerminalization && !commitEditor(editor)) {
@@ -671,73 +606,19 @@ public final class AutoDeductionEventStore {
     }
 
     /**
-     * Compact terminal event rows while preserving unresolved FIRED evidence.
-     *
-     * <p>RECONCILED rows are bounded by calendar date. REJECTED rows have no
-     * trustworthy occurrence identity by design, so they use their durable
-     * rejectedAt timestamp and a fixed retention window instead.</p>
+     * Compact terminal event rows — delegates to the dedicated compaction
+     * collaborator (#489); result/error semantics unchanged.
      */
     public CompactionResult compactTerminalEvents(
             String cutoffCalendarDate,
             java.util.Set<String> protectedOccurrenceKeys) {
-        if (!AutoDeductionContract.isValidCalendarDate(cutoffCalendarDate)) {
-            return CompactionResult.failure("invalid_cutoff", 0);
-        }
-        final long rejectedCutoffEpochMs =
-                System.currentTimeMillis()
-                        - (AutoDeductionContract.REJECTED_TERMINAL_RETENTION_DAYS
-                        * 24L * 60L * 60L * 1000L);
-        int removed = 0;
-        synchronized (LOCK) {
-            SharedPreferences.Editor editor = null;
-            for (Map.Entry<String, ?> entry : persistence.getAllEvents().entrySet()) {
-                if (!entry.getKey().startsWith(KEY_EVENT_PREFIX)
-                        || !(entry.getValue() instanceof String)) {
-                    continue;
-                }
-                String raw = (String) entry.getValue();
-                AutoDeductionPersistenceCodec.DecodeResult decoded =
-                        AutoDeductionPersistenceCodec.decodeEvent(raw);
-
-                if (AutoDeductionContract.STATUS_REJECTED.equals(decoded.status)) {
-                    Long rejectedAt = AutoDeductionPersistenceCodec.rejectedAtEpochMs(raw);
-                    // REJECTED is irrecoverable. Malformed REJECTED rows that
-                    // lack a timestamp are therefore safe to discard on a compaction
-                    // pass instead of becoming immortal terminal garbage.
-                    if (rejectedAt == null || rejectedAt.longValue() < rejectedCutoffEpochMs) {
-                        if (editor == null) editor = persistence.eventEditor();
-                        editor.remove(entry.getKey());
-                        removed++;
-                    }
-                    continue;
-                }
-
-                AutoDeductionPersistenceModels.EventRecord record = decoded.record;
-                if (record == null
-                        || !AutoDeductionContract.STATUS_RECONCILED.equals(record.status)
-                        || record.occurrence == null
-                        || record.occurrence.calendarDate.compareTo(cutoffCalendarDate) >= 0) {
-                    continue;
-                }
-                String occurrenceKey = record.occurrence.canonicalKey();
-                if (protectedOccurrenceKeys != null
-                        && protectedOccurrenceKeys.contains(occurrenceKey)) {
-                    continue;
-                }
-                if (editor == null) editor = persistence.eventEditor();
-                editor.remove(entry.getKey());
-                removed++;
-            }
-            if (editor != null) {
-                if (!failurePolicy.allowTerminalStateCompactionCommit()
-                        || !editor.commit()) {
-                    return CompactionResult.failure(
-                            "terminal_event_compaction_commit_failed",
-                            removed);
-                }
-            }
-        }
-        return CompactionResult.success(removed);
+        return AutoDeductionEventCompaction.compactTerminalEvents(
+                persistence,
+                failurePolicy,
+                KEY_EVENT_PREFIX,
+                LOCK,
+                cutoffCalendarDate,
+                protectedOccurrenceKeys);
     }
 
     public EventLookupResult getFiredUnreconciledEvent(
@@ -779,7 +660,7 @@ public final class AutoDeductionEventStore {
                 return EventLookupResult.absent();
             }
 
-            StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
+            AutoDeductionEventQueries.StorageIdentity storageIdentity = parseStorageKeyIdentity(prefKey);
             if (!storageIdentityMatchesPayload(storageIdentity, record)) {
                 String reason = storageIdentity != null
                         && !storageIdentity.medicationId.equals(record.occurrence.medicationId)
@@ -797,6 +678,12 @@ public final class AutoDeductionEventStore {
         }
     }
 
+    /**
+     * Synchronous batched terminalization commit (#493): malformed FIRED rows
+     * are rewritten to durable REJECTED evidence before the read reports
+     * success, so the explicit outcome drives the fail-closed
+     * {@code rejected_persist_failed} contract of listFiredEventsResult.
+     */
     private boolean commitEditor(SharedPreferences.Editor editor) {
         return editor != null
                 && failurePolicy.allowEventCommit()

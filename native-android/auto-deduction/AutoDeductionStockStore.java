@@ -218,10 +218,11 @@ public final class AutoDeductionStockStore {
                 }
             }
 
-            // Mark the Android Native stock authority initialized only in the
-            // Baseline initialization is committed atomically with initial seeding.
-            // Lifecycle recovery may run only after this durable Native stock
-            // baseline exists.
+            // The durable Native stock baseline (#493): the seeds and the
+            // stockInitialized flag are committed atomically, and lifecycle
+            // recovery is gated on isInitialized(). The synchronous outcome
+            // therefore matters — recovery may only run after this durable
+            // baseline exists, and its failure is reported to the caller.
             editor.putBoolean(KEY_STOCK_INITIALIZED, true);
             if (!editor.commit()) {
                 return SnapshotResult.failure(
@@ -271,15 +272,16 @@ public final class AutoDeductionStockStore {
     }
 
     /**
-     * Apply one exact Auto occurrence exactly once.
+     * Apply one exact Auto occurrence exactly once. The occurrence marker and
+     * the resulting stock balance are committed in one atomic SharedPreferences
+     * transaction (#493): the synchronous outcome drives the AutoApplyResult
+     * contract, and a lost write would either re-deduct stock or leave a
+     * deduction without its idempotency marker. Re-delivery therefore returns
+     * the original actualDeducted amount without subtracting again.
      *
-     * <p>The occurrence marker and the resulting stock balance are committed in
-     * one SharedPreferences transaction. Re-delivery therefore returns the
-     * original actualDeducted amount without subtracting again.</p>
-     */
-    /**
-     * Safe default for direct/non-recovery callers. Old occurrences are rejected
-     * unless an existing marker/resolution already proves idempotent completion.
+     * <p>Safe default for direct/non-recovery callers. Old occurrences are
+     * rejected unless an existing marker/resolution already proves idempotent
+     * completion.</p>
      */
     public AutoApplyResult applyAutoDeduction(
             String medicationId,
@@ -460,6 +462,12 @@ public final class AutoDeductionStockStore {
             editor.putLong(KEY_LAST_FOREGROUND_SEQ, mutationSeq);
             editor.putBoolean(KEY_STOCK_INITIALIZED, true);
 
+            // Synchronous commit (#493): the mutation sequence is the
+            // idempotency fence and is durable only in the same transaction as
+            // the deltas it covers; an asynchronously lost write would let a
+            // foreground retry re-apply the same deltas on top of the already
+            // mutated balance. The explicit outcome drives the
+            // ForegroundApplyResult contract.
             if (!editor.commit()) {
                 return ForegroundApplyResult.failure("foreground_stock_commit_failed");
             }
@@ -552,6 +560,10 @@ public final class AutoDeductionStockStore {
                 removed++;
             }
             if (editor != null) {
+                // Synchronous commit (#493): the explicit outcome is part of
+                // the CompactionResult contract consumed by the terminal-state
+                // sweep (AutoDeductionOccurrenceState); a failed sweep must be
+                // observable rather than reported as a successful no-op.
                 if (!failurePolicy.allowTerminalStateCompactionCommit()
                         || !editor.commit()) {
                     return CompactionResult.failure(

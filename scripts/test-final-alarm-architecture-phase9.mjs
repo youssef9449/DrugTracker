@@ -120,17 +120,29 @@ const doseFeatureContent = read(doseFeature);
 // 9.1 Shared mechanism ownership
 // ---------------------------------------------------------------------------
 
+// The pending-intent factory is a responsibility-oriented extraction from
+// ExactAlarmRuntime (#489): it shares the runtime's AlarmManager mechanics
+// and must not be treated as a foreign AlarmManager consumer.
+const pendingIntentsFactory = 'native-android/alarm-runtime/ExactAlarmPendingIntents.java';
+const pendingIntentsContent = read(pendingIntentsFactory);
+assert(
+  pendingIntentsContent.includes('import android.app.AlarmManager;')
+    && pendingIntentsContent.includes('Context.ALARM_SERVICE'),
+  'AlarmManager mechanics must live in the shared runtime pending-intent factory'
+);
+
 for (const rel of javaFiles) {
   const content = read(rel);
   if (rel === runtime) continue;
+  if (rel === pendingIntentsFactory) continue;
 
   assert(
     !content.includes('import android.app.AlarmManager;'),
-    'AlarmManager import must remain in ExactAlarmRuntime only: ' + rel
+    'AlarmManager import must remain in the shared exact-alarm runtime (ExactAlarmRuntime + ExactAlarmPendingIntents): ' + rel
   );
   assert(
     !content.includes('Context.ALARM_SERVICE'),
-    'AlarmManager service lookup must remain in ExactAlarmRuntime only: ' + rel
+    'AlarmManager service lookup must remain in the shared exact-alarm runtime (ExactAlarmRuntime + ExactAlarmPendingIntents): ' + rel
   );
   assert(
     !content.includes('setExactAndAllowWhileIdle(')
@@ -158,8 +170,12 @@ for (const rel of javaFiles) {
 }
 
 assert(
-  count(runtimeContent, 'PendingIntent.getBroadcast(') === 2,
-  'ExactAlarmRuntime must contain the two shared PendingIntent operations (isPending + build)'
+  count(pendingIntentsContent, 'PendingIntent.getBroadcast(') === 2,
+  'ExactAlarmPendingIntents must contain the two shared PendingIntent operations (isPending + build)'
+);
+assert(
+  count(runtimeContent, 'PendingIntent.getBroadcast(') === 0,
+  'ExactAlarmRuntime must delegate PendingIntent mechanics to the shared factory'
 );
 assert(
   count(runtimeContent, 'setExactAndAllowWhileIdle(') === 2,

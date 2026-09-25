@@ -71,6 +71,12 @@ final class ExactAlarmStore {
                         cancellationKey(featureStorageKey), null);
     }
 
+    /**
+     * Synchronous commit (#493): schedule metadata MUST be durably visible
+     * BEFORE the AlarmManager install so a crash between the two steps cannot
+     * leave an armed alarm without a durable ownership record. Runs on the
+     * background executor — never on a UI thread.
+     */
     boolean writeScheduleLocked(
             String featureStorageKey,
             JSONObject metadata) {
@@ -81,6 +87,19 @@ final class ExactAlarmStore {
                 .commit();
     }
 
+    /**
+     * Synchronous commit (#493): durability serves two distinct callers.
+     * Ownership-safe rollback restores the pre-transaction durable record so
+     * that after a failed AlarmManager install the durable state never
+     * describes a schedule the platform does not hold — an asynchronously
+     * restored rollback could be lost in a crash and leave rollback ambiguity
+     * between operation versions. The same write is the durable
+     * delivery-accepted evidence (markOneShotDelivered): a delivery receiver
+     * can be killed as soon as onReceive work ends, so a lost marker would
+     * replay the delivery. The explicit outcome is consumed by both callers
+     * (rollback failure log / delivery-evidence gate). Background executor or
+     * goAsync receiver thread only — never a UI thread.
+     */
     boolean writeScheduleRawLocked(
             String featureStorageKey,
             String rawMetadata) {
@@ -98,6 +117,14 @@ final class ExactAlarmStore {
     }
 
 
+    /**
+     * Synchronous commit (#493): the cancel transaction needs the real
+     * persistence outcome — a failed removal keeps the metadata row, which
+     * the tombstone-ordering reconciliation must then resolve. The durable
+     * tombstone (also committed) remains the correctness authority; this
+     * commit supplies the explicit success/failure signal. Background
+     * executor only.
+     */
     boolean removeScheduleLocked(String featureStorageKey) {
         return schedules.edit()
                 .remove(storageKey(featureStorageKey))
@@ -115,6 +142,12 @@ final class ExactAlarmStore {
         return removeScheduleLocked(featureStorageKey);
     }
 
+    /**
+     * Synchronous commit (#493): the tombstone is THE durable cancellation
+     * proof and must be on disk before AlarmManager.cancel runs — otherwise a
+     * crash could leave an armed alarm with no durable cancellation evidence.
+     * Background executor only.
+     */
     boolean writeCancellationTombstoneLocked(
             String featureStorageKey,
             String operationVersion) {
@@ -125,6 +158,17 @@ final class ExactAlarmStore {
                 .commit();
     }
 
+    /**
+     * Synchronous commit (#493): the removal outcome is part of the recovery
+     * state machine — the owning feature's compensation recovery refuses
+     * (fail-closed) to resurrect an occurrence while its durable
+     * cancellation tombstone cannot be confirmed durably cleared; superseded-
+     * tombstone cleanup callers consume the outcome only for diagnostics.
+     * A leftover tombstone is reconciled by ordering, but the compensation
+     * gate needs the confirmed outcome, so apply() would silently disable
+     * that fail-closed check. Background executor or goAsync receiver thread
+     * only — never a UI thread.
+     */
     boolean removeCancellationTombstoneLocked(
             String featureStorageKey) {
         return cancellations.edit()
@@ -137,6 +181,10 @@ final class ExactAlarmStore {
         long last = ordering.getLong(
                 ExactAlarmContract.ORDERING_SEQUENCE_KEY, 0L);
         long next = last + 1L;
+        // Synchronous commit (#493): the ordering sequence must be durably
+        // monotonic BEFORE any dependent schedule/tombstone write — a lost
+        // increment would let two operations claim the same ordering token.
+        // Background executor only.
         if (!ordering.edit()
                 .putLong(
                         ExactAlarmContract.ORDERING_SEQUENCE_KEY,

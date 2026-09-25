@@ -9,6 +9,7 @@ import { DoseAlarmModal } from './components/DoseAlarmModal';
 import { SelectDoseModal } from './components/SelectDoseModal';
 import { MedicationHistoryModal } from './components/MedicationHistoryModal';
 import { AutoDeductPromptModal } from './components/AutoDeductPromptModal';
+import { AutoScheduleMissingBanner } from './components/AutoScheduleMissingBanner';
 import { UpdatePrompt } from './components/UpdatePrompt';
 import { useDoseReminders } from './hooks/useDoseReminders';
 import { useAppRuntimeState } from './hooks/useAppRuntimeState';
@@ -86,6 +87,7 @@ export default function App() {
     handleApplyAppPreferences,
     handleSendTestNotification,
     handleOpenExactAlarmSettings,
+    medicationIdsMissingDoseSchedule,
   } = useAppRuntime({
     state: runtimeState,
     ui: { selectDoseMode, settingsModalMode },
@@ -174,6 +176,16 @@ export default function App() {
             setFontScale(next);
             showToast(next === 'large' ? 'تم تكبير حجم الخط' : 'تم إرجاع حجم الخط للطبيعي');
           }}
+        />
+
+        {/* #502: explicit "Auto enabled + missing/invalid doseSchedule"
+            runtime state. Rendered only for medications whose canonical
+            Auto definition is enabled yet carries no usable schedule —
+            those will never produce Auto occurrences. */}
+        <AutoScheduleMissingBanner
+          affectedMedications={medications.filter((med) =>
+            medicationIdsMissingDoseSchedule.includes(med.id)
+          )}
         />
 
         <AppTabContent

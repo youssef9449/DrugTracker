@@ -8,13 +8,14 @@
  * See CriticalNotificationClaim in types.ts for the semantics.
  *
  * Storage shape: { [medicationId]: CriticalNotificationClaim } under one
- * versioned key. All access is synchronous localStorage (via loadJson /
- * saveJson), so a read-decide-write pass is atomic with respect to other
+ * versioned key. All access is synchronous localStorage (via the
+ * runtime-validated readJsonOutcome reader and the persist writer), so a
+ * read-decide-write pass is atomic with respect to other
  * JS code (single-threaded) as long as callers do not await in between.
  */
 
 import type { CriticalNotificationClaim } from '../types';
-import { loadJson, persist } from './storage';
+import { persist, readJsonOutcome, type JsonParserVerdict } from './storage';
 export const CRITICAL_CLAIMS_STORAGE_KEY = 'android_med_tracker_critical_claims_v3';
 
 function isValidClaimsMap(value: unknown): value is Record<string, CriticalNotificationClaim> {
@@ -30,15 +31,53 @@ function isValidClaimsMap(value: unknown): value is Record<string, CriticalNotif
 }
 
 /**
+ * Outcome-aware claims read. Claim state is the cross-tab "already notified"
+ * authority: a present-but-invalid store must never be treated as "no claims"
+ * (that would allow duplicate notifications). Claim-decision callers use this
+ * and fail closed; the convenience loader below stays for enumeration-only
+ * reads where an unreadable map cannot cause a duplicate delivery.
+ */
+export type CriticalClaimsRead =
+  | { status: 'ok'; claims: Record<string, CriticalNotificationClaim> }
+  | { status: 'missing' }
+  | { status: 'invalid' }
+  | { status: 'read_failed' };
+
+export function readCriticalNotificationClaimsOutcome(): CriticalClaimsRead {
+  const outcome = readJsonOutcome(
+    CRITICAL_CLAIMS_STORAGE_KEY,
+    (raw): JsonParserVerdict<Record<string, CriticalNotificationClaim>> =>
+      isValidClaimsMap(raw)
+        ? { ok: true, value: raw as Record<string, CriticalNotificationClaim> }
+        : { ok: false, reason: 'critical_claims_shape_invalid' }
+  );
+  switch (outcome.status) {
+    case 'ok':
+      return { status: 'ok', claims: { ...outcome.value } };
+    case 'missing':
+      return { status: 'missing' };
+    case 'read_failed':
+      return { status: 'read_failed' };
+    default:
+      return { status: 'invalid' };
+  }
+}
+
+/**
  * Load the current claims map from storage.
- * Missing / invalid store → empty map.
+ * Missing / invalid store → empty map (with a diagnostic for invalid).
+ * Claim DECISIONS must use {@link readCriticalNotificationClaimsOutcome} and
+ * fail closed on invalid — an empty map here is only safe for enumeration.
  */
 export function loadCriticalNotificationClaims(): Record<string, CriticalNotificationClaim> {
-  const raw = loadJson<unknown>(CRITICAL_CLAIMS_STORAGE_KEY, null);
-  if (!isValidClaimsMap(raw)) {
+  const outcome = readCriticalNotificationClaimsOutcome();
+  if (outcome.status === 'invalid' || outcome.status === 'read_failed') {
+    console.warn(
+      `[critical-claims] claims store unusable (${outcome.status}); treating as empty for enumeration only.`
+    );
     return {};
   }
-  return { ...raw };
+  return outcome.status === 'ok' ? outcome.claims : {};
 }
 
 export function saveCriticalNotificationClaims(claims: Record<string, CriticalNotificationClaim>): boolean {

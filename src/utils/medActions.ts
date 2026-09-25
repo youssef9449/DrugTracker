@@ -11,6 +11,7 @@ import {
 import { isDoseTimeElapsedToday } from './doseSchedule';
 import { generateId } from './id';
 import { exactAutoLogId } from './autoDeductionReconciliation';
+import { resolveDoseId, normalizeDoseId } from './doseIdentity';
 /**
  * Shared medication-action helpers.
  * Manual stock mutations use `applyDurableStockDelta` — a simple helper that
@@ -38,12 +39,11 @@ export function applyDurableStockDelta(
   return { ...med, currentPills: newPills };
 }
 /**
- * Resolve the doseId for a restore operation. Only identity is resolved —
- * the restore amount comes from durable deduction evidence, NOT the current
- * schedule.
- * - Multi-dose (doseSchedule with >1 slot): explicit doseId required.
- * - Single-slot schedule: omitted doseId resolves to that slot's id.
- * - No doseSchedule: reject.
+ * Restore-flavored entry point to the ONE canonical dose-ID resolver
+ * ({@link resolveDoseId}). Only identity is resolved — the restore amount
+ * comes from durable deduction evidence, NOT the current schedule.
+ * Kept as a named domain API: restore identity resolution and its
+ * `missing_dose_id | invalid_dose_id | no_dose` contract.
  */
 export function resolveRestoreDoseId(
   med: Medication,
@@ -51,24 +51,7 @@ export function resolveRestoreDoseId(
 ):
   | { ok: true; doseId: string }
   | { ok: false; reason: 'missing_dose_id' | 'invalid_dose_id' | 'no_dose' } {
-  const schedule = med.doseSchedule;
-  if (!Array.isArray(schedule) || schedule.length === 0) {
-    // No doseSchedule: cannot restore an occurrence.
-    // A stale explicit doseId is invalid_dose_id; otherwise no_dose.
-    if (doseId != null && doseId !== '') {
-      return { ok: false, reason: 'invalid_dose_id' };
-    }
-    return { ok: false, reason: 'no_dose' };
-  }
-  if (!doseId) {
-    if (schedule.length === 1) {
-      return { ok: true, doseId: schedule[0].id };
-    }
-    return { ok: false, reason: 'missing_dose_id' };
-  }
-  const slot = schedule.find((d) => d.id === doseId);
-  if (!slot) return { ok: false, reason: 'invalid_dose_id' };
-  return { ok: true, doseId: slot.id };
+  return resolveDoseId(med, doseId);
 }
 export type RestoreDoseResult =
   | {
@@ -121,9 +104,9 @@ export function findActiveDeductionForOccurrence(
   calendarDate: string
 ): ConsumptionLog | null {
   // doseId is required.
-  // Trim before matching so '   ' rejects and ' d1 ' normalizes to 'd1'.
-  const normalizedDoseId =
-    doseId == null ? '' : String(doseId).trim();
+  // Canonical identity normalization: ' d1 ' matches the schedule row d1;
+  // blank/absent rejects.
+  const normalizedDoseId = normalizeDoseId(doseId);
   if (!normalizedDoseId) return null;
   const expectedExactId = exactAutoLogId(
     medicationId,
@@ -143,10 +126,7 @@ export function findActiveDeductionForOccurrence(
       l.id === expectedExactId;
     if (!isManualDeduction && !isExactOccurrenceEvidence) continue;
     if (l.reversedAt) continue; // already reversed by a prior Restore
-    const logDoseRaw =
-      l.doseId != null && String(l.doseId).trim() !== ''
-        ? String(l.doseId).trim()
-        : null;
+    const logDoseRaw = normalizeDoseId(l.doseId);
     // require explicit non-empty doseId on the log — no
     // No fallback matching is permitted.
     if (logDoseRaw !== normalizedDoseId) continue;
@@ -176,8 +156,7 @@ export function getHistoricalRestoreDisplayAmount(
   doseId: string | undefined,
   calendarDate: string
 ): number | null {
-  const normalized =
-    doseId == null ? '' : String(doseId).trim();
+  const normalized = normalizeDoseId(doseId);
   if (!normalized) return null;
   const active = findActiveDeductionForOccurrence(
     logs,
@@ -204,8 +183,7 @@ export function isExactAutoDeductionEvidence(
   calendarDate: string
 ): boolean {
   if (log.type !== 'exact_auto') return false;
-  const normalizedDoseId =
-    doseId == null ? '' : String(doseId).trim();
+  const normalizedDoseId = normalizeDoseId(doseId);
   if (!normalizedDoseId) return false;
   return (
     log.id ===
@@ -325,7 +303,7 @@ export function restoreDose(
         delete nextHistory[resolvedDoseId];
       }
     }
-    const slot = med.doseSchedule!.find((d) => d.id === resolvedDoseId);
+    const slot = med.doseSchedule!.find((d) => normalizeDoseId(d.id) === resolvedDoseId);
     // Past-due relative to `now`: prior calendar day, or today after slot time.
     const nowLocalDate = getLocalDateString(now);
     const restoreDateIsPastDay = todayStr < nowLocalDate;
@@ -362,7 +340,7 @@ export function restoreDose(
     const allStillConsumed =
       Array.isArray(med.doseSchedule) &&
       med.doseSchedule.every((d) =>
-        d.id === resolvedDoseId
+        normalizeDoseId(d.id) === resolvedDoseId
           ? false
           : isDoseConsumedOnDate(
               {
@@ -426,51 +404,39 @@ export function consumeDose(
   const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
   const multi = schedule.length > 0;
   const amountOverride = options?.amountOverride;
-  // No doseSchedule: reject ().
-  if (!multi) {
-    if (doseId != null && doseId !== '') {
-      return {
-        updatedMed: null,
-        doseAmount: 0,
-        log: null,
-        reason: 'invalid_dose_id',
-      };
-    }
+  // Resolve which dose slot is being consumed via the ONE canonical
+  // resolver (single-dose default slot, multi-dose explicit requirement,
+  // canonical identity normalization).
+  const resolved = resolveDoseId(med, doseId);
+  if (!resolved.ok) {
     return {
       updatedMed: null,
       doseAmount: 0,
       log: null,
-      reason: 'missing_dose_id',
+      reason: resolved.reason,
     };
   }
-  // Resolve which dose slot is being consumed.
-  let targetDoseId = doseId;
-  let targetAmount = 0;
-  let target =
-    targetDoseId != null && targetDoseId !== ''
-      ? schedule.find((d) => d.id === targetDoseId)
-      : undefined;
-  if (!target) {
-    if (targetDoseId != null && targetDoseId !== '') {
-      return {
-        updatedMed: null,
-        doseAmount: 0,
-        log: null,
-        reason: 'invalid_dose_id',
-      };
-    }
-    if (schedule.length === 1) {
-      target = schedule[0];
-    } else {
-      return {
-        updatedMed: null,
-        doseAmount: 0,
-        log: null,
-        reason: 'missing_dose_id',
-      };
-    }
+  if (!multi) {
+    // Unreachable via the resolver (no schedule ⇒ no_dose/invalid), kept
+    // as an explicit invariant guard.
+    return {
+      updatedMed: null,
+      doseAmount: 0,
+      log: null,
+      reason: 'no_dose',
+    };
   }
-  if (isDoseConsumedOnDate(med, target.id, todayStr)) {
+  const targetDoseId = resolved.doseId;
+  const target = schedule.find((d) => normalizeDoseId(d.id) === targetDoseId);
+  if (!target) {
+    return {
+      updatedMed: null,
+      doseAmount: 0,
+      log: null,
+      reason: 'invalid_dose_id',
+    };
+  }
+  if (isDoseConsumedOnDate(med, targetDoseId, todayStr)) {
     return {
       updatedMed: null,
       doseAmount: 0,
@@ -478,9 +444,9 @@ export function consumeDose(
       reason: 'already_consumed',
     };
   }
-  targetDoseId = target.id;
   // Authoritative amount: Exact Auto FIRED event amount when provided;
   // otherwise current schedule slot amount.
+  let targetAmount = 0;
   if (amountOverride !== undefined) {
     const n = Number(amountOverride);
     if (!Number.isFinite(n) || n <= 0) {

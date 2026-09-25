@@ -175,13 +175,12 @@ describe('fire-retry recovery preservation', () => {
           fireRetryCount: 3,
         },
         med,
-        true,
         now
       )
     ).toBe(true);
   });
 
-  it('does not protect a retry marker when global auto-deduct is disabled', () => {
+  it('still protects a retry marker when global auto-deduct is disabled (#535: preference gating never erases recovery)', () => {
     const med = baseMed({
       autoDeductEnabled: true,
       doseSchedule: [{ id: 'dose-a', amount: 1, time: '08:00' }],
@@ -197,13 +196,12 @@ describe('fire-retry recovery preservation', () => {
           fireRetryCount: 1,
         },
         med,
-        false,
         now
       )
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it('does not protect a retry marker when the medication no longer wants that dose slot', () => {
+  it('still protects a retry marker when the React projection no longer lists the dose slot (#535: stale med state must not drop durable evidence)', () => {
     const med = baseMed({
       autoDeductEnabled: false,
       doseSchedule: [{ id: 'dose-a', amount: 1, time: '08:00' }],
@@ -218,10 +216,9 @@ describe('fire-retry recovery preservation', () => {
           fireRetryCount: 3,
         },
         med,
-        true,
         now
       )
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('does not protect a future retry-marked schedule', () => {
@@ -239,7 +236,6 @@ describe('fire-retry recovery preservation', () => {
           fireRetryCount: 1,
         },
         med,
-        true,
         now
       )
     ).toBe(false);
@@ -260,7 +256,6 @@ describe('fire-retry recovery preservation', () => {
           fireRetryCount: 0,
         },
         med,
-        true,
         now
       )
     ).toBe(false);

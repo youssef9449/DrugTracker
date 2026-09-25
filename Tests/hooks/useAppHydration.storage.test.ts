@@ -18,7 +18,8 @@ vi.mock('@/native', () => ({
   initNativeBridge: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('@/utils/notificationRuntime', () => ({
-  isNotificationChannelEnabled: vi.fn(() => Promise.resolve(true)),
+  ensureNotificationChannel: vi.fn(() => Promise.resolve(true)),
+  getNotificationChannelState: vi.fn(() => Promise.resolve('enabled')),
   retryPersistedNotificationDeliveries: vi.fn(() => Promise.resolve(0)),
 }));
 vi.mock('@/utils/notifications/doseReminderNotifications', () => ({

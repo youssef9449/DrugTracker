@@ -45,3 +45,42 @@ The current product therefore makes an explicit architectural distinction:
 4. such a future native-secure-storage design must keep key material in a platform key store (for example Android Keystore) and expose only the minimum required capability to JavaScript.
 
 This PR intentionally documents the boundary and decision. It does not add a fake encryption layer or create a second persistence system.
+
+## Hardening strategy (current state and next steps)
+
+Concrete hardening measures in the current architecture:
+
+1. **No secret material in localStorage (verified).** The persisted-state
+   surface contains medication/log/pharmacy/preference data only; no
+   credentials, tokens, or keys are stored. Any future feature introducing
+   secret material MUST use platform-backed storage per the decision above.
+2. **Bounded retention for health-related history.** Per-dose consumption/skip
+   history and the consumption log are pruned deterministically at durable
+   write boundaries (`pruneDoseConsumption.ts`, 400-day windows), so the
+   plaintext exposure surface grows with active use, not unboundedly.
+3. **Runtime-validated reads.** Persisted data is validated at the storage
+   boundary (`readJsonOutcome`/`loadValidatedJson` in `storage.ts`); corrupt
+   or foreign-shaped payloads are reported explicitly instead of silently
+   reinterpreted, which limits what a corrupted store can do unnoticed.
+4. **Native retry payload minimization.** The Android notification runtime
+   persists only the minimum fields needed to reconstruct a failed delivery
+   and no longer stores redundant presentation metadata (see
+   `NotificationRuntime.persistRetry` privacy boundary note).
+
+**Content-Security-Policy defense in depth:** a restrictive CSP
+(`default-src 'self'`, no `unsafe-inline` scripts, explicit connect-src
+allowlist) is RECOMMENDED as the next mitigation layer against same-origin
+script injection reading these stores. CSP for this app is delivered by the
+document/headers of the hosting surface (index.html / server config), which
+is a deployment-layer change outside this runtime batch; the recommendation
+is recorded here so the follow-up has a defined home.
+
+**OS-backed/encrypted native storage (evaluation):** for data requiring
+confidentiality beyond the WebView origin — e.g. if medication data must be
+protected against device-local storage extraction — the evaluated design is
+Android EncryptedSharedPreferences / Keystore-backed storage exposed through
+a small Capacitor plugin, with JS keeping only non-sensitive mirrors. This is
+a deliberate architecture change (native becomes the confidentiality
+authority) and is NOT part of the current storage model; it remains the
+documented upgrade path rather than a parallel system introduced today.
+

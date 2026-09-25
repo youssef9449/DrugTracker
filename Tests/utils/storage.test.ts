@@ -2,43 +2,123 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   isValidConsumptionLogRecord,
   isValidMedicationRecord,
-  loadJson,
+  loadValidatedJson,
   loadString,
+  readJsonOutcome,
   readStorageItem,
   saveJson,
   saveString,
   persist,
+  type JsonParserVerdict,
+  type StorageJsonOutcome,
 } from '@/utils/storage';
 
 beforeEach(() => {
   localStorage.clear();
 });
 
-describe('loadJson', () => {
+describe('readJsonOutcome / loadValidatedJson (runtime-validated reads)', () => {
+  const passthrough = (raw: unknown): JsonParserVerdict<{ a: number }> =>
+    raw !== null && raw !== undefined
+      ? { ok: true, value: raw as { a: number } }
+      : { ok: false, reason: 'test_shape_invalid' };
+
   it('returns the parsed value when the key exists', () => {
     localStorage.setItem('k', JSON.stringify({ a: 1 }));
-    expect(loadJson('k', null)).toEqual({ a: 1 });
+    expect(readJsonOutcome('k', passthrough)).toEqual({ status: 'ok', value: { a: 1 } });
   });
 
-  it('returns the fallback when the key is absent', () => {
-    expect(loadJson('missing', { a: 1 })).toEqual({ a: 1 });
-    expect(loadJson('missing', null)).toBeNull();
-    expect(loadJson('missing', [])).toEqual([]);
+  it('reports missing when the key is absent', () => {
+    expect(readJsonOutcome('missing', passthrough)).toEqual({ status: 'missing' });
+    expect(loadValidatedJson('missing', passthrough, { a: 1 })).toEqual({ a: 1 });
   });
 
-  it('returns the fallback when parsing fails', () => {
+  it('reports invalid (not fallback-silently) when parsing fails', () => {
     localStorage.setItem('k', 'not-json{');
-    expect(loadJson('k', 'fallback')).toBe('fallback');
+    const outcome = readJsonOutcome('k', passthrough);
+    expect(outcome.status).toBe('invalid');
+    expect(loadValidatedJson('k', passthrough, { a: 0 })).toEqual({ a: 0 });
   });
 
-  it('preserves array types', () => {
-    localStorage.setItem('arr', JSON.stringify([1, 2, 3]));
-    expect(loadJson<number[]>('arr', [])).toEqual([1, 2, 3]);
+  it('reports invalid when the runtime validator rejects the shape', () => {
+    localStorage.setItem('k', JSON.stringify({ wrong: 'shape' }));
+    const outcome = readJsonOutcome<{ a: number }>(
+      'k',
+      (raw) => (raw && typeof raw === 'object' && (raw as { a?: unknown }).a === 1
+        ? { ok: true, value: raw as { a: number } }
+        : { ok: false, reason: 'test_shape_invalid' })
+    );
+    expect(outcome.status).toBe('invalid');
   });
 
-  it('stores null as a valid JSON value (distinguishes null from absent)', () => {
+  it('reports invalid with the parser reason on an explicit rejection', () => {
+    localStorage.setItem('k', JSON.stringify({ wrong: 'shape' }));
+    const outcome = readJsonOutcome<unknown>(
+      'k',
+      () => ({ ok: false, reason: 'custom_shape_reason' })
+    );
+    expect(outcome).toEqual({ status: 'invalid', reason: 'custom_shape_reason' });
+  });
+
+  it('preserves a VALID null as ok (#477) — distinct from missing and invalid', () => {
     localStorage.setItem('k', 'null');
-    expect(loadJson('k', 'fallback')).toBeNull();
+    const outcome = readJsonOutcome<string | null>('k', (raw) =>
+      raw === null
+        ? { ok: true, value: null as string | null }
+        : typeof raw === 'string'
+          ? { ok: true, value: raw }
+          : { ok: false, reason: 'test_shape_invalid' }
+    );
+    expect(outcome).toEqual({ status: 'ok', value: null });
+    // The convenience wrapper also returns the valid null, not the fallback.
+    expect(loadValidatedJson<string | null>('k', (raw) =>
+      raw === null || typeof raw === 'string'
+        ? { ok: true, value: (raw as string | null) }
+        : { ok: false, reason: 'test_shape_invalid' }
+    , 'fallback')).toBeNull();
+  });
+
+  it('treats a null-returning parser (contract violation) as invalid, never valid data', () => {
+    localStorage.setItem('k', 'null');
+    // A parser that ignores the verdict contract must NOT smuggle data through.
+    const outcome = readJsonOutcome<unknown>(
+      'k',
+      // @ts-expect-error — deliberately violates the verdict contract
+      (raw) => raw
+    );
+    expect(outcome.status).toBe('invalid');
+  });
+
+  it('rejects a stored null when the validator explicitly rejects it (#477)', () => {
+    // Persisted JSON null is only valid when the parser ACCEPTS it. A
+    // validator that rejects null must still produce an invalid outcome —
+    // null is not globally valid just because it is representable.
+    localStorage.setItem('k', 'null');
+    const outcome = readJsonOutcome<{ a: number }>('k', (raw) =>
+      raw !== null && raw !== undefined && typeof raw === 'object' && (raw as { a?: unknown }).a === 1
+        ? { ok: true, value: raw as { a: number } }
+        : { ok: false, reason: 'test_null_rejected' }
+    );
+    expect(outcome).toEqual({ status: 'invalid', reason: 'test_null_rejected' });
+    // The convenience wrapper falls back on a validator-rejected null too —
+    // it must not reinterpret the rejection as a valid null.
+    expect(loadValidatedJson<{ a: number }>('k', (raw) =>
+      raw !== null && raw !== undefined && typeof raw === 'object' && (raw as { a?: unknown }).a === 1
+        ? { ok: true, value: raw as { a: number } }
+        : { ok: false, reason: 'test_null_rejected' }
+    , { a: 0 })).toEqual({ a: 0 });
+  });
+
+  it('reports read_failed when storage itself throws', () => {
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('boom');
+    });
+    try {
+      const outcome: StorageJsonOutcome<unknown> = readJsonOutcome('k', passthrough);
+      expect(outcome.status).toBe('read_failed');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

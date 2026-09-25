@@ -19,7 +19,12 @@ import {
   loadLastAppliedMutationSeq,
   persistLastAppliedMutationSeq,
 } from './stockMutationOrdering';
-import { loadJson, persist } from './storage';
+import {
+  persist,
+  readJsonOutcome,
+  type JsonParserVerdict,
+  type StorageJsonOutcome,
+} from './storage';
 import { applyForegroundAutoStockDeltas } from './autoDeductionNativeStock';
 
 export const STORAGE_MANUAL_ENVELOPE_KEY =
@@ -66,10 +71,24 @@ function isValidExactAutoEnvelope(
   return true;
 }
 
+/**
+ * Outcome-aware Exact Auto envelope read. Distinguishes a legitimately empty
+ * store (`missing`) from a present-but-unusable payload (`invalid`) so
+ * recovery never treats corruption as "nothing pending".
+ */
+export function readExactAutoStockEnvelopeOutcome(): StorageJsonOutcome<ExactAutoEnvelopeStored> {
+  return readJsonOutcome(
+    STORAGE_EXACT_AUTO_ENVELOPE_KEY,
+    (raw): JsonParserVerdict<ExactAutoEnvelopeStored> =>
+      isValidExactAutoEnvelope(raw as ExactAutoEnvelopeStored | null | undefined)
+        ? { ok: true, value: raw as ExactAutoEnvelopeStored }
+        : { ok: false, reason: 'exact_auto_envelope_shape_invalid' }
+  );
+}
+
 export function loadExactAutoStockEnvelope(): ExactAutoEnvelopeStored | null {
-  const raw = loadJson<ExactAutoEnvelopeStored | null>(STORAGE_EXACT_AUTO_ENVELOPE_KEY, null);
-  if (!isValidExactAutoEnvelope(raw)) return null
-  return raw;
+  const outcome = readExactAutoStockEnvelopeOutcome();
+  return outcome.status === 'ok' ? outcome.value : null;
 }
 
 export function saveExactAutoStockEnvelope(
@@ -133,18 +152,37 @@ export interface PendingEnvelopeRef {
   clear: () => string | null;
 }
 
+/** Outcome-aware Manual envelope read (missing vs invalid distinction). */
+export function readManualStockEnvelopeOutcome(): StorageJsonOutcome<ManualStockEnvelope> {
+  return readJsonOutcome(STORAGE_MANUAL_ENVELOPE_KEY, (raw) => {
+    if (!raw || typeof raw !== 'object') {
+      return { ok: false, reason: 'manual_envelope_shape_invalid' } as const;
+    }
+    const candidate = raw as Partial<ManualStockEnvelope>;
+    if (
+      candidate.version !== 1 ||
+      candidate.status !== 'manual_js_ready' ||
+      !Array.isArray(candidate.medications) ||
+      !Array.isArray(candidate.logs) ||
+      !Array.isArray(candidate.stockDeltas) ||
+      !Array.isArray(candidate.occurrenceResolutions) ||
+      typeof candidate.globalAutoDeductEnabled !== 'boolean' ||
+      typeof candidate.mutationSeq !== 'number' ||
+      !Number.isFinite(candidate.mutationSeq) ||
+      candidate.mutationSeq <= 0 ||
+      typeof candidate.createdAt !== 'string' ||
+      candidate.createdAt.length === 0 ||
+      typeof candidate.baseGeneration !== 'number'
+    ) {
+      return { ok: false, reason: 'manual_envelope_fields_invalid' } as const;
+    }
+    return { ok: true, value: raw as ManualStockEnvelope } as const;
+  });
+}
+
 export function loadManualStockEnvelope(): ManualStockEnvelope | null {
-  const raw = loadJson<ManualStockEnvelope | null>(
-    STORAGE_MANUAL_ENVELOPE_KEY,
-    null
-  );
-  if (!raw || raw.version !== 1 || raw.status !== 'manual_js_ready') return null;
-  if (!Array.isArray(raw.medications) || !Array.isArray(raw.logs)) return null;
-  if (!Array.isArray(raw.stockDeltas) || !Array.isArray(raw.occurrenceResolutions)) {
-    return null;
-  }
-  if (typeof raw.globalAutoDeductEnabled !== 'boolean') return null;
-  return raw;
+  const outcome = readManualStockEnvelopeOutcome();
+  return outcome.status === 'ok' ? outcome.value : null;
 }
 
 export function saveManualStockEnvelope(
@@ -520,7 +558,25 @@ export async function recoverManualEnvelopeInto(
   exactToAcknowledge: UnifiedRecoveryResult['exactToAcknowledge'];
 }> {
   const pending: PendingEnvelopeRef[] = [];
-  const manual = loadManualStockEnvelope();
+  // Fail closed on unusable envelope evidence: a present-but-invalid envelope
+  // is NOT "nothing pending". Recovery must not proceed as if the mutation
+  // never happened — the raw payload stays on disk for diagnosis and the
+  // caller is told recovery failed so new mutations stop.
+  const manualOutcome = readManualStockEnvelopeOutcome();
+  if (manualOutcome.status === 'invalid' || manualOutcome.status === 'read_failed') {
+    console.warn(
+      `[stock-recovery] manual stock envelope unusable (${manualOutcome.status}: ${manualOutcome.reason}); blocking mutations until repaired.`
+    );
+    return { ok: false, state: fresh, exactToAcknowledge: [] };
+  }
+  const exactOutcome = readExactAutoStockEnvelopeOutcome();
+  if (exactOutcome.status === 'invalid' || exactOutcome.status === 'read_failed') {
+    console.warn(
+      `[stock-recovery] exact-auto stock envelope unusable (${exactOutcome.status}: ${exactOutcome.reason}); blocking mutations until repaired.`
+    );
+    return { ok: false, state: fresh, exactToAcknowledge: [] };
+  }
+  const manual = manualOutcome.status === 'ok' ? manualOutcome.value : null;
   if (manual) {
     pending.push({
       kind: 'manual',
@@ -534,7 +590,7 @@ export async function recoverManualEnvelopeInto(
     });
   }
   // Only current envelopes with mutationSeq are valid.
-  const exact = loadExactAutoStockEnvelope();
+  const exact = exactOutcome.status === 'ok' ? exactOutcome.value : null;
   if (exact) {
     pending.push({
       kind: 'exact_auto',

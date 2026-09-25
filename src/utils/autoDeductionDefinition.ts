@@ -3,7 +3,8 @@ import {
   getMedicationTreatmentStartDate,
   getMedicationTreatmentEndDate,
 } from './medicationTreatment';
-import { isValidDoseTime, normalizeTimeString } from './doseSchedule';
+import { isMedicationAutoDeductActive } from './doseSchedule';
+import { validateMedicationDose } from './doseIdentity';
 
 /**
  * Canonical Auto-Deduction configuration definition.
@@ -27,6 +28,15 @@ export interface AutoDeductionDefinition {
   /** Effective treatment end date for FUTURE Auto scheduling. Empty = no end. */
   treatmentEndDate: string;
   doses: AutoDeductionDoseDefinition[];
+  /**
+   * True when this medication carries no usable explicit doseSchedule rows
+   * (missing, empty, or every row invalid). This is the EXPLICIT
+   * unsupported state of Auto-Deduction for such medications (#502): the
+   * canonical definition produces zero occurrences and consumers surface
+   * this state instead of silently treating it as a healthy empty schedule.
+   * There is no derived/fallback dose source.
+   */
+  scheduleMissing: boolean;
 }
 
 export function getAutoDeductionDefinition(
@@ -37,25 +47,27 @@ export function getAutoDeductionDefinition(
 
   if (Array.isArray(med.doseSchedule)) {
     for (const dose of med.doseSchedule) {
-      const id = typeof dose?.id === 'string' ? dose.id.trim() : '';
-      const time = typeof dose?.time === 'string' ? dose.time : '';
-      const amount = Number(dose?.amount);
-      if (!id || seen.has(id) || !isValidDoseTime(time) || !(amount > 0)) continue;
-      seen.add(id);
+      const validated = validateMedicationDose(dose);
+      if (!validated.ok) continue;
+      if (seen.has(validated.dose.id)) continue;
+      seen.add(validated.dose.id);
       doses.push({
-        id,
-        time: normalizeTimeString(time),
-        amount,
+        id: validated.dose.id,
+        time: validated.dose.time,
+        amount: validated.dose.amount,
       });
     }
   }
 
   return {
     medicationId: med.id,
-    enabled: med.autoDeductEnabled === true,
+    // Single canonical Auto policy source (documented ON default for a
+    // missing autoDeductEnabled field — #499).
+    enabled: isMedicationAutoDeductActive(med),
     treatmentStartDate: getMedicationTreatmentStartDate(med) ?? '',
     treatmentEndDate: getMedicationTreatmentEndDate(med) ?? '',
     doses,
+    scheduleMissing: doses.length === 0,
   };
 }
 
@@ -81,6 +93,24 @@ export function autoDeductionDefinitionChanged(
       id: oldMed.id,
       createdAt: oldMed.createdAt,
     });
+}
+
+/**
+ * Medication IDs that are Auto-Deduction enabled but carry NO usable
+ * explicit doseSchedule rows. Auto-Deduction is explicitly unsupported for
+ * them (#502): the canonical definition produces zero occurrences and the
+ * runtime surfaces this state instead of silently showing an inactive
+ * feature. No per-caller fallbacks exist — this is derived from the same
+ * canonical definition the scheduler consumes.
+ */
+export function medicationIdsWithoutAutoSchedule(medications: readonly Medication[]): string[] {
+  return medications
+    .filter(
+      (med) =>
+        isMedicationAutoDeductActive(med) &&
+        getAutoDeductionDefinition(med).scheduleMissing
+    )
+    .map((med) => med.id);
 }
 
 export function recurrenceDoseIds(med: Medication): string[] {

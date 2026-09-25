@@ -71,7 +71,7 @@ describe('no-schedule FIRED occurrence (no doseSchedule): FIRED is durable; no n
   it('applyExactAutoEventToMedication: no doseSchedule + non-empty doseId → applies event.amount (NOT dailyDose)', () => {
     const med = unscheduledMed({ dailyDose: 5 });
     const e = noScheduleFiredEvent(2);
-    const applied = applyExactAutoEventToMedication(med, e, NOW);
+    const applied = applyExactAutoEventToMedication(med, e, [], NOW);
     expect(applied.ok).toBe(true);
     if (applied.ok) {
       // 10 − event.amount(2) = 8, NOT 10 − dailyDose(5) = 5.
@@ -87,7 +87,7 @@ describe('no-schedule FIRED occurrence (no doseSchedule): FIRED is durable; no n
   it('applyExactAutoEventToMedication: empty doseSchedule array → applies event.amount', () => {
     const med = unscheduledMed({ doseSchedule: [] });
     const e = noScheduleFiredEvent(2);
-    const applied = applyExactAutoEventToMedication(med, e, NOW);
+    const applied = applyExactAutoEventToMedication(med, e, [], NOW);
     expect(applied.ok).toBe(true);
     if (applied.ok) {
       expect(applied.updatedMed.currentPills).toBe(8);
@@ -103,7 +103,7 @@ describe('no-schedule FIRED occurrence (no doseSchedule): FIRED is durable; no n
       doseSchedule: [{ id: 'd2', amount: 1, time: '20:00' }],
     });
     const e = noScheduleFiredEvent(2);
-    const applied = applyExactAutoEventToMedication(med, e, NOW);
+    const applied = applyExactAutoEventToMedication(med, e, [], NOW);
     expect(applied.ok).toBe(true);
     if (applied.ok) {
       expect(applied.updatedMed.currentPills).toBe(8);
@@ -120,7 +120,7 @@ describe('no-schedule FIRED occurrence (no doseSchedule): FIRED is durable; no n
       ...noScheduleFiredEvent(2),
       doseId: '',
     };
-    const applied = applyExactAutoEventToMedication(med, e, NOW);
+    const applied = applyExactAutoEventToMedication(med, e, [], NOW);
     expect(applied.ok).toBe(false);
     if (!applied.ok) {
       expect(applied.reason).toBe('invalid_dose_id');

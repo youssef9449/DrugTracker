@@ -56,9 +56,14 @@ assert(
   'App runtime state must translate its own policy into the neutral capability'
 );
 assert(
-  reconciliation.includes('allowManualTakeActionByMedicationId') &&
   reconciliation.includes('allowManualTakeAction'),
-  'Dose reconciliation service must consume only the neutral capability'
+  'Dose reconciliation orchestrator must consume only the neutral capability'
+);
+const consumptionCoordinator = read('src/utils/doseReminderConsumptionReconciliation.ts');
+assert(
+  consumptionCoordinator.includes('allowManualTakeActionByMedicationId') &&
+  consumptionCoordinator.includes('allowManualTakeAction'),
+  'Dose consumption coordinator must consume only the neutral capability'
 );
 assert(
   scheduler.includes('DoseReminderReconciliationService') &&

@@ -1,5 +1,6 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
-import { classifyNativeError, toNativeBoundaryError, type NativeErrorCode } from './nativeErrors';
+import {
+  nativeFailureErrorCode, toNativeBoundaryError, type NativeErrorCode } from './nativeErrors';
 
 interface ExactAlarmRuntimePlugin {
   canScheduleExactAlarms(): Promise<{ granted: boolean }>;
@@ -65,10 +66,11 @@ export async function openExactAlarmSettings(): Promise<ExactAlarmSettingsResult
     const result = await ExactAlarmRuntime.openSettings();
     if (result?.opened === true) return { ok: true };
     const message = result?.error || 'open_settings_failed';
+      const errorCode = nativeFailureErrorCode(result, 'open_settings_failed');
     return {
       ok: false,
       error: message,
-      errorCode: classifyNativeError(message),
+      errorCode,
     };
   } catch (error) {
     const boundaryError = toNativeBoundaryError(error, 'platform_failure');

@@ -47,7 +47,12 @@ public final class ExactAlarmPlugin extends Plugin {
         } catch (Exception e) {
             JSObject ret = new JSObject();
             ret.put("opened", false);
-            ret.put("error", "open_settings_failed");
+            // #534: the raw diagnostic stays in `error`; the stable machine
+            // code crosses separately and never depends on message wording.
+            ret.put("error", e.getMessage() != null
+                    ? e.getMessage()
+                    : "open_settings_failed");
+            ret.put("code", "open_settings_failed");
             call.resolve(ret);
         }
     }

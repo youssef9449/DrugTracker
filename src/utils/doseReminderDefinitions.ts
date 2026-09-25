@@ -1,5 +1,5 @@
 import type { Medication } from '../types';
-import { isValidDoseTime } from './doseSchedule';
+import { validateMedicationDose, normalizeDoseId } from './doseIdentity';
 
 export interface DoseReminderSlot {
   medId: string;
@@ -13,7 +13,11 @@ export interface DoseReminderSlot {
 
 /** Stable application identity for one explicit dose reminder slot. */
 export function doseScheduleKey(medId: string, doseId: string): string {
-  return `${medId}::${doseId}`;
+  // Canonical identity normalization: whitespace variants of the same
+  // logical dose share one key. Callers pass validated slot ids; the
+  // fallback keeps the legacy shape for defensively-called blank ids.
+  const canonicalDoseId = normalizeDoseId(doseId) ?? doseId;
+  return `${medId}::${canonicalDoseId}`;
 }
 
 export function parseDoseScheduleKey(
@@ -26,7 +30,9 @@ export function parseDoseScheduleKey(
 
 /**
  * Build reminder slots from explicit doseSchedule only.
- * Invalid, empty, and duplicate dose IDs are ignored at the domain boundary.
+ * Rows are validated by the canonical domain dose contract; invalid, empty,
+ * and duplicate dose IDs are ignored at the domain boundary (no substitute
+ * identities are invented).
  */
 export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
   const name = med.name;
@@ -38,25 +44,22 @@ export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
   const seen = new Set<string>();
   const slots: DoseReminderSlot[] = [];
   for (const row of med.doseSchedule) {
-    if (!row || !isValidDoseTime(row.time) || !(Number(row.amount) > 0)) {
-      continue;
-    }
-    const doseId = typeof row.id === 'string' ? row.id.trim() : '';
-    if (!doseId || seen.has(doseId)) continue;
+    const validated = validateMedicationDose(row);
+    if (!validated.ok) continue;
+    const doseId = validated.dose.id;
+    if (seen.has(doseId)) continue;
     seen.add(doseId);
 
-    const description =
-      typeof row.description === 'string' && row.description.trim()
-        ? row.description.trim()
-        : undefined;
     slots.push({
       medId: med.id,
       doseId,
-      time: row.time,
-      amount: Number(row.amount),
+      time: validated.dose.time,
+      amount: validated.dose.amount,
       name,
       unit,
-      description,
+      ...(validated.dose.description !== undefined
+        ? { description: validated.dose.description }
+        : {}),
     });
   }
   return slots;

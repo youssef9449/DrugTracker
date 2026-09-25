@@ -16,13 +16,22 @@ import app.drugtracker.autodeduction.AutoDeductionScheduler.ScheduleResult;
 
 /** Focused Auto-Deduction responsibility collaborator: AutoDeductionRecovery. */
 final class AutoDeductionRecovery {
-    interface Host {
+    /**
+     * Host surface narrowed to the ports this service consumes (#466);
+     * recovery-specific callbacks remain explicit below.
+     */
+    interface Host extends
+            AutoDeductionPorts.AppContextPort,
+            AutoDeductionPorts.ScheduleStoragePort,
+            AutoDeductionPorts.GenerationPort,
+            AutoDeductionPorts.RecoveryEvidencePort,
+            AutoDeductionPorts.CancellationPort,
+            AutoDeductionPorts.FailurePolicyPort,
+            AutoDeductionPorts.SuccessorObligationPort {
         boolean isRecurrenceGenerationAuthorizedLocked(
                 String medicationId, String doseId, long expected);
         boolean removeScheduleMetadataIfVersionLocked(
                 String prefKey, String expectedVersion);
-        long recoveryNowForService();
-        AutoDeductionSchedulingAdapter schedulingAdapter();
         ScheduleResult installFutureSuccessorIfGenerationHolds(
                 String medicationId, String doseId, String futureDate, String timeHhmm,
                 double amount, long triggerAt, long expectedGen,
@@ -467,17 +476,35 @@ public RestoreResult restoreFutureSchedules() {
             Log.w("AutoDeductionScheduler", "restoreFutureSchedules: exact alarm permission denied");
             // Still attempt past-schedule promotion to FIRED.
         }
-        int restored = 0;
-        int failed = 0;
-        boolean boundaryOk = true;
+        RestoreTally tally = new RestoreTally();
         boolean successorObligationsOk = host.recoverSuccessorObligations();
         if (!successorObligationsOk) {
-            failed++;
-            boundaryOk = false;
+            tally.failed++;
+            tally.boundaryOk = false;
         }
         if (!host.failurePolicy().allowRestoreFutureSchedules()) {
             return RestoreResult.failure(0, 0, "forced_restore_failure");
         }
+        List<ScheduleSnapshot> snapshot = snapshotScheduleMetadata();
+        for (ScheduleSnapshot entry : snapshot) {
+            restoreSingleEntry(entry, tally);
+        }
+        return finalizeRecoveredMetadata(tally);
+    }
+
+    /** Mutable per-pass outcome tally for the decomposed restore flow (#465). */
+    private static final class RestoreTally {
+        int restored;
+        int failed;
+        boolean boundaryOk = true;
+    }
+
+    /**
+     * Phase 1 (#465): durable metadata enumeration + decoding. Rows that fail
+     * to decode are kept raw so the recovery pass can quarantine them
+     * fail-closed.
+     */
+    private List<ScheduleSnapshot> snapshotScheduleMetadata() {
         List<ScheduleSnapshot> snapshot = new ArrayList<>();
         synchronized (AutoDeductionScheduler.class) {
             Map<String, String> all = host.getAllScheduleMetadata();
@@ -494,228 +521,274 @@ public RestoreResult restoreFutureSchedules() {
                         e.getKey(), e.getValue(), record, observedVersion));
             }
         }
-        for (ScheduleSnapshot entry : snapshot) {
-            String prefKey = entry.prefKey;
-            String raw = entry.raw;
-            String observedVersion = entry.observedVersion;
-            AutoDeductionPersistenceModels.ScheduleRecord record = entry.record;
-            if (record == null) {
-                String reason = "malformed_fields";
-                if (!quarantineMalformedScheduleMetadata(
-                        prefKey, raw, reason)) {
-                    Log.e("AutoDeductionScheduler",
-                            "restore: malformed schedule quarantine failed for " + prefKey);
-                    failed++;
-                    boundaryOk = false;
-                }
-                continue;
-            }
+        return snapshot;
+    }
 
-            String medId = record.occurrence.medicationId;
-            String doseId = record.occurrence.doseId;
-            String date = record.occurrence.calendarDate;
-            String time = record.timeHhmm;
-            double amount = record.amount;
-            long epoch = record.scheduledAtEpochMs;
-            String treatmentEndDate = record.treatmentEndDate;
-            if (!AutoDeductionContract.isValidCalendarDate(date)
-                    || !AutoDeductionContract.isValidTimeHhmm(time)
-                    || !AutoDeductionContract.isValidAmount(amount)
-                    || !AutoDeductionContract.isValidCalendarDate(date)
-                    || record.operationVersion.isEmpty()) {
-                if (!quarantineMalformedScheduleMetadata(
-                        prefKey, raw, "malformed_fields")) {
-                    failed++;
-                    boundaryOk = false;
+    /**
+     * Phase 2 (#465): route ONE snapshot entry through the focused recovery
+     * operations — malformed quarantine, expired-treatment resolution, past
+     * occurrence recovery, or future schedule restoration.
+     */
+    private void restoreSingleEntry(ScheduleSnapshot entry, RestoreTally tally) {
+        String prefKey = entry.prefKey;
+        String raw = entry.raw;
+        String observedVersion = entry.observedVersion;
+        AutoDeductionPersistenceModels.ScheduleRecord record = entry.record;
+        if (record == null) {
+            quarantineMalformedEntry(prefKey, raw, "malformed_fields", tally);
+            return;
+        }
+
+        String medId = record.occurrence.medicationId;
+        String doseId = record.occurrence.doseId;
+        String date = record.occurrence.calendarDate;
+        String time = record.timeHhmm;
+        double amount = record.amount;
+        String treatmentEndDate = record.treatmentEndDate;
+        if (!AutoDeductionContract.isValidCalendarDate(date)
+                || !AutoDeductionContract.isValidTimeHhmm(time)
+                || !AutoDeductionContract.isValidAmount(amount)
+                || record.operationVersion.isEmpty()) {
+            quarantineMalformedEntry(prefKey, raw, "malformed_fields", tally);
+            return;
+        }
+        ScheduleStorageIdentity keyIdentity = parseScheduleStorageKey(prefKey);
+        boolean keyMatchesPayload =
+                keyIdentity != null
+                && keyIdentity.medicationId.equals(medId)
+                && keyIdentity.doseId.equals(doseId)
+                && keyIdentity.calendarDate.equals(date);
+        if (!keyMatchesPayload) {
+            quarantineMalformedEntry(prefKey, raw, "identity_mismatch", tally);
+            return;
+        }
+        String occurrenceKey = AutoDeductionContract.occurrenceKey(medId, doseId, date);
+        if (!treatmentEndDate.isEmpty()
+                && date.compareTo(treatmentEndDate) > 0) {
+            resolveExpiredTreatmentOccurrence(
+                    medId, doseId, date, prefKey, observedVersion, tally);
+            return;
+        }
+
+        long epoch = record.scheduledAtEpochMs;
+        if (epoch <= 0) {
+            Long computed = AutoDeductionScheduler.computeEpochMs(date, time);
+            if (computed == null) {
+                // Unrecoverable epoch — cleanup; ownership_lost is not failure.
+                if (!host.removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
+                    Log.i("AutoDeductionScheduler", "restore: epoch-null cleanup ownership_lost/gone: " + prefKey);
                 }
-                continue;
+                // Cannot prove recovery of a valid schedule — leave as resolved via drop.
+                return;
             }
-            ScheduleStorageIdentity keyIdentity = parseScheduleStorageKey(prefKey);
-            boolean keyMatchesPayload =
-                    keyIdentity != null
-                    && keyIdentity.medicationId.equals(medId)
-                    && keyIdentity.doseId.equals(doseId)
-                    && keyIdentity.calendarDate.equals(date);
-            if (!keyMatchesPayload) {
-                if (!quarantineMalformedScheduleMetadata(
-                        prefKey, raw, "identity_mismatch")) {
-                    Log.e("AutoDeductionScheduler",
-                            "restore: malformed schedule quarantine failed for " + prefKey);
-                    failed++;
-                    boundaryOk = false;
-                }
-                continue;
+            epoch = computed;
+        }
+        // multi-day catch-up — every due occurrence from this
+        // snapshot date forward is recovered as FIRED (no horizon); the first
+        // not-yet-due date becomes the live AlarmManager schedule.
+        if (epoch <= host.recoveryNowForService()) {
+            recoverSinglePastOccurrence(
+                    medId, doseId, date, time, amount, prefKey, observedVersion,
+                    "restore", tally);
+            return;
+        }
+        restoreSingleFutureOccurrence(
+                medId, doseId, date, time, amount, treatmentEndDate,
+                occurrenceKey, prefKey, observedVersion, tally);
+    }
+
+    /** Quarantine helper binding the shared tally (#465). */
+    private void quarantineMalformedEntry(
+            String prefKey,
+            String raw,
+            String reason,
+            RestoreTally tally) {
+        if (!quarantineMalformedScheduleMetadata(prefKey, raw, reason)) {
+            Log.e("AutoDeductionScheduler",
+                    "restore: malformed schedule quarantine failed for " + prefKey);
+            tally.failed++;
+            tally.boundaryOk = false;
+        }
+    }
+
+    /** Resolve a record whose occurrence date is past its treatment end. */
+    private void resolveExpiredTreatmentOccurrence(
+            String medId,
+            String doseId,
+            String date,
+            String prefKey,
+            String observedVersion,
+            RestoreTally tally) {
+        synchronized (AutoDeductionScheduler.class) {
+            if (!host.schedulingAdapter()
+                    .isScheduleOwnedByOperationVersion(prefKey, observedVersion)) {
+                return;
             }
-            String occurrenceKey = AutoDeductionContract.occurrenceKey(medId, doseId, date);
-                if (!treatmentEndDate.isEmpty()
-                        && date.compareTo(treatmentEndDate) > 0) {
-                    synchronized (AutoDeductionScheduler.class) {
-                        if (!host.schedulingAdapter()
-                                .isScheduleOwnedByOperationVersion(prefKey, observedVersion)) {
-                            continue;
-                        }
-                        AutoDeductionSchedulingAdapter.CancelResult cancel =
-                                host.schedulingAdapter().cancelOccurrence(medId, doseId, date);
-                        if (!cancel.isOk()) {
-                            failed++;
-                            boundaryOk = false;
-                        }
-                    }
-                    continue;
-                }
-                if (epoch <= 0) {
-                    Long computed = AutoDeductionScheduler.computeEpochMs(date, time);
-                    if (computed == null) {
-                        // Unrecoverable epoch — cleanup; ownership_lost is not failure.
-                        if (!host.removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
-                            Log.i("AutoDeductionScheduler", "restore: epoch-null cleanup ownership_lost/gone: " + prefKey);
-                        }
-                        // Cannot prove recovery of a valid schedule — leave as resolved via drop.
-                        continue;
-                    }
-                    epoch = computed;
-                }
-                // multi-day catch-up — every due occurrence from this
-                // snapshot date forward is recovered as FIRED (no horizon); the first
-                // not-yet-due date becomes the live AlarmManager schedule.
-                if (epoch <= host.recoveryNowForService()) {
-                    if (!new AutoDeductionStockStore(host.appContext()).isInitialized()) {
-                        Log.i("AutoDeductionScheduler", "restore: past occurrence deferred until Native stock is initialized: "
-                                + prefKey);
-                        continue;
-                    }
-                    long snapGen;
-                    synchronized (AutoDeductionScheduler.class) {
-                        snapGen = host.getRecurrenceGenerationLocked(medId, doseId);
-                    }
-                    CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
-                            medId, doseId, date, time, amount, snapGen,
-                            prefKey, observedVersion);
-                    // restored counts future AlarmManager installs only (not FIRED rows).
-                    if (catchUp.futureInstalled) {
-                        restored++;
-                    }
-                    if (catchUp.incomplete) {
-                        Log.e("AutoDeductionScheduler", "restore: catch-up incomplete for " + prefKey);
-                        failed++;
-                        boundaryOk = false;
-                    }
-                    continue;
-                }
-                // Future: effectively cancelled → never reinstall; drop stale metadata.
-                // A newer schedule metadata supersedes a leftover tombstone so legitimate
-                // reschedule is not suppressed.
-                if (host.isOccurrenceCancelledKey(occurrenceKey)) {
-                    Log.i("AutoDeductionScheduler", "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
-                    // Prior cancellation is expected; ownership_lost on cleanup is not failure.
-                    if (!host.removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
-                        Log.i("AutoDeductionScheduler", "restore future cancel cleanup skipped (ownership lost): "
-                                + prefKey);
-                    }
-                    continue;
-                }
-                // Leftover tombstone under a superseding schedule: best-effort cleanup.
-                if (host.hasCancellationTombstone(occurrenceKey)) {
-                    synchronized (AutoDeductionScheduler.class) {
-                        host.clearCancellationTombstoneLocked(occurrenceKey);
-                    }
-                }
-                if (!ExactAlarmRuntime.canScheduleExactAlarms(host.appContext())) {
-                    // Future schedule requires AlarmManager — cannot complete recovery.
-                    Log.w("AutoDeductionScheduler", "restore: exact alarm permission denied for future " + prefKey);
-                    failed++;
-                    boundaryOk = false;
-                    continue;
-                }
-                // Rebuild epoch from calendarDate + timeHhmm in the *current* default
-                // timezone so a TIMEZONE_CHANGED restore does not reinstall a stale epoch.
-                Long recomputed = AutoDeductionScheduler.computeEpochMs(date, time);
-                if (recomputed == null) {
-                    if (!host.removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
-                        Log.i("AutoDeductionScheduler", "restore: recompute-null cleanup ownership_lost: " + prefKey);
-                    }
-                    continue;
-                }
-                if (recomputed <= host.recoveryNowForService()) {
-                    // After TZ change this occurrence is now in the past: multi-day catch-up.
-                    if (!new AutoDeductionStockStore(host.appContext()).isInitialized()) {
-                        Log.i("AutoDeductionScheduler", "restore: TZ past occurrence deferred until Native stock is initialized: "
-                                + prefKey);
-                        continue;
-                    }
-                    long snapGenTz;
-                    synchronized (AutoDeductionScheduler.class) {
-                        snapGenTz = host.getRecurrenceGenerationLocked(medId, doseId);
-                    }
-                    CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
-                            medId, doseId, date, time, amount, snapGenTz,
-                            prefKey, observedVersion);
-                    if (catchUp.futureInstalled) {
-                        restored++;
-                    }
-                    if (catchUp.incomplete) {
-                        Log.e("AutoDeductionScheduler", "restore: TZ catch-up incomplete for " + prefKey);
-                        failed++;
-                        boundaryOk = false;
-                    }
-                    continue;
-                }
-                epoch = recomputed;
-                // Future: atomic ownership check + schedule under one lock.
-                // operationVersion is assigned inside scheduleOccurrenceLocked (under
-                // AutoDeductionScheduler.class) so ordering vs concurrent cancel is correct.
-                String key = occurrenceKey;
-                AutoDeductionPersistenceModels.ScheduleRecord restoredRecord =
-                        new AutoDeductionPersistenceModels.ScheduleRecord(
-                                new AutoDeductionPersistenceModels.OccurrenceId(
-                                        medId, doseId, date),
-                                time,
-                                amount,
-                                epoch,
-                                treatmentEndDate,
-                                "");
-                synchronized (AutoDeductionScheduler.class) {
-                    // drop future schedules whose generation was invalidated.
-                    long metaGen = host.getRecurrenceGenerationLocked(medId, doseId);
-                    if (metaGen > 0L
-                            && !host.isRecurrenceGenerationAuthorizedLocked(medId, doseId, metaGen)) {
-                        Log.i("AutoDeductionScheduler", "restore skip (recurrence generation invalid): " + prefKey);
-                        // Dropping invalidated generation is expected; ownership_lost ok.
-                        host.removeScheduleMetadataIfVersionLocked(prefKey, observedVersion);
-                        continue;
-                    }
-                    ScheduleResult r = host.scheduleOccurrenceLocked(
-                            prefKey, restoredRecord, observedVersion);
-                    if (r.ok) {
-                        restored++;
-                    } else if ("ownership_lost".equals(r.error)) {
-                        // Canceled or replaced after snapshot — expected concurrent outcome.
-                        Log.i("AutoDeductionScheduler", "restore skip (ownership lost): " + prefKey);
-                    } else {
-                        Log.w("AutoDeductionScheduler", "restore schedule failed for " + prefKey + ": " + r.error);
-                        failed++;
-                        boundaryOk = false;
-                    }
-                }
+            AutoDeductionSchedulingAdapter.CancelResult cancel =
+                    host.schedulingAdapter().cancelOccurrence(medId, doseId, date);
+            if (!cancel.isOk()) {
+                tally.failed++;
+                tally.boundaryOk = false;
             }
+        }
+    }
+
+    /**
+     * Phase 3 (#465): recover ONE due occurrence as multi-day catch-up.
+     * Requires initialized Native stock; defers otherwise.
+     */
+    private void recoverSinglePastOccurrence(
+            String medId,
+            String doseId,
+            String date,
+            String time,
+            double amount,
+            String prefKey,
+            String observedVersion,
+            String logContext,
+            RestoreTally tally) {
+        if (!new AutoDeductionStockStore(host.appContext()).isInitialized()) {
+            Log.i("AutoDeductionScheduler", logContext + ": past occurrence deferred until Native stock is initialized: "
+                    + prefKey);
+            return;
+        }
+        long snapGen;
+        synchronized (AutoDeductionScheduler.class) {
+            snapGen = host.getRecurrenceGenerationLocked(medId, doseId);
+        }
+        CatchUpResult catchUp = catchUpMissedOccurrencesAndScheduleNext(
+                medId, doseId, date, time, amount, snapGen,
+                prefKey, observedVersion);
+        // restored counts future AlarmManager installs only (not FIRED rows).
+        if (catchUp.futureInstalled) {
+            tally.restored++;
+        }
+        if (catchUp.incomplete) {
+            Log.e("AutoDeductionScheduler", logContext + ": catch-up incomplete for " + prefKey);
+            tally.failed++;
+            tally.boundaryOk = false;
+        }
+    }
+
+    /**
+     * Phase 4 (#465): restore ONE future occurrence — cancellation/tombstone
+     * handling, timezone-correct epoch recomputation, generation guard, and
+     * the atomic ownership-checked install. A TZ-change that moves the
+     * occurrence into the past re-routes to past recovery.
+     */
+    private void restoreSingleFutureOccurrence(
+            String medId,
+            String doseId,
+            String date,
+            String time,
+            double amount,
+            String treatmentEndDate,
+            String occurrenceKey,
+            String prefKey,
+            String observedVersion,
+            RestoreTally tally) {
+        // Future: effectively cancelled → never reinstall; drop stale metadata.
+        // A newer schedule metadata supersedes a leftover tombstone so legitimate
+        // reschedule is not suppressed.
+        if (host.isOccurrenceCancelledKey(occurrenceKey)) {
+            Log.i("AutoDeductionScheduler", "restore skip (cancelled): " + medId + "/" + doseId + "/" + date);
+            // Prior cancellation is expected; ownership_lost on cleanup is not failure.
+            if (!host.removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
+                Log.i("AutoDeductionScheduler", "restore future cancel cleanup skipped (ownership lost): "
+                        + prefKey);
+            }
+            return;
+        }
+        // Leftover tombstone under a superseding schedule: best-effort cleanup.
+        if (host.hasCancellationTombstone(occurrenceKey)) {
+            synchronized (AutoDeductionScheduler.class) {
+                host.clearCancellationTombstoneLocked(occurrenceKey);
+            }
+        }
+        if (!ExactAlarmRuntime.canScheduleExactAlarms(host.appContext())) {
+            // Future schedule requires AlarmManager — cannot complete recovery.
+            Log.w("AutoDeductionScheduler", "restore: exact alarm permission denied for future " + prefKey);
+            tally.failed++;
+            tally.boundaryOk = false;
+            return;
+        }
+        // Rebuild epoch from calendarDate + timeHhmm in the *current* default
+        // timezone so a TIMEZONE_CHANGED restore does not reinstall a stale epoch.
+        Long recomputed = AutoDeductionScheduler.computeEpochMs(date, time);
+        if (recomputed == null) {
+            if (!host.removeScheduleMetadataIfVersion(prefKey, observedVersion)) {
+                Log.i("AutoDeductionScheduler", "restore: recompute-null cleanup ownership_lost: " + prefKey);
+            }
+            return;
+        }
+        if (recomputed <= host.recoveryNowForService()) {
+            // After TZ change this occurrence is now in the past: multi-day catch-up.
+            recoverSinglePastOccurrence(
+                    medId, doseId, date, time, amount, prefKey, observedVersion,
+                    "restore TZ", tally);
+            return;
+        }
+        long epoch = recomputed;
+        // Future: atomic ownership check + schedule under one lock.
+        // operationVersion is assigned inside scheduleOccurrenceLocked (under
+        // AutoDeductionScheduler.class) so ordering vs concurrent cancel is correct.
+        AutoDeductionPersistenceModels.ScheduleRecord restoredRecord =
+                new AutoDeductionPersistenceModels.ScheduleRecord(
+                        new AutoDeductionPersistenceModels.OccurrenceId(
+                                medId, doseId, date),
+                        time,
+                        amount,
+                        epoch,
+                        treatmentEndDate,
+                        "");
+        synchronized (AutoDeductionScheduler.class) {
+            // drop future schedules whose generation was invalidated.
+            long metaGen = host.getRecurrenceGenerationLocked(medId, doseId);
+            if (metaGen > 0L
+                    && !host.isRecurrenceGenerationAuthorizedLocked(medId, doseId, metaGen)) {
+                Log.i("AutoDeductionScheduler", "restore skip (recurrence generation invalid): " + prefKey);
+                // Dropping invalidated generation is expected; ownership_lost ok.
+                host.removeScheduleMetadataIfVersionLocked(prefKey, observedVersion);
+                return;
+            }
+            ScheduleResult r = host.scheduleOccurrenceLocked(
+                    prefKey, restoredRecord, observedVersion);
+            if (r.ok) {
+                tally.restored++;
+            } else if ("ownership_lost".equals(r.error)) {
+                // Canceled or replaced after snapshot — expected concurrent outcome.
+                Log.i("AutoDeductionScheduler", "restore skip (ownership lost): " + prefKey);
+            } else {
+                Log.w("AutoDeductionScheduler", "restore schedule failed for " + prefKey + ": " + r.error);
+                tally.failed++;
+                tally.boundaryOk = false;
+            }
+        }
+    }
+
+    /**
+     * Phase 5 (#465): finalization — independent fire-retry evidence pass,
+     * terminal-state compaction, and the aggregate result.
+     */
+    private RestoreResult finalizeRecoveredMetadata(RestoreTally tally) {
         // Also recover independent fire-retry evidence (may exist without shared schedule rows).
         RestoreResult retryPass = recoverIndependentFireRetryEvidencePass();
-        restored += retryPass.restored;
-        failed += retryPass.failed;
+        tally.restored += retryPass.restored;
+        tally.failed += retryPass.failed;
         if (!retryPass.ok) {
-            boundaryOk = false;
+            tally.boundaryOk = false;
         }
         if (!host.compactTerminalState()) {
             Log.e("AutoDeductionScheduler",
                     "restore: terminal-state compaction incomplete");
-            failed++;
-            boundaryOk = false;
+            tally.failed++;
+            tally.boundaryOk = false;
         }
-        if (!boundaryOk || failed > 0) {
-            return RestoreResult.failure(restored, failed,
+        if (!tally.boundaryOk || tally.failed > 0) {
+            return RestoreResult.failure(tally.restored, tally.failed,
                     "restore_boundary_incomplete");
         }
-        return RestoreResult.success(restored, failed);
+        return RestoreResult.success(tally.restored, tally.failed);
     }
 
 boolean quarantineMalformedScheduleMetadata(

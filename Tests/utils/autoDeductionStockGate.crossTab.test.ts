@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { withAutoStockMutationGate } from '../../src/utils/autoDeductionStockGate';
-import { loadJson } from '../../src/utils/storage';
+import { readJsonOutcome } from '../../src/utils/storage';
 import { STORAGE_MEDS_KEY } from '../../src/utils/autoDeductionStockGate';
 
 describe('withAutoStockMutationGate cross-document locking', () => {
@@ -96,9 +96,12 @@ describe('cross-tab stale-snapshot protection', () => {
       mutate(tabB.withAutoStockMutationGate),
     ]);
 
-    expect(loadJson<Array<{ id: string; currentPills: number }>>(STORAGE_MEDS_KEY, [])).toEqual([
-      { id: 'm1', currentPills: 12 },
-    ]);
+    const medsOutcome = readJsonOutcome(STORAGE_MEDS_KEY, (raw) =>
+      raw !== null && raw !== undefined
+        ? { ok: true, value: raw }
+        : { ok: false, reason: 'test_shape_invalid' }
+    );
+    expect(medsOutcome).toEqual({ status: 'ok', value: [{ id: 'm1', currentPills: 12 }] });
     expect(request).toHaveBeenCalledTimes(2);
   });
 });

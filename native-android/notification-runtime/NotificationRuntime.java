@@ -7,19 +7,9 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
-import android.content.SharedPreferences;
-import org.json.JSONException;
-import org.json.JSONObject;
 
 import androidx.core.app.NotificationManagerCompat;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 /**
  * Shared Android notification-delivery runtime.
  *
@@ -38,18 +28,14 @@ public final class NotificationRuntime {
     public static final String EXTRA_ACTION_ID = "notificationActionId";
 
     private static final int NOTIFICATION_ID = 1;
-    private static final String RETRY_PREFS =
-            "drugtracker_notification_delivery_retry_v2";
-    private static final String RETRY_ENTRY_PREFIX = "entry:";
-    private static final int MAX_RETRY_ENTRIES = 64;
-    private static final long MAX_RETRY_AGE_MS =
-            7L * 24L * 60L * 60L * 1000L;
-    private static final Object RETRY_LOCK = new Object();
 
     private final Context appContext;
+    /** Durable retry-evidence store (#489 responsibility extraction). */
+    private final NotificationRetryStore retryStore;
 
     public NotificationRuntime(Context context) {
         appContext = context.getApplicationContext();
+        retryStore = new NotificationRetryStore(appContext);
     }
 
     public boolean areNotificationsEnabled() {
@@ -67,6 +53,21 @@ public final class NotificationRuntime {
     }
 
     public PostResult post(Request request) {
+        return postInternal(request, true);
+    }
+
+    /**
+     * Common delivery implementation (#533): permission checks, channel
+     * setup/validation, manager lookup, notify(), and the delivery broadcast
+     * exist in exactly ONE path. The only parameterized difference is the
+     * retry-persistence policy: the public post() persists failed deliveries
+     * for later retry; the retry replay path must not re-persist.
+     *
+     * #511: when delivery fails AND the retry evidence itself cannot be
+     * stored, the result carries that distinction explicitly
+     * ({@code retryEvidence == FAILED}) instead of swallowing it.
+     */
+    private PostResult postInternal(Request request, boolean persistRetryOnFailure) {
         if (request == null
                 || request.namespace == null || request.namespace.isEmpty()
                 || request.identity == null || request.identity.isEmpty()
@@ -76,8 +77,7 @@ public final class NotificationRuntime {
             return PostResult.failed("invalid_request");
         }
         if (!areNotificationsEnabled()) {
-            persistRetry(request);
-            return PostResult.failed("notifications_disabled");
+            return failedWithRetryPolicy(request, "notifications_disabled", persistRetryOnFailure);
         }
 
         try {
@@ -88,15 +88,13 @@ public final class NotificationRuntime {
                     request.channelVisibility);
 
             if (!isChannelEnabled(request.channelId)) {
-                persistRetry(request);
-                return PostResult.failed("notification_channel_disabled");
+                return failedWithRetryPolicy(request, "notification_channel_disabled", persistRetryOnFailure);
             }
 
             Notification notification = buildNotification(request);
             NotificationManager manager = notificationManager();
             if (manager == null) {
-                persistRetry(request);
-                return PostResult.failed("notification_manager_unavailable");
+                return failedWithRetryPolicy(request, "notification_manager_unavailable", persistRetryOnFailure);
             }
 
             manager.notify(
@@ -109,110 +107,61 @@ public final class NotificationRuntime {
             event.putExtra(EXTRA_NAMESPACE, request.namespace);
             event.putExtra(EXTRA_IDENTITY, request.identity);
             appContext.sendBroadcast(event);
-            clearRetry(request.namespace, request.identity);
+            retryStore.clear(request.namespace, request.identity);
             return PostResult.accepted();
         } catch (SecurityException e) {
-            persistRetry(request);
-            return PostResult.failed("notification_security_exception");
+            return failedWithRetryPolicy(request, "notification_security_exception", persistRetryOnFailure);
         } catch (Exception e) {
-            persistRetry(request);
-            return PostResult.failed("notification_post_failed");
+            return failedWithRetryPolicy(request, "notification_post_failed", persistRetryOnFailure);
         }
     }
 
-    public void persistRetry(Request request) {
-        if (request == null || request.namespace == null || request.namespace.isEmpty()
-                || request.identity == null || request.identity.isEmpty()) return;
-
-        final long now = System.currentTimeMillis();
-        final String entryKey = retryEntryKey(request.namespace, request.identity);
-
-        try {
-            JSONObject entry = serializeRequest(request);
-            entry.put("queuedAtEpochMs", now);
-            entry.put("retryToken", UUID.randomUUID().toString());
-            String serialized = entry.toString();
-
-            synchronized (RETRY_LOCK) {
-                SharedPreferences prefs =
-                        appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
-                Map<String, ?> all = prefs.getAll();
-                SharedPreferences.Editor editor = prefs.edit();
-                List<RetryCandidate> candidates = new ArrayList<>();
-                boolean currentExists = false;
-
-                for (Map.Entry<String, ?> stored : all.entrySet()) {
-                    if (!stored.getKey().startsWith(RETRY_ENTRY_PREFIX)) continue;
-                    if (stored.getKey().equals(entryKey)) {
-                        currentExists = true;
-                        continue;
-                    }
-
-                    Long queuedAt = readQueuedAt(stored.getValue());
-                    String retryToken = readRetryToken(stored.getValue());
-                    if (queuedAt == null
-                            || retryToken == null
-                            || now - queuedAt.longValue() > MAX_RETRY_AGE_MS) {
-                        editor.remove(stored.getKey());
-                        continue;
-                    }
-                    candidates.add(new RetryCandidate(
-                            stored.getKey(),
-                            queuedAt.longValue(),
-                            retryToken));
-                }
-
-                if (!currentExists) {
-                    candidates.sort((a, b) -> Long.compare(a.queuedAtEpochMs, b.queuedAtEpochMs));
-                    while (candidates.size() >= MAX_RETRY_ENTRIES && !candidates.isEmpty()) {
-                        RetryCandidate oldest = candidates.remove(0);
-                        editor.remove(oldest.key);
-                    }
-                }
-
-                editor.putString(entryKey, serialized).apply();
-            }
-        } catch (JSONException ignored) {
+    /** Fail a delivery, applying the caller's retry-persistence policy (#533). */
+    private PostResult failedWithRetryPolicy(
+            Request request,
+            String error,
+            boolean persistRetryOnFailure) {
+        if (!persistRetryOnFailure) {
+            return PostResult.failed(error);
         }
+        RetryPersistResult persisted = retryStore.persist(request);
+        return PostResult.failed(error, persisted.ok
+                ? PostResult.RetryEvidenceState.STORED
+                : PostResult.RetryEvidenceState.FAILED);
+    }
+
+    /**
+     * Persist a failed delivery for a later retry.
+     *
+     * #511: serialization/persistence failures are NOT silently discarded —
+     * the structured outcome lets the caller distinguish "retry scheduled"
+     * from "delivery failed and retry evidence could not be stored".
+     *
+     * #520 privacy boundary: the retry record stores the MINIMUM fields
+     * needed for native reconstruction (namespace+identity routing, channel
+     * id/importance, presentation title/body, action routing). Notification
+     * text may contain health-related content; it cannot be reconstructed
+     * natively after process death, so the presentation is retained here
+     * under the app's private storage. No extras or redundant metadata
+     * (channel display name is not persisted — the channel already exists at
+     * OS level and is reused during replay). Retention: bounded by
+     * MAX_RETRY_ENTRIES + MAX_RETRY_AGE_MS eviction.
+     */
+    public RetryPersistResult persistRetry(Request request) {
+        return retryStore.persist(request);
     }
 
     public int retryPersistedFailures() {
-        final long now = System.currentTimeMillis();
-        final List<RetryCandidate> candidates = new ArrayList<>();
-
-        synchronized (RETRY_LOCK) {
-            SharedPreferences prefs =
-                    appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
-            SharedPreferences.Editor cleanup = prefs.edit();
-
-            for (Map.Entry<String, ?> stored : prefs.getAll().entrySet()) {
-                if (!stored.getKey().startsWith(RETRY_ENTRY_PREFIX)) continue;
-                Long queuedAt = readQueuedAt(stored.getValue());
-                String retryToken = readRetryToken(stored.getValue());
-                if (queuedAt == null
-                        || retryToken == null
-                        || now - queuedAt.longValue() > MAX_RETRY_AGE_MS) {
-                    cleanup.remove(stored.getKey());
-                    continue;
-                }
-                candidates.add(new RetryCandidate(
-                        stored.getKey(),
-                        queuedAt.longValue(),
-                        retryToken));
-            }
-            cleanup.apply();
-        }
-
-        candidates.sort((a, b) -> Long.compare(a.queuedAtEpochMs, b.queuedAtEpochMs));
+        // Replay orchestration stays here; the store owns scans/CAS removal.
         int accepted = 0;
-        for (RetryCandidate candidate : candidates) {
-            Request request = readRetryRequest(candidate.key);
+        for (NotificationRetryStore.RetryCandidate candidate : retryStore.listPendingRetries()) {
+            Request request = retryStore.readRequest(candidate.key);
             if (request == null) {
-                removeRetryKey(candidate.key, candidate.retryToken);
+                retryStore.remove(candidate.key, candidate.retryToken);
                 continue;
             }
             PostResult result = postWithoutPersistingRetry(request);
-            if (result.accepted && clearRetryIfUnchanged(candidate.key, candidate.retryToken)) {
+            if (result.accepted && retryStore.clearIfUnchanged(candidate.key, candidate.retryToken)) {
                 accepted++;
             }
         }
@@ -220,178 +169,7 @@ public final class NotificationRuntime {
     }
 
     private PostResult postWithoutPersistingRetry(Request request) {
-        if (request == null || !areNotificationsEnabled()) {
-            return PostResult.failed("notifications_disabled");
-        }
-        try {
-            ensureChannel(request.channelId, request.channelName,
-                    request.channelImportance, request.channelVisibility);
-            if (!isChannelEnabled(request.channelId)) {
-                return PostResult.failed("notification_channel_disabled");
-            }
-            NotificationManager manager = notificationManager();
-            if (manager == null) return PostResult.failed("notification_manager_unavailable");
-            manager.notify(tagFor(request.namespace, request.identity), NOTIFICATION_ID,
-                    buildNotification(request));
-            Intent event = new Intent(ACTION_NOTIFICATION_POSTED);
-            event.setPackage(appContext.getPackageName());
-            event.putExtra(EXTRA_NAMESPACE, request.namespace);
-            event.putExtra(EXTRA_IDENTITY, request.identity);
-            appContext.sendBroadcast(event);
-            return PostResult.accepted();
-        } catch (Exception e) {
-            return PostResult.failed("notification_post_failed");
-        }
-    }
-
-    private JSONObject serializeRequest(Request request) throws JSONException {
-        JSONObject item = new JSONObject();
-        item.put("namespace", request.namespace);
-        item.put("identity", request.identity);
-        item.put("title", request.title);
-        item.put("body", request.body);
-        item.put("channelId", request.channelId);
-        item.put("channelName", request.channelName);
-        item.put("channelImportance", request.channelImportance);
-        item.put("channelVisibility", request.channelVisibility);
-        item.put("smallIcon", request.smallIcon);
-        item.put("autoCancel", request.autoCancel);
-        item.put("ongoing", request.ongoing);
-        if (request.action != null) {
-            JSONObject action = new JSONObject();
-            action.put("id", request.action.id);
-            action.put("title", request.action.title);
-            action.put("foreground", request.action.foreground);
-            item.put("action", action);
-        }
-        return item;
-    }
-
-    private Request deserializeRequest(JSONObject item) {
-        if (item == null) return null;
-        try {
-            JSONObject actionJson = item.optJSONObject("action");
-            Action action = actionJson == null ? null : new Action(
-                    actionJson.optString("id", ""),
-                    actionJson.optString("title", ""),
-                    actionJson.optBoolean("foreground", false));
-            return new Request(
-                    item.getString("namespace"),
-                    item.getString("identity"),
-                    item.getString("title"),
-                    item.getString("body"),
-                    item.getString("channelId"),
-                    item.optString("channelName", ""),
-                    item.optInt("channelImportance", 4),
-                    item.optInt("channelVisibility", 1),
-                    item.optString("smallIcon", "ic_launcher"),
-                    item.optBoolean("autoCancel", true),
-                    item.optBoolean("ongoing", false),
-                    action);
-        } catch (JSONException e) {
-            return null;
-        }
-    }
-
-    private void clearRetry(String namespace, String identity) {
-        if (namespace == null || identity == null) return;
-        removeRetryKey(retryEntryKey(namespace, identity), null);
-    }
-
-    private void removeRetryKey(String entryKey, String expectedRetryToken) {
-        synchronized (RETRY_LOCK) {
-            SharedPreferences prefs =
-                    appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
-            if (expectedRetryToken != null) {
-                String currentRetryToken = readRetryToken(
-                        prefs.getString(entryKey, null));
-                if (currentRetryToken == null
-                        || !currentRetryToken.equals(expectedRetryToken)) {
-                    return;
-                }
-            }
-            prefs.edit().remove(entryKey).apply();
-        }
-    }
-
-    private boolean clearRetryIfUnchanged(
-            String entryKey,
-            String expectedRetryToken) {
-        synchronized (RETRY_LOCK) {
-            SharedPreferences prefs =
-                    appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
-            String currentRetryToken = readRetryToken(
-                    prefs.getString(entryKey, null));
-            if (currentRetryToken == null
-                    || !currentRetryToken.equals(expectedRetryToken)) {
-                return false;
-            }
-            prefs.edit().remove(entryKey).apply();
-            return true;
-        }
-    }
-
-    private Request readRetryRequest(String entryKey) {
-        synchronized (RETRY_LOCK) {
-            SharedPreferences prefs =
-                    appContext.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
-            String raw = prefs.getString(entryKey, null);
-            if (raw == null) return null;
-            try {
-                return deserializeRequest(new JSONObject(raw));
-            } catch (JSONException e) {
-                return null;
-            }
-        }
-    }
-
-    private Long readQueuedAt(Object raw) {
-        if (!(raw instanceof String)) return null;
-        try {
-            long value = new JSONObject((String) raw).optLong(
-                    "queuedAtEpochMs", Long.MIN_VALUE);
-            return value > 0L ? Long.valueOf(value) : null;
-        } catch (JSONException e) {
-            return null;
-        }
-    }
-
-    private String readRetryToken(Object raw) {
-        if (!(raw instanceof String)) return null;
-        try {
-            String value = new JSONObject((String) raw).optString(
-                    "retryToken", "").trim();
-            return value.isEmpty() ? null : value;
-        } catch (JSONException e) {
-            return null;
-        }
-    }
-
-    private static String retryEntryKey(String namespace, String identity) {
-        String value = namespace + "\u0000" + identity;
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
-            StringBuilder result = new StringBuilder(RETRY_ENTRY_PREFIX);
-            for (byte b : hash) {
-                result.append(String.format("%02x", b & 0xff));
-            }
-            return result.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 unavailable", e);
-        }
-    }
-
-    private static final class RetryCandidate {
-        final String key;
-        final long queuedAtEpochMs;
-        final String retryToken;
-
-        RetryCandidate(String key, long queuedAtEpochMs, String retryToken) {
-            this.key = key;
-            this.queuedAtEpochMs = queuedAtEpochMs;
-            this.retryToken = retryToken;
-        }
+        return postInternal(request, false);
     }
 
     public CancelResult cancel(String namespace, String identity) {
@@ -510,6 +288,21 @@ public final class NotificationRuntime {
                 1,
                 intent,
                 flags);
+    }
+
+    /**
+     * Channel bootstrap WITHOUT posting (#503): the runtime owns channel
+     * creation/presentation mechanics; a startup orchestrator may create the
+     * channels a feature requires BEFORE those channels' existence is used as
+     * a capability gate. Creating a missing channel is deterministic;
+     * existing channels are left untouched (no importance downgrades).
+     */
+    public void createChannelIfAbsent(
+            String channelId,
+            String channelName,
+            int importance,
+            int visibility) {
+        ensureChannel(channelId, channelName, importance, visibility);
     }
 
     private void ensureChannel(
@@ -643,20 +436,48 @@ public final class NotificationRuntime {
     }
 
     public static final class PostResult {
+        /** Distinguishes delivery-failure outcomes with persisted retry evidence (#511). */
+        public enum RetryEvidenceState { NOT_ATTEMPTED, STORED, FAILED }
+
         public final boolean accepted;
         public final String error;
+        public final RetryEvidenceState retryEvidence;
 
-        private PostResult(boolean accepted, String error) {
+        private PostResult(boolean accepted, String error, RetryEvidenceState retryEvidence) {
             this.accepted = accepted;
             this.error = error;
+            this.retryEvidence = retryEvidence;
         }
 
         public static PostResult accepted() {
-            return new PostResult(true, null);
+            return new PostResult(true, null, RetryEvidenceState.NOT_ATTEMPTED);
         }
 
         public static PostResult failed(String error) {
-            return new PostResult(false, error);
+            return new PostResult(false, error, RetryEvidenceState.NOT_ATTEMPTED);
+        }
+
+        public static PostResult failed(String error, RetryEvidenceState retryEvidence) {
+            return new PostResult(false, error, retryEvidence);
+        }
+    }
+
+    /** Structured outcome of a retry-persistence attempt (#511). */
+    public static final class RetryPersistResult {
+        public final boolean ok;
+        public final String error;
+
+        private RetryPersistResult(boolean ok, String error) {
+            this.ok = ok;
+            this.error = error;
+        }
+
+        static RetryPersistResult stored() {
+            return new RetryPersistResult(true, null);
+        }
+
+        static RetryPersistResult failed(String error) {
+            return new RetryPersistResult(false, error);
         }
     }
 }

@@ -2,7 +2,9 @@ import { scheduleCriticalAlarmNative, cancelCriticalAlarmNative, verifyCriticalA
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
 import { cancelNotification, getNotificationPermissionResult, getPendingNotificationResult, scheduleNotification } from './notificationRuntime';
 import { scheduleWebNotification } from './notifications/webNotifications';
-import { classifyNativeError, type NativeErrorCode } from './nativeErrors';
+import {
+  classifyNativeError,
+  type NativeErrorCode } from './nativeErrors';
 
 export interface CriticalAlarmOperationResult {
   ok: boolean;

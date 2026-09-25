@@ -9,6 +9,7 @@ import { getTodayDateString, tomorrowDateString, localEpochMs } from '../utils/d
 import {
   getAutoDeductionDefinitionForDate,
   getAutoDeductionDefinitionSignature,
+  medicationIdsWithoutAutoSchedule,
 } from '../utils/autoDeductionDefinition';
 import {
   cancelAutoDeduction,
@@ -22,6 +23,10 @@ import {
   restoreFutureSchedulesOnce,
 } from '../utils/restoreFutureSchedulesBoundary';
 import { withAutoStockMutationGate } from '../utils/autoDeductionStockGate';
+import {
+  resolveAutoDeductionSchedulingDecision,
+  isAutoDeductionBlockedByExactAlarmPermission,
+} from '../utils/autoDeductionSchedulingGate';
 import { ScheduledOperationCoordinator } from '../utils/scheduling/ScheduledOperationCoordinator';
 export interface UseAutoDeductionSchedulerOptions {
   medications: Medication[];
@@ -137,13 +142,13 @@ async function cancelUndesiredExactOccurrence(
  * Protect past-due schedules that carry durable fire-retry evidence.
  * fireRetryCount is Auto-owned retry evidence surfaced by the native schedule
  * listing; it is not part of Shared ExactAlarm schedule metadata. Stale React
- * global/med disabled state must not drop recovery evidence for an already-failed
- * FIRED persistence.
+ * med state must not drop recovery evidence for an already-failed FIRED
+ * persistence. Retry/recovery state is independent from preference gating —
+ * callers decide desired-state separately (#535: no ignored parameters).
  */
 export function isFireRetryRecoveryPending(
   schedule: ScheduledOccurrence,
   med: Medication | undefined,
-  globalAutoDeductEnabled: boolean,
   now: number = Date.now()
 ): boolean {
   // Durable native retry marker is required. React enable flags are NOT used
@@ -151,7 +156,6 @@ export function isFireRetryRecoveryPending(
   if (Number(schedule.fireRetryCount) <= 0) {
     return false;
   }
-  void globalAutoDeductEnabled;
   // Prefer native scheduledAtEpochMs; fall back to timeHhmm or med schedule.
   let scheduledAt: number | null = null;
   if (
@@ -177,6 +181,20 @@ export function isFireRetryRecoveryPending(
   }
   return scheduledAt <= now + 2_000;
 }
+export interface AutoDeductionSchedulerStatus {
+  /**
+   * True when Android exact-alarm permission is DENIED: Auto-Deduction
+   * configuration stays intact, no future Auto alarm is armed, and the UI
+   * should surface the actionable exact-alarm prerequisite (#500).
+   */
+  schedulingBlockedByExactAlarmPermission: boolean;
+  /**
+   * Auto-enabled medication IDs with NO usable explicit doseSchedule
+   * (#502 explicit unsupported state — no silent zero-occurrence schedule).
+   */
+  medicationIdsMissingDoseSchedule: string[];
+}
+
 export function useAutoDeductionScheduler({
   medications,
   globalAutoDeductEnabled,
@@ -185,12 +203,16 @@ export function useAutoDeductionScheduler({
   exactAlarmPermission,
   resumeTick = 0,
   midnightTick = 0,
-}: UseAutoDeductionSchedulerOptions): void {
+}: UseAutoDeductionSchedulerOptions): AutoDeductionSchedulerStatus {
   const trackedRef = useRef<Set<string>>(new Set());
   const operationCoordinatorRef = useRef(
     new ScheduledOperationCoordinator<string>()
   );
   const recoveryBoundaryRef = useRef<string | null>(null);
+  const missingScheduleMedicationIds = useMemo(
+    () => medicationIdsWithoutAutoSchedule(medications),
+    [medications]
+  );
   const signature = useMemo(
     () =>
       [
@@ -204,9 +226,14 @@ export function useAutoDeductionScheduler({
     [medications, globalAutoDeductEnabled, exactAlarmPermission]
   );
   useEffect(() => {
-    if (!hydrated || isFirstRun) return;
-    if (exactAlarmPermission === null || exactAlarmPermission === 'denied') {
-      if (exactAlarmPermission === 'denied') {
+    // One shared decision point for the Auto × Exact Alarm prerequisite.
+    const decision = resolveAutoDeductionSchedulingDecision({
+      hydrated,
+      isFirstRun,
+      exactAlarmPermission,
+    });
+    if (decision.action !== 'schedule') {
+      if (decision.action === 'cancel_armed_and_wait') {
         const gen = operationCoordinatorRef.current.bump('auto-deduction');
         const toCancel = Array.from(trackedRef.current);
         operationCoordinatorRef.current.enqueue(
@@ -298,8 +325,7 @@ export function useAutoDeductionScheduler({
             const durableMed = medications.find((m) => m.id === s.medicationId);
             if (isFireRetryRecoveryPending(
               s,
-              durableMed,
-              globalAutoDeductEnabled
+              durableMed
             )) {
               // This past-due schedule is the durable recovery source for a
               // failed fire-persistence retry. Do not invalidate/cancel it
@@ -369,4 +395,10 @@ export function useAutoDeductionScheduler({
     resumeTick,
     midnightTick,
   ]);
+
+  return {
+    schedulingBlockedByExactAlarmPermission:
+      isAutoDeductionBlockedByExactAlarmPermission(exactAlarmPermission),
+    medicationIdsMissingDoseSchedule: missingScheduleMedicationIds,
+  };
 }

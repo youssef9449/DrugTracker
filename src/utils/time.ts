@@ -42,6 +42,19 @@ export const DEFAULT_SOLID_PACK_SIZE = 30;
 /** Default package size for liquid (ml) medications. */
 export const DEFAULT_LIQUID_PACK_SIZE = 100;
 /**
+ * Canonical persisted-time validation for "HH:mm" values (strict two-digit
+ * shape + real hour/minute ranges). ONE definition of a valid persisted
+ * reminder/dose time — used by storage hydration, dose schedule rows, and
+ * scheduling boundaries alike so "99:99"/"25:00" style values are rejected
+ * consistently everywhere.
+ */
+export function isValidTimeHhmm(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{2}:\d{2}$/.test(value)) return false;
+  const hour = Number(value.slice(0, 2));
+  const minute = Number(value.slice(3, 5));
+  return hour <= 23 && minute <= 59;
+}
+/**
  * Convert a "HH:MM" 24-hour string to minutes-since-midnight.
  *
  * Returns -1 for malformed input (NaN, wrong shape, or out-of-range

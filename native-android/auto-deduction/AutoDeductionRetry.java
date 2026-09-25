@@ -23,7 +23,7 @@ final class AutoDeductionRetry {
         ScheduleResult scheduleNextOccurrenceFromIndependentEvidenceLocked(
                 String medicationId, String doseId, String calendarDate,
                 AutoDeductionPersistenceModels.RetryEvidenceRecord evidence);
-        boolean clearSuccessorObligation(
+        void clearSuccessorObligation(
                 String medicationId, String doseId, String calendarDate);
     }
 
@@ -173,14 +173,11 @@ boolean recordIndependentFireRetryEvidenceLocked(
         }
     }
 
-boolean clearIndependentFireRetryEvidenceLocked(String occurrenceKey) {
-        if (occurrenceKey == null || occurrenceKey.isEmpty()) return true;
-        boolean ok = evidenceStore.clear(occurrenceKey);
-        if (!ok) {
-            Log.w("AutoDeductionScheduler",
-                    "independent fire-retry evidence clear failed for " + occurrenceKey);
-        }
-        return ok;
+void clearIndependentFireRetryEvidenceLocked(String occurrenceKey) {
+        // Post-completion cleanup (#493): the evidence store removal is
+        // asynchronous and needs no outcome — a surviving record is
+        // re-processed idempotently by recovery and re-cleaned there.
+        evidenceStore.clear(occurrenceKey);
     }
 
 void clearIndependentFireRetryEvidenceAfterStock(

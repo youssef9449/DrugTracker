@@ -1,4 +1,4 @@
-import { useEffect, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import {
   registerNotificationActionHandler,
   registerDoseReceivedHandler,
@@ -7,7 +7,10 @@ import {
 import { getExactAlarmPermission, type ExactAlarmPermission } from '../utils/exactAlarm';
 import { getNotificationPermission } from '../utils/notifications/notificationPermissions';
 import { NOTIFICATIONS_KEY } from '../constants/storageKeys';
-import { isNotificationChannelEnabled, retryPersistedNotificationDeliveries } from '../utils/notificationRuntime';
+import {
+  getNotificationChannelState,
+  retryPersistedNotificationDeliveries,
+} from '../utils/notificationRuntime';
 import { isDoseReminderOccurrenceOwned } from '../utils/doseReminderNative';
 import {
   DOSE_REMINDER_CHANNEL_ID,
@@ -15,6 +18,8 @@ import {
 } from '../utils/notifications/doseReminderNotifications';
 import { playSuccessChime } from '../utils/sound';
 import { runAsyncCommand } from '../utils/async/runAsyncCommand';
+import { readStorageItem } from '../utils/storage';
+import { publishAppResumeEvent } from '../utils/appResumeEvents';
 /**
  * Registers native notification-action, dose-received, and app-resume
  * handlers. Cleanup unregisters on unmount / dependency change.
@@ -42,6 +47,21 @@ export function useNativeActionHandlers(opts: {
     setExactAlarmPermission,
     setNotificationsEnabled,
   } = opts;
+  // #542: the dose-received listener has mount lifetime. Latest dynamic
+  // values are read through refs so medication-state churn cannot cause
+  // native unregister/register cycles.
+  const manualTakeCapabilityRef = useRef(allowManualTakeActionByMedicationId);
+  const openAlarmRef = useRef(openAlarm);
+  const soundEnabledRef = useRef(soundEnabled);
+  useEffect(() => {
+    manualTakeCapabilityRef.current = allowManualTakeActionByMedicationId;
+  }, [allowManualTakeActionByMedicationId]);
+  useEffect(() => {
+    openAlarmRef.current = openAlarm;
+  }, [openAlarm]);
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
   useEffect(() => {
     registerNotificationActionHandler((actionId, medicationId, doseId) => {
       const separator = actionId.indexOf('|');
@@ -79,18 +99,20 @@ export function useNativeActionHandlers(opts: {
   // (dose-reminder-foreground-v1), so Android produces no sound. The
   // in-app chime (playSuccessChime) is the ONLY sound — gated by the
   // existing soundEnabled setting, exactly like all other UI feedback.
+  // Registered ONCE per hook lifecycle (#542): the callback reads the
+  // latest capability map / openAlarm / soundEnabled through refs.
   useEffect(() => {
     registerDoseReceivedHandler((medicationId, doseId) => {
       // interactive alarm requires explicit doseSchedule doseId.
       if (!doseId || !String(doseId).trim()) return;
-      if (allowManualTakeActionByMedicationId.get(medicationId) === false) {
+      if (manualTakeCapabilityRef.current.get(medicationId) === false) {
         return;
       }
-      openAlarm(medicationId, String(doseId).trim());
-      if (soundEnabled) playSuccessChime();
+      openAlarmRef.current(medicationId, String(doseId).trim());
+      if (soundEnabledRef.current) playSuccessChime();
     });
     return () => registerDoseReceivedHandler(null);
-  }, [openAlarm, soundEnabled, allowManualTakeActionByMedicationId]);
+  }, []);
   // ─────────────────────────────────────────────────────────────
   // App-resume handler: re-check exact-alarm permission when the app
   // returns to the foreground. The user may have just granted/denied
@@ -104,7 +126,8 @@ export function useNativeActionHandlers(opts: {
   // criticalAlarmResumeTick → useCriticalAlarmScheduler re-runs and
   // verifies each matching claim against the platform's actual pending
   // notifications, re-arming any alarm the OS dropped (exact-alarm
-  // permission revoked, scheduled notification removed, …).
+  // permission revoked, scheduled notification removed, …) — and the
+  // same event fans out to foreground Critical Stock delivery (#505).
   //
   // …and the DOSE reminders: every resume bumps doseAlarmResumeTick →
   // useDoseReminderScheduler's consumption-suppression effect re-runs,
@@ -114,6 +137,10 @@ export function useNativeActionHandlers(opts: {
   // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     registerAppResumeHandler((isActive) => {
+      // Fan out to independent event-driven consumers (foreground Critical
+      // Stock reconciliation, future lifecycle listeners). The native
+      // listener itself stays single-slot and mount-lifetime here.
+      publishAppResumeEvent({ isActive });
       // Always bump the lifecycle tick on BOTH foreground and background
       // transitions so useDoseReminderScheduler re-arms all pending dose
       // reminders on the correct channel (silent foreground / system-sound
@@ -137,20 +164,42 @@ export function useNativeActionHandlers(opts: {
           .catch((err) => {
             console.warn('[App] Resume exact-alarm re-check failed:', err);
           });
+        // #487 + #482: explicit capability concepts — the platform grant,
+        // each Dose Reminder channel's health, and the persisted FEATURE
+        // preference are distinct states. An UNKNOWN channel state (transient
+        // native error) never flips the user's preference to disabled; only
+        // a real OS denial ('disabled') can.
         Promise.all([
           getNotificationPermission(),
-          isNotificationChannelEnabled(DOSE_REMINDER_CHANNEL_ID),
-          isNotificationChannelEnabled(DOSE_REMINDER_FOREGROUND_CHANNEL_ID),
+          getNotificationChannelState(DOSE_REMINDER_CHANNEL_ID),
+          getNotificationChannelState(DOSE_REMINDER_FOREGROUND_CHANNEL_ID),
+          readStorageItem(NOTIFICATIONS_KEY),
         ])
-          .then(([permission, backgroundChannel, foregroundChannel]) => {
-            const storedPreference = localStorage.getItem(NOTIFICATIONS_KEY);
-            const desired = storedPreference === null || storedPreference === 'true';
+          .then(([permission, backgroundChannel, foregroundChannel, storedPreference]) => {
+            const platformNotificationsGranted = permission === 'granted';
+            // Unknown channel capability must not disable a valid preference.
+            const doseNotificationChannelsHealthy =
+              backgroundChannel !== 'disabled' && foregroundChannel !== 'disabled';
+            const channelStateKnown =
+              backgroundChannel !== 'unknown' && foregroundChannel !== 'unknown';
+            const persistedPreferenceUnset = !storedPreference.ok || storedPreference.value === null;
+            const doseNotificationsEnabled =
+              persistedPreferenceUnset || storedPreference.value === 'true';
+            if (persistedPreferenceUnset) {
+              // Preference not persisted yet — publish the computed state.
+              setNotificationsEnabled(
+                platformNotificationsGranted && doseNotificationChannelsHealthy
+              );
+              return;
+            }
             setNotificationsEnabled(
-              desired
-                && permission === 'granted'
-                && backgroundChannel
-                && foregroundChannel
+              doseNotificationsEnabled
+                && platformNotificationsGranted
+                && doseNotificationChannelsHealthy
             );
+            if (!channelStateKnown) {
+              console.warn('[App] Resume channel capability unknown; preference preserved.');
+            }
           })
           .catch((err) => {
             console.warn('[App] Resume notification capability re-check failed:', err);

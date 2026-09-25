@@ -252,7 +252,7 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
       actualDeducted: 2,
     });
 
-    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    const applied = applyExactAutoEventToMedication(med, e, [], new Date());
     expect(applied.ok).toBe(true);
     if (applied.ok) {
       // Native has already moved 10 -> 8; JS must not perform 8 -> 6.
@@ -277,7 +277,7 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
       calendarDate: '2026-09-14',
       amount: 1,
     });
-    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    const applied = applyExactAutoEventToMedication(med, e, [], new Date());
     expect(applied.ok).toBe(true);
     if (applied.ok) {
       // Only one of two slots consumed → lastConsumedDate unchanged
@@ -309,7 +309,7 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
       calendarDate: '2026-09-14',
       amount: 2,
     });
-    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    const applied = applyExactAutoEventToMedication(med, e, [], new Date());
     expect(applied.ok).toBe(true);
     if (applied.ok) {
       // event.amount (2) is authoritative, NOT dailyDose (1).
@@ -346,7 +346,7 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
       calendarDate: '2026-09-14',
       amount: 2,
     });
-    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    const applied = applyExactAutoEventToMedication(med, e, [], new Date());
     expect(applied.ok).toBe(true);
     if (applied.ok) {
       // event.amount (2) authoritative, NOT dailyDose (2 here, but the point
@@ -378,7 +378,7 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
       calendarDate: '2026-09-14',
       amount: 2,
     });
-    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    const applied = applyExactAutoEventToMedication(med, e, [], new Date());
     expect(applied.ok).toBe(true);
     if (applied.ok) {
       // 10 − event.amount(2) = 8, NOT 10 − dailyDose(5) = 5.
@@ -399,7 +399,7 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
       calendarDate: '2026-09-14',
       amount: 1,
     });
-    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    const applied = applyExactAutoEventToMedication(med, e, [], new Date());
     expect(applied.ok).toBe(true);
     if (applied.ok) {
       expect(applied.updatedMed.currentPills).toBe(9);
@@ -421,7 +421,7 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
       calendarDate: '2026-09-14',
       amount: 1,
     });
-    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    const applied = applyExactAutoEventToMedication(med, e, [], new Date());
     expect(applied.ok).toBe(false);
     if (!applied.ok) {
       expect(applied.reason).toBe('invalid_dose_id');
@@ -447,7 +447,7 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
       calendarDate: '2026-09-14',
       amount: 1,
     });
-    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    const applied = applyExactAutoEventToMedication(med, e, [], new Date());
     expect(applied.ok).toBe(true);
     if (applied.ok) {
       expect(applied.updatedMed.lastConsumedDate).toBe('2026-09-14');
@@ -472,7 +472,7 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
       calendarDate: '2026-09-14',
       amount: 1,
     });
-    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    const applied = applyExactAutoEventToMedication(med, e, [], new Date());
     expect(applied.ok).toBe(true);
     if (applied.ok) {
       // 10 − event.amount(1) = 9, NOT 10 − schedule amount(3) = 7.
@@ -503,7 +503,7 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
       calendarDate: '2026-09-13',
       amount: 2,
     });
-    const applied = applyExactAutoEventToMedication(med, e, new Date());
+    const applied = applyExactAutoEventToMedication(med, e, [], new Date());
     expect(applied.ok).toBe(true);
     if (applied.ok) {
       // Only the FIRED occurrence's amount (2). No sibling d2, no days
@@ -533,8 +533,8 @@ describe('applyExactAutoEventToMedication — FIRED occurrence is durable; event
       calendarDate: '2026-09-14',
       amount: 2,
     });
-    const r1 = applyExactAutoEventToMedication(recent, e, new Date());
-    const r2 = applyExactAutoEventToMedication(old, e, new Date());
+    const r1 = applyExactAutoEventToMedication(recent, e, [], new Date());
+    const r2 = applyExactAutoEventToMedication(old, e, [], new Date());
     expect(r1.ok).toBe(true);
     expect(r2.ok).toBe(true);
     if (r1.ok && r2.ok) {

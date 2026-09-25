@@ -10,8 +10,16 @@
  */
 
 import type { ConsumptionLog, Medication } from '../types';
-import { loadJson, loadString, persist } from './storage';
+import {
+  isValidConsumptionLogRecord,
+  isValidMedicationRecord,
+  loadString,
+  persist,
+  readJsonOutcome,
+  type JsonParserVerdict,
+} from './storage';
 import { persistLastAppliedMutationSeq } from './stockMutationOrdering';
+import { pruneConsumptionLogs } from './pruneDoseConsumption';
 
 export const STORAGE_MEDS_KEY = 'android_med_tracker_items_v2';
 export const STORAGE_LOGS_KEY = 'android_med_tracker_logs_v2';
@@ -57,12 +65,39 @@ export function loadDurableGlobalAutoDeductEnabled(): boolean {
   return loadString(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true') !== 'false';
 }
 
+/** Runtime-validated medication-list parser for durable stock reads (#477). */
+function parseMedicationList(raw: unknown): JsonParserVerdict<Medication[]> {
+  return Array.isArray(raw) && raw.every(isValidMedicationRecord)
+    ? { ok: true, value: raw }
+    : { ok: false, reason: 'medication_list_shape_invalid' };
+}
+
+/** Runtime-validated consumption-log parser for durable stock reads (#477). */
+function parseConsumptionLogs(raw: unknown): JsonParserVerdict<ConsumptionLog[]> {
+  return Array.isArray(raw) && raw.every(isValidConsumptionLogRecord)
+    ? { ok: true, value: raw }
+    : { ok: false, reason: 'consumption_log_shape_invalid' };
+}
+
 export function loadDurableAutoStockState(): AutoStockDurableState {
-  const meds = loadJson<Medication[] | null>(STORAGE_MEDS_KEY, null);
-  const logs = loadJson<ConsumptionLog[] | null>(STORAGE_LOGS_KEY, null);
+  // Durable Auto-owned state is a trusted reconciliation input: malformed
+  // records are surfaced as explicit invalid outcomes (diagnosable) instead
+  // of silently collapsing into an authoritative empty snapshot.
+  const meds = readJsonOutcome(STORAGE_MEDS_KEY, parseMedicationList);
+  const logs = readJsonOutcome(STORAGE_LOGS_KEY, parseConsumptionLogs);
+  if (meds.status === 'invalid' || meds.status === 'read_failed') {
+    console.warn(
+      `[auto-stock] durable medication state unusable (${meds.status}: ${'reason' in meds ? meds.reason : ''}); failing closed.`
+    );
+  }
+  if (logs.status === 'invalid' || logs.status === 'read_failed') {
+    console.warn(
+      `[auto-stock] durable log state unusable (${logs.status}: ${'reason' in logs ? logs.reason : ''}); failing closed.`
+    );
+  }
   return {
-    medications: Array.isArray(meds) ? meds : [],
-    logs: Array.isArray(logs) ? logs : [],
+    medications: meds.status === 'ok' ? meds.value : [],
+    logs: logs.status === 'ok' ? logs.value : [],
     globalAutoDeductEnabled: loadDurableGlobalAutoDeductEnabled(),
   };
 }
@@ -89,9 +124,12 @@ export function commitDurableAutoStockState(
   state: AutoStockDurableState,
   opts?: CommitDurableOptions
 ): string | null {
+  // Centralized durable-history retention (#507): every meds+logs commit
+  // prunes the consumption log to its documented bounded window.
+  const logs = pruneConsumptionLogs(state.logs);
   const medErr = persist(STORAGE_MEDS_KEY, state.medications, { json: true });
   if (medErr) return medErr;
-  const logErr = persist(STORAGE_LOGS_KEY, state.logs, { json: true });
+  const logErr = persist(STORAGE_LOGS_KEY, logs, { json: true });
   if (logErr) return logErr;
   if (state.globalAutoDeductEnabled != null) {
     const globalErr = persist(

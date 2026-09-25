@@ -1,7 +1,7 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import {
   NativeBoundaryError,
-  classifyNativeError,
+  nativeFailureErrorCode,
   toNativeBoundaryError,
   type NativeBoundaryFailure,
 } from './nativeErrors';
@@ -116,7 +116,7 @@ export async function scheduleDoseReminderNative(
   });
   if (!result?.ok) {
     const message = result?.error || 'dose_reminder_schedule_failed';
-    throw new NativeBoundaryError(classifyNativeError(message), message);
+    throw new NativeBoundaryError(nativeFailureErrorCode(result, 'dose_reminder_schedule_failed'), message);
   }
 }
 
@@ -131,7 +131,7 @@ export async function cancelDoseReminderNative(
   });
   if (result?.ok !== true) {
     const message = result?.error || 'dose_reminder_cancel_failed';
-    throw new NativeBoundaryError(classifyNativeError(message), message);
+    throw new NativeBoundaryError(nativeFailureErrorCode(result, 'dose_reminder_cancel_failed'), message);
   }
 }
 
@@ -160,7 +160,7 @@ export async function scheduleDoseSnoozeNative(
   });
   if (!result?.ok) {
     const message = result?.error || 'dose_snooze_schedule_failed';
-    throw new NativeBoundaryError(classifyNativeError(message), message);
+    throw new NativeBoundaryError(nativeFailureErrorCode(result, 'dose_snooze_schedule_failed'), message);
   }
 }
 
@@ -177,7 +177,7 @@ export async function cancelDoseSnoozeNative(
     const message =
       result?.error || 'dose_snooze_cancel_failed';
     throw new NativeBoundaryError(
-      classifyNativeError(message),
+      nativeFailureErrorCode(result, 'dose_snooze_cancel_failed'),
       message
     );
   }

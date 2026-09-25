@@ -11,7 +11,11 @@ import {
 } from './notifications/notificationPermissions';
 import { getExactAlarmPermission, type ExactAlarmPermission } from './exactAlarm';
 import { initNativeBridge } from '../native';
-import { isNotificationChannelEnabled, retryPersistedNotificationDeliveries } from './notificationRuntime';
+import {
+  ensureNotificationChannel,
+  getNotificationChannelState,
+  retryPersistedNotificationDeliveries,
+} from './notificationRuntime';
 import {
   DOSE_REMINDER_CHANNEL_ID,
   DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
@@ -19,10 +23,11 @@ import {
 import {
   isValidConsumptionLogRecord,
   isValidMedicationRecord,
-  loadJson,
   loadString,
   persist,
+  readJsonOutcome,
   readStorageItem,
+  type JsonParserVerdict,
 } from './storage';
 import { convergeAutoDeductionStock } from './autoDeductionNativeStock';
 import {
@@ -58,6 +63,40 @@ export interface PersistedAppHydrationState {
   isFirstEverOpen: boolean;
   loadedMedications: Medication[];
   shouldShowAutoDeductPrompt: boolean;
+}
+
+/**
+ * Runtime-validated pharmacy-settings parser for durable reads (#477).
+ * Validates the persisted object shape explicitly — the boundary never
+ * hands back a bare generic cast of unvalidated durable data.
+ */
+function parsePharmacySettings(
+  raw: unknown
+): JsonParserVerdict<Partial<PharmacySettings>> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, reason: 'pharmacy_settings_shape_invalid' };
+  }
+  const candidate = raw as Record<string, unknown>;
+  const arrayFields = [
+    'pharmacies',
+    'whatsappContacts',
+    'whatsappAddresses',
+    'selectedWhatsappContactIds',
+    'selectedWhatsappAddressIds',
+  ] as const;
+  for (const field of arrayFields) {
+    const value = candidate[field];
+    if (value !== undefined && !Array.isArray(value)) {
+      return { ok: false, reason: `pharmacy_${field}_not_array` };
+    }
+  }
+  if (
+    candidate.defaultDurationDays !== undefined &&
+    candidate.defaultDurationDays !== 60
+  ) {
+    return { ok: false, reason: 'pharmacy_default_duration_invalid' };
+  }
+  return { ok: true, value: raw as Partial<PharmacySettings> };
 }
 
 /**
@@ -98,30 +137,44 @@ export function loadPersistedAppState(
   if (isFirstEverOpen) {
     setters.setIsFirstRun(true);
   } else {
-    const parsed = loadJson<unknown>(STORAGE_MEDS_KEY, null);
-    if (Array.isArray(parsed)) {
-      const validMedications = parsed.filter(isValidMedicationRecord);
-      if (validMedications.length !== parsed.length) {
-        console.warn('[App] Ignored malformed persisted medication records during hydration.');
-      }
-      loadedMedications = validMedications;
+    // Hydration distinguishes missing vs invalid vs unreadable durable state.
+    // A corrupt medication snapshot is never treated as an authoritative
+    // empty list — startup proceeds fail-safe with a loud diagnostic.
+    const medsOutcome = readJsonOutcome(STORAGE_MEDS_KEY, (raw) =>
+      Array.isArray(raw) && raw.every(isValidMedicationRecord)
+        ? { ok: true, value: raw }
+        : { ok: false, reason: 'medication_snapshot_shape_invalid' }
+    );
+    if (medsOutcome.status === 'ok') {
+      loadedMedications = medsOutcome.value;
+    } else if (medsOutcome.status === 'invalid' || medsOutcome.status === 'read_failed') {
+      console.warn(
+        `[App] Persisted medication state unusable (${medsOutcome.status}: ${medsOutcome.reason}); starting fail-safe.`
+      );
     }
   }
 
-  const savedLogs = loadJson<unknown>(STORAGE_LOGS_KEY, null);
-  if (Array.isArray(savedLogs)) {
-    const validLogs = savedLogs.filter(isValidConsumptionLogRecord);
-    if (validLogs.length !== savedLogs.length) {
-      console.warn('[App] Ignored malformed persisted consumption-log records during hydration.');
-    }
-    setters.setLogs(validLogs);
-  }
-
-  const parsedPharmacy = loadJson<Partial<PharmacySettings> | null>(
-    STORAGE_PHARMACY_KEY,
-    null
+  const logsOutcome = readJsonOutcome(STORAGE_LOGS_KEY, (raw) =>
+    Array.isArray(raw) && raw.every(isValidConsumptionLogRecord)
+      ? { ok: true, value: raw }
+      : { ok: false, reason: 'consumption_log_shape_invalid' }
   );
-  if (parsedPharmacy && typeof parsedPharmacy === 'object') {
+  if (logsOutcome.status === 'ok') {
+    setters.setLogs(logsOutcome.value);
+  } else if (logsOutcome.status === 'invalid' || logsOutcome.status === 'read_failed') {
+    console.warn(
+      `[App] Persisted consumption-log state unusable (${logsOutcome.status}: ${logsOutcome.reason}); starting fail-safe.`
+    );
+  }
+
+  const pharmacyOutcome = readJsonOutcome(STORAGE_PHARMACY_KEY, parsePharmacySettings);
+  const parsedPharmacy = pharmacyOutcome.status === 'ok' ? pharmacyOutcome.value : null;
+  if (pharmacyOutcome.status === 'invalid' || pharmacyOutcome.status === 'read_failed') {
+    console.warn(
+      `[App] Persisted pharmacy settings unusable (${pharmacyOutcome.status}); keeping defaults.`
+    );
+  }
+  if (parsedPharmacy) {
     const pharmacies = Array.isArray(parsedPharmacy.pharmacies)
       ? parsedPharmacy.pharmacies
       : [];
@@ -277,16 +330,42 @@ export async function initializeNativeRuntime(
   await initNativeBridge();
   void retryPersistedNotificationDeliveries();
 
+  // #503: bootstrap the required Dose Reminder channels BEFORE their
+  // existence is used as a scheduling gate. Notification Runtime owns
+  // channel creation; Dose Reminder owns its channel descriptors. On a
+  // clean install the channels are created deterministically here, so a
+  // valid persisted preference is never flipped to disabled merely because
+  // the channels did not exist yet. A genuinely disabled channel or an OS
+  // notification denial still reports 'disabled' after bootstrap.
+  await Promise.all([
+    ensureNotificationChannel({
+      channelId: DOSE_REMINDER_CHANNEL_ID,
+      channelName: DOSE_REMINDER_CHANNEL_ID,
+      channelImportance: 4,
+    }),
+    ensureNotificationChannel({
+      channelId: DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+      channelName: DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
+      channelImportance: 2,
+    }),
+  ]).catch((err) => {
+    console.warn('[App] Dose Reminder channel bootstrap failed:', err);
+  });
+
   const [backgroundChannel, foregroundChannel] = await Promise.all([
-    isNotificationChannelEnabled(DOSE_REMINDER_CHANNEL_ID),
-    isNotificationChannelEnabled(DOSE_REMINDER_FOREGROUND_CHANNEL_ID),
+    getNotificationChannelState(DOSE_REMINDER_CHANNEL_ID),
+    getNotificationChannelState(DOSE_REMINDER_FOREGROUND_CHANNEL_ID),
   ]);
 
   const savedPreference = readStorageItem(NOTIFICATIONS_KEY);
+  // #482: only a REAL OS denial ('disabled') may flip the persisted
+  // preference off. An 'unknown' capability state (transient native error)
+  // leaves the user's preference untouched. (#503 adds channel bootstrap
+  // before this gate so a missing channel is created, not treated as denial.)
   if (
     savedPreference.ok
     && savedPreference.value === 'true'
-    && (!backgroundChannel || !foregroundChannel)
+    && (backgroundChannel === 'disabled' || foregroundChannel === 'disabled')
   ) {
     setNotificationsEnabled(false);
   }

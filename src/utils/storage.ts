@@ -10,7 +10,10 @@
  *   error-surfacing writers (differed only by JSON.stringify).
  *
  * This module consolidates all of them:
- * - `loadJson` / `loadString`: silent readers (return fallback on error).
+ * - `readJsonOutcome` / `loadValidatedJson`: runtime-validated readers —
+ *   persisted data is parsed AND validated at the storage boundary, with
+ *   explicit missing/invalid/read_failed outcomes (no blind generic casts).
+ * - `loadString`: raw string reader (returns fallback on error).
  * - `saveJson` / `saveString`: failure-aware writers (return null on success or an error message on failure).
  * - `saveJsonBestEffort` / `saveStringBestEffort`: explicitly silent writers for non-critical preferences only.
  * - `persist`: error-surfacing writer (returns null on success or an
@@ -19,6 +22,9 @@
  */
 import { STORAGE_ERRORS } from '../constants/uiStrings';
 import type { ConsumptionLog, Medication } from '../types';
+import { validateMedicationDose } from './doseIdentity';
+import { isValidTimeHhmm } from './time';
+import { isValidCalendarDateString } from './date/calendarPrimitives';
 export type StorageReadResult =
   | { ok: true; value: string | null }
   | { ok: false; value: null };
@@ -45,18 +51,9 @@ function isOptionalString(value: unknown): boolean {
 }
 
 function isDoseRecord(value: unknown): boolean {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const dose = value as Record<string, unknown>;
-  return (
-    isNonEmptyString(dose.id) &&
-    isFiniteNumber(dose.amount) &&
-    dose.amount > 0 &&
-    typeof dose.time === 'string' &&
-    /^\\d{2}:\\d{2}$/.test(dose.time) &&
-    Number(dose.time.slice(0, 2)) < 24 &&
-    Number(dose.time.slice(3, 5)) < 60 &&
-    isOptionalString(dose.description)
-  );
+  // Canonical domain dose-row validation (id + HH:mm + amount + optional
+  // description) — the SAME contract the scheduling features consume.
+  return validateMedicationDose(value).ok;
 }
 
 function isHistoryMap(value: unknown): boolean {
@@ -95,9 +92,7 @@ export function isValidMedicationRecord(value: unknown): value is Medication {
     if (current !== undefined && (!isFiniteNumber(current) || current <= 0)) return false;
   }
   if (medication.reminderEnabled !== undefined && typeof medication.reminderEnabled !== 'boolean') return false;
-  if (medication.reminderTime !== undefined && (
-    typeof medication.reminderTime !== 'string' || !/^\\d{2}:\\d{2}$/.test(medication.reminderTime)
-  )) return false;
+  if (medication.reminderTime !== undefined && !isValidTimeHhmm(medication.reminderTime)) return false;
   if (medication.criticalStockAlertsEnabled !== undefined && typeof medication.criticalStockAlertsEnabled !== 'boolean') return false;
   if (medication.dosesPerDay !== undefined && !Number.isInteger(medication.dosesPerDay)) return false;
   if (medication.doseSchedule !== undefined && (
@@ -121,7 +116,7 @@ export function isValidConsumptionLogRecord(value: unknown): value is Consumptio
     typeof log.type === 'string' && CONSUMPTION_LOG_TYPES.has(log.type as ConsumptionLog['type']) &&
     isFiniteNumber(log.amount) &&
     typeof log.date === 'string' &&
-    /^\\d{4}-\\d{2}-\\d{2}$/.test(log.date) &&
+    isValidCalendarDateString(log.date) &&
     isNonEmptyString(log.timestamp) &&
     typeof log.description === 'string' &&
     isOptionalString(log.reversedAt) &&
@@ -131,17 +126,98 @@ export function isValidConsumptionLogRecord(value: unknown): value is Consumptio
 }
 
 /**
- * Read and JSON.parse a localStorage value. Returns `fallback` if the key
- * is absent or parsing fails. Never throws.
+ * Explicit outcome of a validated durable JSON read.
+ * `missing` is a legitimately empty key; `invalid` means the stored payload
+ * exists but does not satisfy the reader (corruption/foreign shape);
+ * `read_failed` means storage itself could not be read.
+ * Consumers must never collapse `invalid`/`read_failed` into an authoritative
+ * empty snapshot — durable-state reconciliation fails closed instead.
  */
-export function loadJson<T>(key: string, fallback: T): T {
+export type StorageJsonOutcome<T> =
+  | { status: 'ok'; value: T }
+  | { status: 'missing' }
+  | { status: 'invalid'; reason: string }
+  | { status: 'read_failed'; reason: string };
+
+/**
+ * Explicit parser verdict for the validated-read boundary (#477).
+ *
+ * The parser — not a null sentinel — owns the validity decision:
+ * - `{ ok: true, value }` is a VALIDATED value. `value` may be `null` when
+ *   the reader's contract accepts a stored null as legitimate data; the
+ *   storage boundary preserves it as `{ status: 'ok', value: null }`.
+ * - `{ ok: false, reason }` is an explicit shape rejection with a
+ *   machine-readable reason surfaced on the `invalid` outcome.
+ *
+ * Returning `null`/`undefined` from a parser is a CONTRACT ERROR and is
+ * treated as a shape rejection (never as valid data) — this keeps a generic
+ * TypeScript cast from smuggling unvalidated durable values through the
+ * boundary. TypeScript generics are never a substitute for runtime
+ * validation here: a `T` annotation alone does not make a stored payload
+ * trusted; only an explicit `{ ok: true }` verdict does.
+ */
+export type JsonParserVerdict<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: string };
+
+/**
+ * Read + JSON.parse + runtime-validate a localStorage value.
+ * The parser is the ONLY way a caller obtains a typed value: persisted data
+ * is validated at the storage boundary instead of trusting a TypeScript
+ * generic. Never throws.
+ *
+ * Outcome contract (#477):
+ * - missing key → `missing`;
+ * - malformed JSON → `invalid` (json_parse_failed);
+ * - rejected shape → `invalid` (parser's reason);
+ * - storage read failure → `read_failed`;
+ * - validated value — INCLUDING a legitimate null — → `ok`.
+ */
+export function readJsonOutcome<T>(
+  key: string,
+  parse: (raw: unknown) => JsonParserVerdict<T>
+): StorageJsonOutcome<T> {
   const result = readStorageItem(key);
-  if (!result.ok || result.value == null) return fallback;
-  try {
-    return JSON.parse(result.value) as T;
-  } catch {
-    return fallback;
+  if (!result.ok) {
+    return { status: 'read_failed', reason: 'storage_read_failed' };
   }
+  if (result.value == null) return { status: 'missing' };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(result.value);
+  } catch {
+    return { status: 'invalid', reason: 'json_parse_failed' };
+  }
+  const parsed = parse(raw);
+  if (parsed == null || typeof parsed !== 'object') {
+    // A parser that ignores the verdict contract (returns null/undefined or
+    // a bare value) is a caller bug: fail closed instead of trusting it.
+    return { status: 'invalid', reason: 'shape_validation_failed' };
+  }
+  return parsed.ok
+    ? { status: 'ok', value: parsed.value }
+    : { status: 'invalid', reason: parsed.reason || 'shape_validation_failed' };
+}
+
+/**
+ * Convenience wrapper over {@link readJsonOutcome} for non-critical reads:
+ * missing → fallback; invalid/read_failed → fallback + a diagnostic warning
+ * so corruption stays observable. Trusted-snapshot consumers should use
+ * {@link readJsonOutcome} directly and handle each outcome explicitly.
+ */
+export function loadValidatedJson<T>(
+  key: string,
+  parse: (raw: unknown) => JsonParserVerdict<T>,
+  fallback: T
+): T {
+  const outcome = readJsonOutcome(key, parse);
+  if (outcome.status === 'ok') return outcome.value;
+  if (outcome.status === 'invalid' || outcome.status === 'read_failed') {
+    console.warn(
+      `[storage] validated read of "${key}" failed (${outcome.status}: ${outcome.reason}); using fallback.`
+    );
+  }
+  return fallback;
 }
 /**
  * Read a raw string from localStorage. Returns `fallback` if the key is

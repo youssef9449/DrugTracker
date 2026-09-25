@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 /**
  * Issue #267 regression tests — manual stock mutations have no
@@ -134,7 +135,7 @@ describe('#267 regression 12 — Multiple dose isolation', () => {
       getOccurrenceSnapshot: async () => ({ ok: true, status: 'ABSENT' }),
     });
     expect(take.outcome).toBe('applied');
-    const pillsAfterD1 = durable.medications[0].currentPills;
+    const pillsAfterD1 = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
     expect(pillsAfterD1).toBe(29); // 30 - 1 (d1)
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
     expect(isDoseConsumedOnDate(durable.medications[0], 'd2', TODAY)).toBe(false);
@@ -159,7 +160,7 @@ describe('#267 regression 12 — Multiple dose isolation', () => {
       saveEnvelope: () => null,
     });
     expect(recon.details[0]?.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBe(pillsAfterD1 - 1); // 28 (d2 deducted 1)
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterD1 - 1); // 28 (d2 deducted 1)
     expect(isDoseConsumedOnDate(durable.medications[0], 'd2', TODAY)).toBe(true);
   });
 
@@ -217,7 +218,7 @@ describe('#267 regression 13 — manual mutations do not perform elapsed-day set
       makeLogId: () => 'refill-1',
     });
     expect(r.outcome).toBe('applied');
-    expect(r.medications[0].currentPills).toBe(30);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(30);
   });
 
   it('runGatedUndoRefill reverses only the refill amount', async () => {
@@ -231,7 +232,7 @@ describe('#267 regression 13 — manual mutations do not perform elapsed-day set
       makeLogId: () => 'refill-undo-1',
     });
     expect(r.outcome).toBe('applied');
-    expect(r.medications[0].currentPills).toBe(20);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(20);
   });
 
   it('runGatedAutoDeductToggle flips the flag without inventing stock from elapsed days', async () => {
@@ -245,7 +246,7 @@ describe('#267 regression 13 — manual mutations do not perform elapsed-day set
       todayStr: TODAY,
     });
     expect(r.outcome).toBe('applied');
-    expect(r.medications[0].currentPills).toBe(30);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(30);
   });
 
   it('runGatedMedicationUpdate preserves currentPills (config-only edit)', async () => {
@@ -270,7 +271,7 @@ describe('#267 regression 13 — manual mutations do not perform elapsed-day set
       todayStr: TODAY,
     });
     expect(r.outcome).toBe('applied');
-    expect(r.medications[0].currentPills).toBe(30);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(30);
   });
 });
 
@@ -298,7 +299,7 @@ describe('#267 regression 14 — No pure-projection Restore', () => {
     expect(r.outcome).toBe('rejected');
     expect(r.reason).toBe('missing_deduction_evidence');
     // Stock unchanged (no projection-only restore).
-    expect(durable.medications[0].currentPills).toBe(30);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(30);
     // No restore log was created.
     expect(durable.logs.some((l) => l.id === 'restore-1')).toBe(false);
   });

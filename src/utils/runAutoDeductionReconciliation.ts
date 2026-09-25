@@ -426,10 +426,17 @@ async function runOnce(
   // original `fresh` snapshot is now stale. Re-read it after envelope recovery
   // and before creating/committing any new Exact-Auto mutation envelope.
   const durableGlobalAutoDeductEnabled = loadDurableGlobalAutoDeductEnabled();
-  const result = reconcileFiredEvents(baseMeds, baseLogs, repairedEvents, {
-    globalAutoDeductEnabled: durableGlobalAutoDeductEnabled,
-    now: input.now,
-  });
+  const result = reconcileFiredEvents(
+    baseMeds,
+    baseLogs,
+    repairedEvents,
+    input.now === undefined
+      ? { globalAutoDeductEnabled: durableGlobalAutoDeductEnabled }
+      : {
+          globalAutoDeductEnabled: durableGlobalAutoDeductEnabled,
+          now: input.now,
+        }
+  );
   if (!result.mutated && result.toAcknowledge.length === 0) {
     return {
       ...result,

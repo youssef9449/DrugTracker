@@ -174,7 +174,7 @@ describe('SelectDoseModal', () => {
     expect(onSelect).toHaveBeenCalledWith('med-multi', 'd1');
   });
 
-  it('disables past doses (time elapsed today) and marks them auto-deducted with checked checkbox', () => {
+  it('keeps past doses manually selectable regardless of Auto state when not consumed', () => {
     vi.setSystemTime(new Date(2026, 8, 13, 12, 0, 0));
     const onSelect = vi.fn();
     render(
@@ -192,10 +192,10 @@ describe('SelectDoseModal', () => {
       .getAllByRole('button')
       .find((btn) => btn.getAttribute('data-dose-id') === 'd2');
 
-    expect(d1Btn).toBeDisabled();
-    expect(d1Btn).toHaveTextContent('خصم تلقائي');
+    expect(d1Btn).toBeEnabled();
+    expect(d1Btn).toHaveTextContent('تناول الجرعة');
     fireEvent.click(d1Btn!);
-    expect(onSelect).not.toHaveBeenCalled();
+    expect(onSelect).toHaveBeenCalledWith('med-multi', 'd1');
 
     expect(d2Btn).toBeEnabled();
     expect(d2Btn).toHaveTextContent('اختيار');

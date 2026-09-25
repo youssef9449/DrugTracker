@@ -75,6 +75,9 @@ jobs:
       - name: Generate a clean Capacitor Android project
         run: npx cap add android
 
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
       - name: Prepare repository-owned Android integration
         run: node scripts/prepare-android.mjs
 

@@ -369,6 +369,28 @@ export function prepareAndroidProject() {
     }
   }
 
+  const mainActivitySource = path.join(root, 'native-android', 'app', 'MainActivity.java');
+  const mainActivityDestination = path.join(
+    androidDir,
+    'app',
+    'src',
+    'main',
+    'java',
+    'app',
+    'drugtracker',
+    'MainActivity.java'
+  );
+  if (!fs.existsSync(mainActivitySource)) {
+    fail('missing repository-owned MainActivity source: ' + mainActivitySource);
+  }
+  fs.copyFileSync(mainActivitySource, mainActivityDestination);
+  console.info(
+    '[prepare-android] Installed ' +
+      path.relative(root, mainActivitySource) +
+      ' → ' +
+      path.relative(root, mainActivityDestination)
+  );
+
   syncJavaSourceSet(
     path.join(root, 'native-android', 'notification-runtime'),
     path.join(

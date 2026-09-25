@@ -37,8 +37,8 @@ export interface SelectDoseModalProps {
   onSelect: (medicationId: string, doseId: string) => void;
   /** Restore action in manage mode (falls back to onSelect if omitted). */
   onRestore?: (medicationId: string, doseId: string) => void;
-  /** Global Auto-Deduction toggle (defaults to true). Effective auto state
-   *  is isMedicationAutoDeductActive(medication) — med-level only. */
+  /** Global Auto kill switch; preserves medication.autoDeductEnabled. */
+  globalAutoDeductEnabled?: boolean | undefined;
   /** Durable stock logs used to classify source and show historical amounts. */
   logs?: ConsumptionLog[];
   onClose: () => void;
@@ -61,6 +61,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   onRestore,
   logs = [],
   onClose,
+  globalAutoDeductEnabled = true,
 }) => {
   if (!medication) return null;
   const today = getTodayDateString();
@@ -74,7 +75,8 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   const unit = medication.unit || 'قرص';
   const isManage = mode === 'manage';
   const isRestore = mode === 'restore';
-  const isAutoActive = isMedicationAutoDeductActive(medication);
+  const isAutoActive =
+    globalAutoDeductEnabled && isMedicationAutoDeductActive(medication);
   const title =
     isManage
       ? 'إدارة الجرعات'

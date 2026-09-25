@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 /// <reference types="@testing-library/jest-dom/vitest" />
 /**
  * Management modal stays open after Take / Restore so the user can

@@ -50,13 +50,26 @@ assert(
   'notification delivery failure must leave the one-shot durable'
 );
 assert(
-  receiver.indexOf('adapter.markOneShotDelivered(') < receiver.indexOf('adapter.completeOneShot('),
+  // Delivery-path ordering: the durable delivery evidence write happens
+  // AFTER the notification post and BEFORE the one-shot completion that
+  // consumes the schedule. The idempotent replay branch (an already-
+  // delivered one-shot is completed early, before any posting) is the one
+  // legitimate completeOneShot call that precedes markOneShotDelivered —
+  // so the delivery-path completion is located with lastIndexOf.
+  receiver.indexOf('adapter.markOneShotDelivered(')
+      > receiver.indexOf('new NotificationRuntime(appContext).post(')
+    && receiver.lastIndexOf('adapter.completeOneShot(')
+      > receiver.indexOf('adapter.markOneShotDelivered('),
   'delivery evidence must be persisted before one-shot completion'
 );
 assert(
   exactAlarm.includes('public boolean markOneShotDelivered(')
     && exactAlarm.includes('deliveryState')
-    && exactAlarm.includes('ExactAlarmOperationLock.LOCK'),
+    // The operation lock was unified into the shared runtime: evidence
+    // writes are serialized on the OperationLock class monitor and guarded
+    // by the operation-version ownership check before any durable write.
+    && exactAlarm.includes('synchronized (OperationLock.class)')
+    && exactAlarm.includes('isMetadataOwnedByOperationVersion'),
   'one-shot delivery evidence must be durable and operation-version guarded'
 );
 assert(
@@ -70,14 +83,14 @@ assert(
   'Critical scheduler claim writes must use the cross-tab failure-aware coordinator'
 );
 assert(
-  scheduler.includes('claim?.claimed && claim.alarmTime === null')
+  scheduler.includes('current?.claimed && current.alarmTime === null')
     && scheduler.includes("exactAlarmPermission === 'denied'"),
   'scheduler must respect foreground in-flight ownership and permission-denied cleanup'
 );
 assert(
-  foreground.includes('tryClaimCriticalNotification(med.id, true)')
+  foreground.includes('runWithCriticalNotificationClaim(')
     && foreground.includes('if (!sent)')
-    && foreground.includes('releaseInFlightCriticalNotificationClaim'),
+    && foreground.includes('releaseInFlightClaimIfOwned'),
   'foreground fallback must claim atomically and release on failed delivery'
 );
 assert(
@@ -93,7 +106,10 @@ assert(
 );
 assert(
   web.includes('if (!writeEntries(entries))')
-    && web.includes('return persisted && existed;'),
+    // #519: cancel reports failure when the durable state was unreadable —
+    // the platform-level cancel still ran, but the caller must not treat
+    // the state as trusted.
+    && web.includes("return read.status === 'ok' && persisted && existed;"),
   'Web schedule/cancel persistence failures must be observable'
 );
 

@@ -23,6 +23,10 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     createdAt: '2024-01-01T00:00:00.000Z',
     reminderEnabled: true,
     reminderTime: '09:00',
+    // The alarm modal is fail-closed: it renders only when doseId resolves
+    // to an explicit schedule row (no reminderTime/dailyDose fallback).
+    doseSchedule: [{ id: 'd1', amount: 1, time: '09:00' }],
+    dosesPerDay: 1,
     ...overrides,
   };
 }
@@ -199,6 +203,8 @@ describe('DoseAlarmModal', () => {
 });
 
 describe('DoseAlarmModal — medication-level stock display', () => {
+  afterEach(() => cleanup());
+
   it('Medication ON with past lastSync still shows durable currentPills (no projection)', () => {
     const med = makeMed({
       currentPills: 30,

@@ -11,19 +11,22 @@ vi.mock('@/utils/sound', () => ({
   stopAllSounds: vi.fn(),
 }));
 
-// Mock the snooze scheduler so tests don't hit Capacitor's native bridge.
-vi.mock('../utils/notificationTestFacade', async () => {
+// Mock the native snooze bridge. useDoseReminders imports these directly
+// from '@/utils/notifications/doseReminderNotifications' (the facade module
+// merely re-exports them), so the production module is the mock target.
+vi.mock('@/utils/notifications/doseReminderNotifications', async () => {
   const actual =
     await vi.importActual<
-      typeof import('../utils/notificationTestFacade')
-    >('../utils/notificationTestFacade');
+      typeof import('@/utils/notifications/doseReminderNotifications')
+    >('@/utils/notifications/doseReminderNotifications');
   return {
     ...actual,
     scheduleSnoozedDoseReminder: vi.fn().mockResolvedValue(undefined),
+    cancelSnoozedDoseReminder: vi.fn().mockResolvedValue(undefined),
   };
 });
 
-import { scheduleSnoozedDoseReminder } from '../utils/notificationTestFacade';
+import { scheduleSnoozedDoseReminder } from '@/utils/notifications/doseReminderNotifications';
 
 /** Build a medication with a reminder enabled at the given time. */
 function makeMed(overrides: Partial<Medication> = {}): Medication {
@@ -199,7 +202,12 @@ describe('useDoseReminders', () => {
         result.current.openAlarm('med-dismiss-storage-failure', 'd1');
       });
 
-      vi.spyOn(storage, 'saveJson').mockReturnValue('storage_write_failed');
+      // Spy is restored before the test ends: module-level spies would
+      // otherwise leak into later tests in this file (clearAllMocks keeps
+      // the mocked implementation), breaking every real saveJson consumer.
+      const saveJsonSpy = vi
+        .spyOn(storage, 'saveJson')
+        .mockReturnValue('storage_write_failed');
 
       let dismissed = true;
       act(() => {
@@ -210,6 +218,8 @@ describe('useDoseReminders', () => {
       expect(result.current.alarmingMedication).toEqual(
         expect.objectContaining({ id: 'med-dismiss-storage-failure' })
       );
+
+      saveJsonSpy.mockRestore();
     });
 
     it('dismissAlarm writes FIRED_KEY so the reminder does not re-fire today', () => {
@@ -228,8 +238,9 @@ describe('useDoseReminders', () => {
       const fired = JSON.parse(
         localStorage.getItem(FIRED_KEY) || '{}'
       ) as Record<string, boolean>;
-      const today = new Date().toISOString().slice(0, 10);
-      expect(fired[`med-dismiss:${today}`]).toBe(true);
+      // Fired-dedup identity is medicationId + doseId + calendarDate.
+      const today = getTodayDateString();
+      expect(fired[`med-dismiss:d1:${today}`]).toBe(true);
     });
   });
 
@@ -321,10 +332,12 @@ describe('useDoseReminders', () => {
         'Test Med',
         1,
         'قرص',
-        '09:00',
+        // doseSchedule is the sole source of the snooze re-fire time —
+        // the medication-level reminderTime is not consulted.
+        '23:59',
         15,
         'd1',
-        false,
+        true,
         undefined
       );
     });

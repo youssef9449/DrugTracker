@@ -1,17 +1,28 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 import type { Medication, ConsumptionLog } from '@/types';
 import { useStockAlerts } from '@/hooks/useStockAlerts';
 import { restoreDose, resolveRestoreDoseId } from '@/utils/medActions';
 
-vi.mock('../utils/notificationTestFacade', () => ({
+// The hook imports the production source modules directly, so the mocks
+// must be installed on those module ids (mocking the test facade would
+// not intercept production calls).
+vi.mock('@/utils/notifications/criticalStockNotifications', () => ({
   sendCriticalStockAlert: vi.fn(() => Promise.resolve(true)),
-  cancelCriticalAlarm: vi.fn(() => Promise.resolve()),
+}));
+vi.mock('@/utils/criticalAlarmScheduling', () => ({
+  cancelCriticalAlarm: vi.fn(() => Promise.resolve({ ok: true })),
 }));
 
-import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notificationTestFacade';
+import { sendCriticalStockAlert } from '@/utils/notifications/criticalStockNotifications';
+import { cancelCriticalAlarm } from '@/utils/criticalAlarmScheduling';
 import { readCriticalClaims as readClaims } from '../helpers/criticalStockClaims';
+import { installWebLocksShim, type WebLocksShimHandle } from '../helpers/webLocksShim';
+
+// #484: foreground claim acquisition requires the cross-document Web Lock;
+// tests install an explicit Web Locks test double (fail-closed without it).
+let locksShim: WebLocksShimHandle | null = null;
 
 const sendMock = vi.mocked(sendCriticalStockAlert);
 const cancelMock = vi.mocked(cancelCriticalAlarm);
@@ -29,6 +40,9 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
     autoDeductEnabled: true,
+    // The unified critical-stock policy requires the per-medication flag
+    // to be explicitly ON before any delivery decision.
+    criticalStockAlertsEnabled: true,
     doseSchedule: [
       { id: 'morning', amount: 1, time: '08:00' },
       { id: 'evening', amount: 2, time: '20:00' },
@@ -90,6 +104,7 @@ function useAlerts(medications: Medication[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  locksShim = installWebLocksShim();
   vi.useFakeTimers();
   vi.setSystemTime(TEST_NOW);
   localStorage.clear();
@@ -98,11 +113,24 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  locksShim?.uninstall();
+  locksShim = null;
   vi.useRealTimers();
 });
 
+/**
+ * Drain the claim-coordinator/delivery microtask chains (the claim
+ * acquisition is serialized through the Web Locks shim, so delivery and
+ * claim writes complete within one macrotask turn).
+ */
+const flush = async (): Promise<void> => {
+  await act(async () => {
+    await Promise.resolve();
+  });
+};
+
 describe('restore dose → critical stock reconciliation', () => {
-  it('Critical → Restore → Sufficient: exact dose restore clears the old critical claim', () => {
+  it('Critical → Restore → Sufficient: exact dose restore clears the old critical claim', async () => {
     // Start at 4 pills (after taking evening dose=2 from 6). threshold=1.
     // floor(4/3)=1 day left at threshold 1 → critical.
     // After Restore (reverses evening dose +2) → 6 → floor(6/3)=2 → sufficient.
@@ -114,6 +142,7 @@ describe('restore dose → critical stock reconciliation', () => {
     const { rerender } = renderHook(({ medications }) => useAlerts(medications), {
       initialProps: { medications: [med] },
     });
+    await flush();
 
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-restore']).toEqual({ claimed: true, alarmTime: null });
@@ -133,17 +162,19 @@ describe('restore dose → critical stock reconciliation', () => {
     );
 
     rerender({ medications: [result.updatedMed] });
+    await flush();
     expect(readClaims()['med-restore']).toBeUndefined();
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
 
-  it('Critical → Restore → Sufficient → Critical: a new episode gets exactly one new notification', () => {
+  it('Critical → Restore → Sufficient → Critical: a new episode gets exactly one new notification', async () => {
     const baseMed = makeMed({ currentPills: 6, warningThresholdDays: 1 });
     const { med, logs } = makeConsumedMed(baseMed, 'evening', TEST_DATE, 2);
 
     const { rerender } = renderHook(({ medications }) => useAlerts(medications), {
       initialProps: { medications: [med] },
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
 
     const result = restoreDose(med, 'evening', TEST_DATE, TEST_NOW, logs);
@@ -152,15 +183,17 @@ describe('restore dose → critical stock reconciliation', () => {
     expect(sufficientMed.currentPills).toBe(6);
 
     rerender({ medications: [sufficientMed] });
+    await flush();
     expect(readClaims()['med-restore']).toBeUndefined();
     expect(sendMock).toHaveBeenCalledTimes(1);
 
     // Drop back into critical for a new episode
     rerender({ medications: [{ ...sufficientMed, currentPills: 2 }] });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(2);
   });
 
-  it('Critical → Restore → Still Critical: exact restore keeps the same episode claim and sends no duplicate', () => {
+  it('Critical → Restore → Still Critical: exact restore keeps the same episode claim and sends no duplicate', async () => {
     // Start at 0 pills (after taking morning dose=1 from 1). Still critical (0 pills).
     const baseMed = makeMed({ currentPills: 1 });
     const { med, logs } = makeConsumedMed(baseMed, 'morning', TEST_DATE, 1);
@@ -169,6 +202,7 @@ describe('restore dose → critical stock reconciliation', () => {
     const { rerender } = renderHook(({ medications }) => useAlerts(medications), {
       initialProps: { medications: [med] },
     });
+    await flush();
 
     expect(sendMock).toHaveBeenCalledTimes(1);
     const originalClaim = readClaims()['med-restore'];
@@ -180,10 +214,14 @@ describe('restore dose → critical stock reconciliation', () => {
     expect(result.updatedMed.currentPills).toBe(1);
     expect(result.restoredAmount).not.toBe(med.dailyDose);
     rerender({ medications: [result.updatedMed] });
+    await flush();
 
     expect(readClaims()['med-restore']).toEqual(originalClaim);
     expect(sendMock).toHaveBeenCalledTimes(1);
-    expect(cancelMock).not.toHaveBeenCalled();
+    // After a successful foreground send the hook ALWAYS enqueues the
+    // post-send cancellation of the (possibly armed) scheduled fallback
+    // (#539) — a harmless no-op when no fallback alarm was armed, as here.
+    expect(cancelMock).toHaveBeenCalledWith('med-restore');
   });
 
   it('restores the selected multi-dose slot amount, not dailyDose', () => {
@@ -230,7 +268,7 @@ describe('restore dose → critical stock reconciliation', () => {
     expect(morningResult.restoredAmount + eveningResult.restoredAmount).toBe(3);
   });
 
-  it('multiple same-day restores remain in the same critical episode and do not duplicate notifications', () => {
+  it('multiple same-day restores remain in the same critical episode and do not duplicate notifications', async () => {
     // Start at 0 pills (after taking both morning=1 and evening=2 from 3).
     const baseMed = makeMed({ currentPills: 3 });
     const morningTake = makeDoseTakenLog(baseMed, 'morning', TEST_DATE, 1, 'take-morning');
@@ -245,6 +283,7 @@ describe('restore dose → critical stock reconciliation', () => {
     const { rerender } = renderHook(({ medications }) => useAlerts(medications), {
       initialProps: { medications: [med] },
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
 
     // Restore morning (+1) → 1. Still critical (floor(1/3)=0 ≤ 3).
@@ -252,6 +291,7 @@ describe('restore dose → critical stock reconciliation', () => {
     if (!morningResult.ok) throw new Error('Expected morning restore');
     expect(morningResult.updatedMed.currentPills).toBe(1);
     rerender({ medications: [morningResult.updatedMed] });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-restore']?.claimed).toBe(true);
 
@@ -273,6 +313,7 @@ describe('restore dose → critical stock reconciliation', () => {
     expect(eveningResult.restoredAmount).toBe(2);
 
     rerender({ medications: [eveningResult.updatedMed] });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-restore']?.claimed).toBe(true);
   });

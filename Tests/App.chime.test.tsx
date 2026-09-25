@@ -144,8 +144,10 @@ function seedMed(overrides: Record<string, unknown> = {}): void {
     localStorage.setItem('android_med_tracker_auto_deduct_v1', 'true');
     render(<App />);
     await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
-    // Global toggle is labeled for all meds
-    const globalToggle = screen.getByLabelText(/تبديل الخصم التلقائي لجميع الأدوية/);
+    // Global toggle (current header aria-label reflects state):
+    //   enabled → "الخصم التلقائي لجميع الأدوية مفعّل — انقر للإيقاف"
+    //   disabled → "الخصم التلقائي لجميع الأدوية متوقف — انقر للتفعيل"
+    const globalToggle = screen.getByLabelText(/الخصم التلقائي لجميع الأدوية/);
     fireEvent.click(globalToggle);
     // Phase 4: chime fires after the async durable gate resolves.
     await waitFor(() => expect(playSuccessChime).toHaveBeenCalledTimes(1));
@@ -157,7 +159,7 @@ function seedMed(overrides: Record<string, unknown> = {}): void {
     localStorage.setItem('android_med_tracker_auto_deduct_v1', 'false');
     render(<App />);
     await waitFor(() => expect(screen.getByText('Chime Med')).toBeInTheDocument());
-    const globalToggle = screen.getByLabelText(/تبديل الخصم التلقائي لجميع الأدوية/);
+    const globalToggle = screen.getByLabelText(/الخصم التلقائي لجميع الأدوية/);
     fireEvent.click(globalToggle);
     // Phase 4: chime fires after the async durable gate resolves.
     await waitFor(() => expect(playSuccessChime).toHaveBeenCalledTimes(1));

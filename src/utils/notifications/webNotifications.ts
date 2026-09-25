@@ -481,18 +481,24 @@ function isChromiumNotificationSettingsSupported(): boolean {
   }
 
   // There is no standard API that probes browser-internal settings URLs.
-  // Keep the fallback narrowly scoped to known Chromium signatures and
-  // never send Firefox/Safari/unknown browsers to a chrome:// URL.
+  // Keep the fallback narrowly scoped to known desktop Chromium signatures.
+  // Chrome-family UAs commonly contain the historical Safari/ token, so that
+  // token alone must NOT disqualify Chrome/Chromium.
   const ua = navigator.userAgent;
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
+  const hasChromiumSignature = /Chrome|Chromium|CriOS/i.test(ua);
+  const isKnownAlternateChromium =
+    /Edg\/|OPR\/|Brave\/|Vivaldi\/|SamsungBrowser\//i.test(ua);
+  const isFirefox = /Firefox|FxiOS/i.test(ua);
+  const isSafariWithoutChromiumSignature =
+    /Safari\//i.test(ua) && !hasChromiumSignature;
+
   return (
-    !/Android|iPhone|iPad|iPod/i.test(ua) &&
-    /Chrome|Chromium/i.test(ua) &&
-    !/Firefox|FxiOS|Safari\//i.test(ua) &&
-    !/Edg\//i.test(ua) &&
-    !/OPR\//i.test(ua) &&
-    !/Brave\//i.test(ua) &&
-    !/Vivaldi\//i.test(ua) &&
-    !/SamsungBrowser\//i.test(ua)
+    !isMobile &&
+    hasChromiumSignature &&
+    !isKnownAlternateChromium &&
+    !isFirefox &&
+    !isSafariWithoutChromiumSignature
   );
 }
 

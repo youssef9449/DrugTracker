@@ -167,7 +167,7 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     expect(second.reversedLogId).not.toBe(exactAutoLogId('med-1', 'd1', TODAY));
   });
 
-  it('consumed marker without active deduction log fails closed (no stock, no invent)', () => {
+  it('consumed marker without active deduction log → already_restored (fail closed: no stock, no invent)', () => {
     const med = makeMed({
       doseConsumptionHistory: { d1: [TODAY] },
       currentPills: 18,
@@ -185,7 +185,12 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.reason).toBe('missing_deduction_evidence');
+    // Production contract: a consumed occurrence whose active deduction is
+    // gone (already reversed / absent evidence) is idempotently
+    // already_restored — never missing_deduction_evidence, and no stock is
+    // invented.
+    expect(result.reason).toBe('already_restored');
+    expect(med.currentPills).toBe(18);
   });
 
   it('no durable deduction evidence → missing_deduction_evidence, stock unchanged', () => {
@@ -234,7 +239,11 @@ describe('restoreDose durable amount authority (Phase 4)', () => {
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.reason).toBe('missing_deduction_evidence');
+    // The doseId-less exact_auto record is NOT valid occurrence evidence, so
+    // no restore proceeds; with the consume marker still durable the
+    // production outcome is the idempotent already_restored (not
+    // missing_deduction_evidence, which requires an unconsumed occurrence).
+    expect(result.reason).toBe('already_restored');
     expect(med.currentPills).toBe(18);
   });
 });

@@ -122,7 +122,9 @@ describe('generatePharmacyOrderMessage', () => {
       { name: 'كونكور 5 مجم', quantity: 30, unit: 'قرص', packageSize: 30 },
     ]);
     expect(msg).toContain('1. كونكور 5 مجم');
-    expect(msg).toContain('30 قرص');
+    // A full package of a solid unit is ordered as one whole box
+    // (describeOrderInBoxes), not as a raw pill count.
+    expect(msg).toContain('المطلوب: علبة واحدة');
   });
 
   it('keeps an explicit mixed box + strip selection instead of recomputing from total pills', () => {
@@ -141,7 +143,7 @@ describe('generatePharmacyOrderMessage', () => {
       },
     ]);
 
-    expect(msg).toContain('1. بنادول - المطلوب: علبة واحدة و شريطان');
+    expect(msg).toContain('1. بنادول - المطلوب: علبة واحدة و شريطين');
   });
 
   it('formats a mixed box + sachet selection with the medication unit', () => {
@@ -153,7 +155,7 @@ describe('generatePharmacyOrderMessage', () => {
         ],
         'كيس'
       )
-    ).toBe('علبة واحدة و كيسان');
+    ).toBe('علبة واحدة و كيسين');
   });
 
   it('orders one full package when monthly consumption fits in one package', () => {

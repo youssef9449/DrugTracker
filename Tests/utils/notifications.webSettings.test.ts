@@ -23,9 +23,11 @@ beforeEach(() => {
 });
 
 describe('openBrowserNotificationSettings', () => {
-  it('uses the Chromium settings URL only for a detected Chromium browser', () => {
+  it('uses the Chromium settings URL for a standard desktop Chrome UA', () => {
+    // Standard Chrome user agents include the historical Safari/ token.
+    // That token must not prevent Chromium detection in the UA fallback.
     setUserAgent(
-      'Mozilla/5.0 Chrome/153.0.0.0 Safari/537.36'
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/153.0.0.0 Safari/537.36'
     );
     const open = vi.spyOn(window, 'open').mockReturnValue({} as Window);
 

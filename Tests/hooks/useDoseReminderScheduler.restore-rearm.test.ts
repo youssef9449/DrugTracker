@@ -73,6 +73,9 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     createdAt: '2024-01-01T00:00:00.000Z',
     reminderEnabled: true,
     reminderTime,
+    // Chronic meds are always treatment-active; temporary meds would need
+    // explicit treatmentStartDate/durationDays to schedule at all.
+    isChronic: true,
     // Explicit single-slot schedule so reminder slots are defined by doseSchedule.
     doseSchedule: [{ id: 'd1', amount: dailyDose, time: reminderTime }],
     dosesPerDay: 1,
@@ -157,7 +160,7 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
       { initialProps: { medications: [base] } }
     );
     await flushUntil(() =>
-      mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'd2')
+      mocks.schedule.mock.calls.some((c) => c[5] === 'd2')
     );
     const schedulesAfterMount = mocks.schedule.mock.calls.length;
 
@@ -171,7 +174,7 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
       mocks.schedule.mock.calls.some(
         (c) =>
           c[0] === 'med-restore' &&
-          c[5]?.doseId === 'd2' &&
+          c[5] === 'd2' &&
           c[6]?.skipToday === true
       )
     );
@@ -181,7 +184,7 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
       '20:00',
       1,
       'قرص',
-      'd2', { skipToday: true }
+      'd2', { skipToday: true, allowManualTakeAction: false }
     );
 
     // Restore d2 (clear consumption) while 20:00 still ahead
@@ -199,14 +202,14 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
           (c) =>
             c[0] === 'med-restore' &&
             c[2] === '20:00' &&
-            c[5]?.doseId === 'd2' &&
+            c[5] === 'd2' &&
             !c[6]?.skipToday
         )
     );
 
     const postRestore = mocks.schedule.mock.calls.slice(schedulesBeforeRestore);
     const d2Rearm = postRestore.find(
-      (c) => c[0] === 'med-restore' && c[5]?.doseId === 'd2' && !c[6]?.skipToday
+      (c) => c[0] === 'med-restore' && c[5] === 'd2' && !c[6]?.skipToday
     );
     expect(d2Rearm).toBeDefined();
     expect(d2Rearm).toEqual([
@@ -215,12 +218,13 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
       '20:00',
       1,
       'قرص',
-      { doseId: 'd2' },
+      'd2',
+      { allowManualTakeAction: false },
     ]);
     // Must not leave a skipToday schedule as the final action for d2
     const lastD2 = [...mocks.schedule.mock.calls]
       .reverse()
-      .find((c) => c[0] === 'med-restore' && c[5]?.doseId === 'd2');
+      .find((c) => c[0] === 'med-restore' && c[5] === 'd2');
     expect(lastD2?.[6]?.skipToday).toBeUndefined();
     void schedulesAfterMount;
   });
@@ -274,7 +278,7 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
       (c) =>
         c[0] === 'med-past' &&
         c[2] === '14:00' &&
-        c[5]?.doseId === 'd2' &&
+        c[5] === 'd2' &&
         !c[6]?.skipToday
     );
     // After restore of a past slot, the consumption effect must not schedule
@@ -306,10 +310,10 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
     );
     await flushUntil(() =>
       mocks.schedule.mock.calls.some(
-        (c) => c[0] === 'med-sib' && c[5]?.doseId === 'd1' && c[6]?.skipToday === true
+        (c) => c[0] === 'med-sib' && c[5] === 'd1' && c[6]?.skipToday === true
       ) &&
       mocks.schedule.mock.calls.some(
-        (c) => c[0] === 'med-sib' && c[5]?.doseId === 'd2' && c[6]?.skipToday === true
+        (c) => c[0] === 'med-sib' && c[5] === 'd2' && c[6]?.skipToday === true
       )
     );
 
@@ -328,7 +332,7 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
         .some(
           (c) =>
             c[0] === 'med-sib' &&
-            c[5]?.doseId === 'd2' &&
+            c[5] === 'd2' &&
             !c[6]?.skipToday
         )
     );
@@ -344,7 +348,7 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
         (c) =>
           c[0] === 'med-sib' &&
           c[2] === '20:00' &&
-          c[5]?.doseId === 'd2' &&
+          c[5] === 'd2' &&
           c[6]?.skipToday !== true
       )
     ).toBe(true);
@@ -359,12 +363,12 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
       postRestoreSchedules.some(
         (c) =>
           c[0] === 'med-sib' &&
-          c[5]?.doseId === 'd1' &&
+          c[5] === 'd1' &&
           c[6]?.skipToday !== true
       )
     ).toBe(false);
     expect(
-      postRestoreSchedules.some((c) => c[0] === 'med-sib' && c[5]?.doseId === 'd1')
+      postRestoreSchedules.some((c) => c[0] === 'med-sib' && c[5] === 'd1')
     ).toBe(false);
     expect(
       postRestoreCancels.some((c) => c[0] === 'med-sib' && c[1] === 'd1')
@@ -373,14 +377,14 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
     // Final logical state: d2 armed today, d1 last schedule still skipToday
     const lastD2 = [...mocks.schedule.mock.calls]
       .reverse()
-      .find((c) => c[0] === 'med-sib' && c[5]?.doseId === 'd2');
+      .find((c) => c[0] === 'med-sib' && c[5] === 'd2');
     expect(lastD2?.[6]?.skipToday).toBeUndefined();
     expect(lastD2?.[2]).toBe('20:00');
 
     const lastD1 = [...mocks.schedule.mock.calls]
       .reverse()
-      .find((c) => c[0] === 'med-sib' && c[5]?.doseId === 'd1');
-    expect(lastD1?.[5]?.skipToday).toBe(true);
+      .find((c) => c[0] === 'med-sib' && c[5] === 'd1');
+    expect(lastD1?.[6]?.skipToday).toBe(true);
     expect(lastD1?.[2]).toBe('18:00');
   });
 
@@ -398,9 +402,7 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
       { initialProps: { lifecycleTick: 0 } }
     );
 
-    await vi.advanceTimersByTimeAsync(0);
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
 
     const schedulesAfterFirst = mocks.schedule.mock.calls.length;
     expect(schedulesAfterFirst).toBeGreaterThanOrEqual(1);
@@ -411,10 +413,9 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
     mocks.cancel.mockClear();
 
     rerender({ lifecycleTick: 1 });
-    await vi.advanceTimersByTimeAsync(0);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    // Wait for the pending-state lookup of the repair check to run.
+    await flushUntil(() => mocks.isPending.mock.calls.length >= 1);
+    await new Promise((r) => setTimeout(r, 20));
 
     expect(mocks.schedule).not.toHaveBeenCalled();
     expect(mocks.cancel).not.toHaveBeenCalled();
@@ -433,18 +434,13 @@ describe('useDoseReminderScheduler — restore re-arms future dose notification'
       { initialProps: { lifecycleTick: 0 } }
     );
 
-    await vi.advanceTimersByTimeAsync(0);
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
     mocks.schedule.mockClear();
     mocks.cancel.mockClear();
     mocks.isPending.mockResolvedValue({ ok: true, pending: false });
 
     rerender({ lifecycleTick: 2 });
-    await vi.advanceTimersByTimeAsync(0);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
 
     // Repair schedules without cancel when signature unchanged and pending missing.
     expect(mocks.schedule).toHaveBeenCalled();

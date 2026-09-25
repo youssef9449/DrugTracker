@@ -122,7 +122,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     await waitFor(() => {
       const med = readPersistedMedications().find((m) => m.id === 'med-single')!;
       expect(med.currentPills).toBe(18);
-      expect(med.doseConsumptionHistory?.s1).toBe(getTodayDateString());
+      expect(med.doseConsumptionHistory?.s1).toContain(getTodayDateString());
     });
     const doseLog = readLogs().find((l) => l.type === 'dose_taken');
     expect(doseLog?.amount).toBe(-2);
@@ -208,7 +208,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     fireEvent.click(takeD1Btn!);
     await waitFor(() => {
       const med = readPersistedMedications().find((m) => m.id === 'med-multi')!;
-      expect(med.doseConsumptionHistory?.d1).toBe(today);
+      expect(med.doseConsumptionHistory?.d1).toContain(today);
       expect(med.currentPills).toBe(19);
     });
     const takeLog = readLogs().find((l) => l.type === 'dose_taken');
@@ -253,7 +253,24 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
         }),
       ])
     );
-    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+    // Restore is evidence-gated: an active dose_taken log for the d3
+    // occurrence (amount 2) is required to offer/perform the Restore.
+    localStorage.setItem(
+      STORAGE_LOGS_KEY,
+      JSON.stringify([
+        {
+          id: 'seed-take-d3',
+          medicationId: 'med-multi',
+          medicationName: 'Drug A Multi',
+          type: 'dose_taken',
+          amount: -2,
+          date: today,
+          timestamp: '2024-09-10T20:00:00.000Z',
+          description: 'تناول جرعة يدوياً (-2 قرص)',
+          doseId: 'd3',
+        },
+      ] satisfies ConsumptionLog[])
+    );
 
     // Late evening so d1/d2 are auto-completed
     vi.setSystemTime(new Date('2024-09-10T22:00:00'));

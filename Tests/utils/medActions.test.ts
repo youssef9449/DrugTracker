@@ -247,14 +247,17 @@ describe('consumeDose strict doseId identity', () => {
 
 // ─── consumeDose no-schedule rejection (#267/#268 — no fallback) ─
 describe('consumeDose rejects no-schedule meds (#267/#268)', () => {
-  it('rejects a no-schedule med with missing_dose_id when doseId is omitted', () => {
+  it('rejects a no-schedule med with no_dose when doseId is omitted', () => {
     const med = makeMed({
       doseSchedule: undefined,
       dosesPerDay: undefined,
       dailyDose: 2,
     });
     const result = consumeDose(med, 'manual', '2024-01-10', new Date('2024-01-10T08:00:00'));
-    expect(result.reason).toBe('missing_dose_id');
+    // Canonical resolver: no usable schedule + omitted id → 'no_dose'
+    // (resolveDoseId); 'missing_dose_id' is reserved for the ambiguous
+    // multi-dose-without-id case.
+    expect(result.reason).toBe('no_dose');
     expect(result.doseAmount).toBe(0);
     expect(result.updatedMed).toBeNull();
     expect(result.log).toBeNull();
@@ -285,7 +288,8 @@ describe('consumeDose rejects no-schedule meds (#267/#268)', () => {
       dailyDose: 5,
     });
     const result = consumeDose(med, 'manual', '2024-01-10', new Date('2024-01-10T08:00:00'));
-    expect(result.reason).toBe('missing_dose_id');
+    // No usable schedule + omitted id → 'no_dose' (canonical resolver).
+    expect(result.reason).toBe('no_dose');
     expect(result.doseAmount).toBe(0);
   });
 });

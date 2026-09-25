@@ -109,7 +109,10 @@ describe('ConsumptionLogView', () => {
       />
     );
     expect(screen.getByText('30')).toBeInTheDocument();
-    expect(screen.getByText('1')).toBeInTheDocument();
+    // Per-med breakdown now shows the projected unit total for the month
+    // (schedule amount 2/day × 30 days), while the header total above stays
+    // slot-based (1 slot × 30 = 30, not dailyDose-based).
+    expect(screen.getByText('60 قرصاً')).toBeInTheDocument();
   });
 
   it('explicit single-slot schedule counts even when auto deduction is disabled', () => {
@@ -128,7 +131,7 @@ describe('ConsumptionLogView', () => {
     );
 
     expect(screen.getByText('30')).toBeInTheDocument();
-    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.getByText('60 قرصاً')).toBeInTheDocument();
   });
 
   it('counts multi-dose doseSchedule length as daily slots', () => {
@@ -151,9 +154,11 @@ describe('ConsumptionLogView', () => {
         showToast={() => {}}
       />
     );
-    // 3 slots/day × 30 = 90
+    // 3 slots/day → header 3 × 30 = 90 monthly slots (slot-based, not
+    // dailyDose/amount-based); per-med breakdown shows the unit total
+    // (3 × 30 = 90 pills).
     expect(screen.getByText('90')).toBeInTheDocument();
-    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('90 قرصاً')).toBeInTheDocument();
   });
 
   it('sums scheduled slots regardless of auto deduction state', () => {
@@ -188,7 +193,10 @@ describe('ConsumptionLogView', () => {
 
     // 1 + 3 + 2 = 6 daily slots → 180 monthly; Auto-OFF still contributes its schedule.
     expect(screen.getByText('180')).toBeInTheDocument();
-    expect(screen.getByText('6')).toBeInTheDocument();
+    // Per-med unit totals: 1×30, 3×30, 2×30.
+    expect(screen.getByText('30 قرصاً')).toBeInTheDocument();
+    expect(screen.getByText('90 قرصاً')).toBeInTheDocument();
+    expect(screen.getByText('60 قرصاً')).toBeInTheDocument();
   });
 
   it('renders the updated empty-state copy', () => {

@@ -4,7 +4,7 @@ import { TOAST_MESSAGES, PERSIST_FAILURE_MESSAGES, STORAGE_ERRORS } from '@/cons
 describe('uiStrings (#100)', () => {
   it('TOAST_MESSAGES.doseTaken formats with name + amount + unit', () => {
     expect(TOAST_MESSAGES.doseTaken('كونكور', 1, 'قرص')).toBe(
-      'تم تسجيل جرعة "كونكور" (-1 قرص). لن يتم الخصم التلقائي اليوم.'
+      'تم تسجيل جرعة "كونكور" (-1 قرص).'
     );
   });
 
@@ -31,7 +31,7 @@ describe('uiStrings (#100)', () => {
 
   it('TOAST_MESSAGES.autoDeductSummary formats with totalPills', () => {
     expect(TOAST_MESSAGES.autoDeductSummary(5)).toBe(
-      'تم الخصم التلقائي للاستهلاك: خصم 5 قرص لمرور الأيام.'
+      'تم الخصم التلقائي للاستهلاك: خصم 5 قرص لمواعيد الجرعات المستحقة.'
     );
   });
 

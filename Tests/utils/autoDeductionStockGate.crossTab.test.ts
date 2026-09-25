@@ -72,10 +72,20 @@ describe('cross-tab stale-snapshot protection', () => {
       value: { request },
     });
 
-    localStorage.setItem(
-      STORAGE_MEDS_KEY,
-      JSON.stringify([{ id: 'm1', currentPills: 10 }])
-    );
+    // #477: the durable read is runtime-validated (parseMedicationList), so
+    // the seeded record must be a VALID medication record or the gate fails
+    // closed with an empty snapshot.
+    const seedMed = {
+      id: 'm1',
+      name: 'M1',
+      currentPills: 10,
+      dailyDose: 1,
+      unit: 'قرص',
+      warningThresholdDays: 5,
+      colorTag: 'teal',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([seedMed]));
 
     const tabA = await import('../../src/utils/autoDeductionStockGate');
     vi.resetModules();
@@ -86,9 +96,11 @@ describe('cross-tab stale-snapshot protection', () => {
         const current = Number(fresh.medications[0]?.currentPills ?? 0);
         await Promise.resolve();
         const next = current + 1;
+        // Keep the durable record valid so the NEXT tab's validated read
+        // sees the first tab's commit instead of failing closed.
         localStorage.setItem(
           STORAGE_MEDS_KEY,
-          JSON.stringify([{ id: 'm1', currentPills: next }])
+          JSON.stringify([{ ...fresh.medications[0], id: 'm1', currentPills: next }])
         );
       });
 
@@ -102,7 +114,7 @@ describe('cross-tab stale-snapshot protection', () => {
         ? { ok: true, value: raw }
         : { ok: false, reason: 'test_shape_invalid' }
     );
-    expect(medsOutcome).toEqual({ status: 'ok', value: [{ id: 'm1', currentPills: 12 }] });
+    expect(medsOutcome).toEqual({ status: 'ok', value: [{ ...seedMed, currentPills: 12 }] });
     expect(request).toHaveBeenCalledTimes(2);
   });
 });

@@ -73,6 +73,9 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     createdAt: '2024-01-01T00:00:00.000Z',
     reminderEnabled: true,
     reminderTime,
+    // Chronic meds are always treatment-active; temporary meds would need
+    // explicit treatmentStartDate/durationDays to schedule at all.
+    isChronic: true,
     // Explicit single-slot schedule so reminder slots are defined by doseSchedule.
     doseSchedule: [{ id: 'd1', amount: dailyDose, time: reminderTime }],
     dosesPerDay: 1,
@@ -267,8 +270,9 @@ describe('useDoseReminderScheduler — operation retries', () => {
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
     expect(mocks.schedule).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(1000);
-    await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
+    // The bounded retry backs off for 1s of real wall-clock time (this suite
+    // only fakes Date, not timers), so wait for the retry to land.
+    await flushUntil(() => mocks.schedule.mock.calls.length >= 2, 3000);
     expect(mocks.schedule).toHaveBeenCalledTimes(2);
   });
 
@@ -289,8 +293,9 @@ describe('useDoseReminderScheduler — operation retries', () => {
     await flushUntil(() => mocks.cancel.mock.calls.length >= 1);
     expect(mocks.cancel).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(1000);
-    await flushUntil(() => mocks.cancel.mock.calls.length >= 2);
+    // The bounded retry backs off for 1s of real wall-clock time (this suite
+    // only fakes Date, not timers), so wait for the retry to land.
+    await flushUntil(() => mocks.cancel.mock.calls.length >= 2, 3000);
     expect(mocks.cancel).toHaveBeenCalledTimes(2);
   });
 });

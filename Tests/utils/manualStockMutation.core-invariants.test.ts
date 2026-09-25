@@ -50,7 +50,9 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(`${TODAY}T15:00:00`));
-    durable = { medications: [med()], logs: [] };
+    // Seed 10 pills: the absolute stock assertions below (9 after a 1-pill
+    // Take) are written against a 10-pill starting balance.
+    durable = { medications: [med({ currentPills: 10 })], logs: [] };
     __setAutoStockGateTestHooks({
       load: () => ({
         medications: durable.medications.map((m) => ({ ...m })),
@@ -561,7 +563,9 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(`${TODAY}T15:00:00`));
-    durable = { medications: [med()], logs: [] };
+    // Seed 10 pills: the absolute stock assertions below (9 after a 1-pill
+    // Take) are written against a 10-pill starting balance.
+    durable = { medications: [med({ currentPills: 10 })], logs: [] };
     manualEnvelope = null;
     __setAutoStockGateTestHooks({
       load: () => ({
@@ -775,7 +779,9 @@ describe('Phase 4 — Exact Auto event.amount is authoritative for Manual Take',
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(`${TODAY}T15:00:00`));
-    durable = { medications: [med()], logs: [] };
+    // Seed 10 pills: the absolute stock assertions below (9 after a 1-pill
+    // Take) are written against a 10-pill starting balance.
+    durable = { medications: [med({ currentPills: 10 })], logs: [] };
     __setAutoStockGateTestHooks({
       load: () => ({
         medications: durable.medications.map((m) => ({ ...m })),

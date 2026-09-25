@@ -428,9 +428,8 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
     expect(result.outcome).toBe('applied');
     const med = result.medications[0];
     expect(requireDefined(med, 'med').doseSchedule?.map((d) => d.id)).toEqual(['d1']);
-    expect(requireDefined(med, 'med').doseConsumptionHistory).toEqual({ d1: '2026-09-14' });
+    // doseConsumptionHistory maps doseId → list of consumption dates.
     expect(requireDefined(med, 'med').doseConsumptionHistory).toEqual({ d1: ['2026-09-14'] });
-    expect(requireDefined(med, 'med').doseConsumptionHistory).not.toHaveProperty('d2');
     expect(requireDefined(med, 'med').doseConsumptionHistory).not.toHaveProperty('d2');
   });
 

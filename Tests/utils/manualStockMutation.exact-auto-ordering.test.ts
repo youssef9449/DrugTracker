@@ -63,7 +63,8 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
     beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(`${TODAY}T15:00:00`));
-    durable = { medications: [med()], logs: [], globalAutoDeductEnabled: false };
+    // Seed 10 pills: absolute assertions below expect 9 after a 1-pill Take.
+    durable = { medications: [med({ currentPills: 10 })], logs: [], globalAutoDeductEnabled: false };
     manualEnvelope = null;
     failLogs = false;
     failClear = false;
@@ -143,11 +144,16 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
     const newerLogs = durable.logs.map((l) => ({ ...l }));
 
     // Plant older Manual envelope (seq 1 already applied) with contradictory stock=10.
+    // Production envelopes always carry globalAutoDeductEnabled + stockDeltas +
+    // occurrenceResolutions (readManualStockEnvelopeOutcome rejects shapes without them).
     manualEnvelope = {
       version: 1,
       status: 'manual_js_ready',
       medications: [med({ currentPills: 10 })],
       logs: [{ id: 'old-log', medicationId: 'med-1', medicationName: 'TestMed', type: 'dose_taken', amount: 1, date: TODAY, timestamp: '', description: '' }],
+      globalAutoDeductEnabled: false,
+      stockDeltas: [],
+      occurrenceResolutions: [],
       createdAt: new Date().toISOString(),
       baseGeneration: 0,
       mutationSeq: 1,
@@ -248,6 +254,9 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
           description: '',
         },
       ],
+      globalAutoDeductEnabled: false,
+      stockDeltas: [],
+      occurrenceResolutions: [],
       createdAt: new Date().toISOString(),
       baseGeneration: 0,
       mutationSeq: 1,
@@ -324,6 +333,9 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
       status: 'manual_js_ready',
       medications: [med({ currentPills: 9 })],
       logs: seq10Logs,
+      globalAutoDeductEnabled: true,
+      stockDeltas: [],
+      occurrenceResolutions: [],
       createdAt: new Date().toISOString(),
       baseGeneration: 0,
       mutationSeq: 10,
@@ -393,6 +405,9 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
           description: '',
         },
       ],
+      globalAutoDeductEnabled: true,
+      stockDeltas: [],
+      occurrenceResolutions: [],
       createdAt: new Date().toISOString(),
       baseGeneration: 0,
       mutationSeq: 11,
@@ -638,7 +653,10 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
     // Snapshot matched → finalize (no-op, seq 3 <= lastApplied 3) + clear + ACK.
     expect(phase4Exact).toBeNull();
     expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
-    expect(durable.logs.filter((l) => l.id === 'match-clear')).toHaveLength(1);
+    // Without re-apply: the original exact_auto log remains exactly once.
+    expect(
+      durable.logs.filter((l) => l.id === exactAutoLogId('med-1', 'd1', TODAY))
+    ).toHaveLength(1);
     expect(marked).toEqual([`med-1|d1|${TODAY}`]);
     expect(recon.markedCount).toBe(1);
   });
@@ -674,7 +692,9 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
 
     // Snapshot re-applied: durable now matches envelope (currentPills=7).
     expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(7);
-    expect(durable.logs.some((l) => l.id === 'mismatch-apply')).toBe(true);
+    expect(
+      durable.logs.some((l) => l.id === exactAutoLogId('med-1', 'd1', TODAY))
+    ).toBe(true);
     expect(phase4Exact).toBeNull();
     expect(lastApplied).toBe(4);
     expect(marked).toEqual([`med-1|d1|${TODAY}`]);

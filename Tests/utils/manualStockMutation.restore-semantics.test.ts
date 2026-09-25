@@ -62,7 +62,8 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(`${TODAY}T15:00:00`));
-    durable = { medications: [med()], logs: [], globalAutoDeductEnabled: false };
+    // Seed 10 pills: absolute assertions below expect 9 after a 1-pill Take.
+    durable = { medications: [med({ currentPills: 10 })], logs: [], globalAutoDeductEnabled: false };
     manualEnvelope = null;
     failLogs = false;
     failClear = false;
@@ -221,7 +222,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
           type: 'exact_auto',
           amount: -1,
           date: TODAY,
-          timestamp: '',
+          timestamp: `${TODAY}T08:00:00.000Z`,
           description: '',
           doseId: 'd1',
         },
@@ -232,7 +233,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
           type: 'exact_auto',
           amount: -1,
           date: TODAY,
-          timestamp: '',
+          timestamp: `${TODAY}T08:00:00.000Z`,
           description: '',
           doseId: 'd2',
         },
@@ -295,7 +296,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
           type: 'exact_auto',
           amount: -1,
           date: TODAY,
-          timestamp: '',
+          timestamp: `${TODAY}T08:00:00.000Z`,
           description: '',
           doseId: 'd1',
         },
@@ -311,7 +312,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     expect(r.restoredAmount).toBe(1);
     expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(1);
   });
-  it('zero actual Auto deduction Restore adds zero', async () => {
+  it('zero actual Auto deduction Restore is rejected (no invented zero restore)', async () => {
     durable = {
       medications: [
         med({
@@ -327,7 +328,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
           type: 'exact_auto',
           amount: 0,
           date: TODAY,
-          timestamp: '',
+          timestamp: `${TODAY}T08:00:00.000Z`,
           description: '',
           doseId: 'd1',
         },
@@ -339,15 +340,20 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
       todayStr: TODAY,
       makeLogId: () => 'restore-zero',
     });
-    expect(r.outcome).toBe('applied');
+    // Production fails closed on a zero-amount deduction record: there is no
+    // positive deduction to reverse, so no restore log/marker is invented.
+    expect(r.outcome).toBe('rejected');
+    expect(r.reason).toBe('missing_deduction_evidence');
     expect(r.restoredAmount).toBe(0);
     expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(0);
-    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d1).toBeUndefined();
+    // Nothing was mutated: the consume marker and the evidence log remain.
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d1).toEqual([TODAY]);
+    expect(durable.logs.filter((l) => l.id === 'restore-zero')).toHaveLength(0);
   });
   it('Auto 3 → Restore = +3 (active deduction tracked)', async () => {
     durable = {
       medications: [med({ currentPills: 7, doseConsumptionHistory: { d1: [TODAY] } })],
-      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: `${TODAY}T08:00:00.000Z`, description: '', doseId: 'd1' }],
     };
     const r = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-auto-3' });
     expect(r.outcome).toBe('applied');
@@ -366,7 +372,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     // NOT the old Auto's 3 (which is already reversed).
     durable = {
       medications: [med({ currentPills: 1 })],
-      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1', reversedAt: 'already-reversed' }],
+      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: `${TODAY}T08:00:00.000Z`, description: '', doseId: 'd1', reversedAt: 'already-reversed' }],
     };
     // Take d1 — clamped to available stock (1). currentPills 1 → 0.
     const take = await runGatedManualConsume({ medicationId: 'med-1', doseId: 'd1', source: 'manual', todayStr: TODAY });
@@ -405,7 +411,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
   it('Auto 3 → Restore → Take 3 → Restore = +3 (reverses the second Take)', async () => {
     durable = {
       medications: [med({ currentPills: 7, doseConsumptionHistory: { d1: [TODAY] }, doseSchedule: [{ id: 'd1', amount: 3, time: '08:00' }], dosesPerDay: 1 })],
-      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: `${TODAY}T08:00:00.000Z`, description: '', doseId: 'd1' }],
     };
     // Restore the Auto (3).
     const r1 = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-auto-3b' });
@@ -426,7 +432,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
   it('Restore twice for the same occurrence does not add stock twice', async () => {
     durable = {
       medications: [med({ currentPills: 7, doseConsumptionHistory: { d1: [TODAY] } })],
-      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: '', description: '', doseId: 'd1' }],
+      logs: [{ id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -3, date: TODAY, timestamp: `${TODAY}T08:00:00.000Z`, description: '', doseId: 'd1' }],
     };
     const r1 = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-1-dedup' });
     expect(r1.outcome).toBe('applied');
@@ -444,8 +450,8 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     durable = {
       medications: [med({ currentPills: 8, doseConsumptionHistory: { d1: [TODAY], d2: [TODAY] } })],
       logs: [
-        { id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -1, date: TODAY, timestamp: '', description: '', doseId: 'd1' },
-        { id: exactAutoLogId('med-1', 'd2', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -2, date: TODAY, timestamp: '', description: '', doseId: 'd2' },
+        { id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -1, date: TODAY, timestamp: `${TODAY}T08:00:00.000Z`, description: '', doseId: 'd1' },
+        { id: exactAutoLogId('med-1', 'd2', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -2, date: TODAY, timestamp: `${TODAY}T08:00:00.000Z`, description: '', doseId: 'd2' },
       ],
     };
     // Restore d1 → reverses auto-a (1), NOT auto-b (2).
@@ -453,19 +459,25 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     expect(r.outcome).toBe('applied');
     expect(r.restoredAmount).toBe(1);
     expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
-    // d2 still consumed; auto-b NOT reversed.
+    // d2 still consumed; auto-b (d2) NOT reversed.
     expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d2).toEqual([TODAY]);
-    expect(durable.logs.find((l) => l.id === 'auto-b')?.reversedAt).toBeUndefined();
-    // auto-a IS reversed.
-    expect(durable.logs.find((l) => l.id === 'auto-a')?.reversedAt).toBeTruthy();
+    expect(
+      durable.logs.find((l) => l.id === exactAutoLogId('med-1', 'd2', TODAY))
+        ?.reversedAt
+    ).toBeUndefined();
+    // auto-a (d1) IS reversed.
+    expect(
+      durable.logs.find((l) => l.id === exactAutoLogId('med-1', 'd1', TODAY))
+        ?.reversedAt
+    ).toBeTruthy();
   });
   it('Old reversed deduction is not picked as the active deduction for a later Restore', async () => {
     // Two deductions for the same occurrence: old (reversed) + new (active).
     durable = {
       medications: [med({ currentPills: 6, doseConsumptionHistory: { d1: [TODAY] } })],
       logs: [
-        { id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -4, date: TODAY, timestamp: '', description: '', doseId: 'd1', reversedAt: 'old' },
-        { id: 'new-deduct', medicationId: 'med-1', medicationName: 'TestMed', type: 'dose_taken', amount: -4, date: TODAY, timestamp: '', description: '', doseId: 'd1' },
+        { id: exactAutoLogId('med-1', 'd1', TODAY), medicationId: 'med-1', medicationName: 'TestMed', type: 'exact_auto', amount: -4, date: TODAY, timestamp: `${TODAY}T08:00:00.000Z`, description: '', doseId: 'd1', reversedAt: 'old' },
+        { id: 'new-deduct', medicationId: 'med-1', medicationName: 'TestMed', type: 'dose_taken', amount: -4, date: TODAY, timestamp: `${TODAY}T08:00:00.000Z`, description: '', doseId: 'd1' },
       ],
     };
     // Restore must find new-deduct (4), NOT old-deduct (4, reversed).
@@ -475,7 +487,10 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     // new-deduct reversed; old-deduct stays reversed.
     expect(durable.logs.find((l) => l.id === 'new-deduct')?.reversedAt).toBeTruthy();
-    expect(durable.logs.find((l) => l.id === 'old-deduct')?.reversedAt).toBe('old');
+    expect(
+      durable.logs.find((l) => l.id === exactAutoLogId('med-1', 'd1', TODAY))
+        ?.reversedAt
+    ).toBe('old');
     // restore log links to new-deduct, NOT old-deduct.
     expect(durable.logs.find((l) => l.id === 'restore-new')?.relatedLogId).toBe('new-deduct');
   });
@@ -498,7 +513,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
           type: 'exact_auto',
           amount: -1,
           date: TODAY,
-          timestamp: '',
+          timestamp: `${TODAY}T08:00:00.000Z`,
           description: '',
           doseId: 'd1',
         },
@@ -569,7 +584,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
           type: 'exact_auto',
           amount: -1,
           date: TODAY,
-          timestamp: '',
+          timestamp: `${TODAY}T08:00:00.000Z`,
           description: '',
           doseId: 'd1',
         },

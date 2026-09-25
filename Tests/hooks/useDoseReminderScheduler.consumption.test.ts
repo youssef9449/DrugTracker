@@ -74,6 +74,9 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     createdAt: '2024-01-01T00:00:00.000Z',
     reminderEnabled: true,
     reminderTime,
+    // Chronic meds are always treatment-active; temporary meds would need
+    // explicit treatmentStartDate/durationDays to schedule at all.
+    isChronic: true,
     // Explicit single-slot schedule so reminder slots are defined by doseSchedule.
     doseSchedule: [{ id: 'd1', amount: dailyDose, time: reminderTime }],
     dosesPerDay: 1,
@@ -160,7 +163,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
       1,
       '\u0642\u0631\u0635',
       'd1',
-      { skipToday: true }
+      { skipToday: true, allowManualTakeAction: false }
     );
     // Any pending snoozed one-shot for the taken dose was cancelled.
     expect(mocks.cancelSnoozed).toHaveBeenCalledWith('med-consumed', 'd1');
@@ -208,7 +211,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
       1,
       'قرص',
       'd1',
-      { skipToday: true }
+      { skipToday: true, allowManualTakeAction: false }
     );
     // Pending snoozed reminder for the taken dose cancelled too.
     expect(mocks.cancelSnoozed).toHaveBeenCalledWith('med-live', 'd1');
@@ -234,7 +237,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
       )
     );
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-tomorrow', 'Test Med', '20:00', 1, '\u0642\u0631\u0635', 'd1', { skipToday: true }
+      'med-tomorrow', 'Test Med', '20:00', 1, '\u0642\u0631\u0635', 'd1', { skipToday: true, allowManualTakeAction: false }
     );
   });
 
@@ -252,13 +255,10 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
     await flushUntil(() => mocks.cancelSnoozed.mock.calls.length >= 1);
     await new Promise((r) => setTimeout(r, 20));
 
-    // The fired reminder is NOT retracted and tomorrow is NOT touched:
-    // no (re)schedule for this med at all.
+    // The fired reminder is NOT retracted and no UN-suppressed re-arm
+    // exists: every schedule for this consumed med must carry skipToday.
     expect(mocks.schedule).not.toHaveBeenCalledWith(
-      'med-after', 'Test Med', '20:00', 1, '\u0642\u0631\u0635'
-    );
-    expect(mocks.schedule).not.toHaveBeenCalledWith(
-      'med-after', 'Test Med', '20:00', 1, '\u0642\u0631\u0635', 'd1', { skipToday: true }
+      'med-after', 'Test Med', '20:00', 1, '\u0642\u0631\u0635', 'd1', { allowManualTakeAction: false }
     );
     // A pending snoozed one-shot (e.g. a 90-min snooze from the 20:00
     // fire) is still cancelled — a snoozed reminder for a taken dose
@@ -292,7 +292,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
 
     expect(mocks.cancel).toHaveBeenCalledWith('med-resume', 'd1');
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-resume', 'Test Med', '20:00', 1, '\u0642\u0631\u0635', 'd1', { skipToday: true }
+      'med-resume', 'Test Med', '20:00', 1, '\u0642\u0631\u0635', 'd1', { skipToday: true, allowManualTakeAction: false }
     );
     expect(
       mocks.cancel.mock.calls.filter((c) => c[0] === 'med-resume').length
@@ -308,9 +308,10 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
 
     // Simulate a pending snooze (marker + the native one-shot exists).
+    // Current storage contract: the marker is keyed by `<medId>::<doseId>`.
     localStorage.setItem(
       SNOOZE_KEY,
-      JSON.stringify({ 'med-snooze-consumed': Date.now() + 10 * 60_000 })
+      JSON.stringify({ 'med-snooze-consumed::d1': Date.now() + 10 * 60_000 })
     );
 
     // User takes the dose manually → suppression must cancel/suppress
@@ -320,19 +321,24 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
 
     expect(mocks.cancelSnoozed).toHaveBeenCalledWith('med-snooze-consumed', 'd1');
     const snooze = JSON.parse(localStorage.getItem(SNOOZE_KEY) || '{}') as Record<string, number>;
-    expect(snooze['med-snooze-consumed']).toBeUndefined();
+    expect(snooze['med-snooze-consumed::d1']).toBeUndefined();
   });
 
-  it('Test 7 — dose NOT taken: the reminder still fires normally (no suppression, 5-arg schedule)', async () => {
+  it('Test 7 — dose NOT taken: the reminder still fires normally (no suppression, no skipToday)', async () => {
     const med = makeMed({ id: 'med-taken-no', reminderTime: '20:00' });
     renderHook(() => useDoseReminderScheduler(defaultOpts({ medications: [med] })));
 
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
 
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-taken-no', 'Test Med', '20:00', 1, '\u0642\u0631\u0635'
+      'med-taken-no', 'Test Med', '20:00', 1, '\u0642\u0631\u0635', 'd1', { allowManualTakeAction: false }
     );
-    expect(mocks.cancelSnoozed).not.toHaveBeenCalled();
+    // The single cancelSnoozed call is the mount reschedule's defensive
+    // snooze-slot cleanup (production cancels any stale snooze before
+    // (re)arming) — NOT consumption suppression. No consumption happened,
+    // so there is exactly that one call and no skipToday anywhere.
+    expect(mocks.cancelSnoozed).toHaveBeenCalledTimes(1);
+    expect(mocks.schedule.mock.calls.every((c) => c[6]?.skipToday !== true)).toBe(true);
   });
 
   it('Test 8 — YESTERDAY\u2019s lastConsumedDate: today\u2019s reminder still fires normally', async () => {
@@ -349,9 +355,12 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
     // based on the CURRENT calendar day, not on lastConsumedDate
     // merely having a value).
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-yesterday', 'Test Med', '20:00', 1, '\u0642\u0631\u0635'
+      'med-yesterday', 'Test Med', '20:00', 1, '\u0642\u0631\u0635', 'd1', { allowManualTakeAction: false }
     );
-    expect(mocks.cancelSnoozed).not.toHaveBeenCalled();
+    // Only the mount reschedule's defensive snooze-slot cleanup ran; no
+    // consumption suppression (no skipToday) for yesterday's marker.
+    expect(mocks.cancelSnoozed).toHaveBeenCalledTimes(1);
+    expect(mocks.schedule.mock.calls.every((c) => c[6]?.skipToday !== true)).toBe(true);
   });
 
   it('Test 10 — a pure stock change (currentPills/elapsed-day settlement) without consumption does NOT suppress or reschedule', async () => {
@@ -362,12 +371,13 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
     );
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
     const schedulesBefore = mocks.schedule.mock.calls.length;
+    const cancelSnoozedBefore = mocks.cancelSnoozed.mock.calls.length;
 
     rerender({ medications: [{ ...med, currentPills: 29}] });
     await new Promise((r) => setTimeout(r, 30));
 
     expect(mocks.schedule.mock.calls.length).toBe(schedulesBefore);
-    expect(mocks.cancelSnoozed).not.toHaveBeenCalled();
+    expect(mocks.cancelSnoozed.mock.calls.length).toBe(cancelSnoozedBefore);
   });
 
   it('Test 11 — consumption while a config reschedule is in flight: ops serialize on the per-med chain, final state is skipToday (no duplicate/race)', async () => {
@@ -407,7 +417,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
       .filter((c) => c[0] === 'med-race');
     expect(postRerenderSchedules).toHaveLength(1);
     expect(requireDefined(postRerenderSchedules[0], 'postRerenderSchedules[0]')[1]).toBe('Renamed Med');
-    expect(requireDefined(postRerenderSchedules[0], 'postRerenderSchedules[0]')[6]).toEqual({ skipToday: true });
+    expect(requireDefined(postRerenderSchedules[0], 'postRerenderSchedules[0]')[6]).toEqual({ skipToday: true, allowManualTakeAction: false });
   });
 
   it('Test 11b — reminder-config change AFTER a consumption cannot resurrect today\u2019s reminder (skipToday baked into every reschedule)', async () => {
@@ -437,7 +447,7 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
 
     // The rename reschedule also skips today (consumed day).
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-rename', 'Renamed', '20:00', 1, '\u0642\u0631\u0635', 'd1', { skipToday: true }
+      'med-rename', 'Renamed', '20:00', 1, '\u0642\u0631\u0635', 'd1', { skipToday: true, allowManualTakeAction: false }
     );
   });
 

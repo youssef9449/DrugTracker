@@ -1,16 +1,22 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 import type { Medication } from '@/types';
 import { useStockAlerts } from '@/hooks/useStockAlerts';
 import { getTodayDateString, getCriticalAlarmDate } from '@/utils/dateCalculations';
 
-vi.mock('../utils/notificationTestFacade', () => ({
+// The hook imports the production source modules directly, so the mocks
+// must be installed on those module ids (mocking the test facade would
+// not intercept production calls).
+vi.mock('@/utils/notifications/criticalStockNotifications', () => ({
   sendCriticalStockAlert: vi.fn(() => Promise.resolve(true)),
-  cancelCriticalAlarm: vi.fn(() => Promise.resolve()),
+}));
+vi.mock('@/utils/criticalAlarmScheduling', () => ({
+  cancelCriticalAlarm: vi.fn(() => Promise.resolve({ ok: true })),
 }));
 
-import { sendCriticalStockAlert, cancelCriticalAlarm } from '../utils/notificationTestFacade';
+import { sendCriticalStockAlert } from '@/utils/notifications/criticalStockNotifications';
+import { cancelCriticalAlarm } from '@/utils/criticalAlarmScheduling';
 import { readCriticalClaims as readClaims, writeCriticalClaim as writeClaim } from '../helpers/criticalStockClaims';
 import { installWebLocksShim, type WebLocksShimHandle } from '../helpers/webLocksShim';
 
@@ -22,19 +28,37 @@ const sendMock = vi.mocked(sendCriticalStockAlert);
 const cancelMock = vi.mocked(cancelCriticalAlarm);
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
+  const dailyDose = overrides.dailyDose ?? 2;
   return {
     id: 'med-1',
     name: 'Test Med',
     currentPills: 30,
-    dailyDose: 2,
+    dailyDose,
     unit: 'قرص',
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
     autoDeductEnabled: true,
+    // The unified critical-stock policy requires the per-medication flag
+    // to be explicitly ON before any delivery/scheduling decision.
+    criticalStockAlertsEnabled: true,
+    // The crossing projection reads the explicit dose schedule; mirror
+    // dailyDose so status semantics are unchanged.
+    doseSchedule: [{ id: 'd1', amount: dailyDose, time: '20:00' }],
     ...overrides,
   };
 }
+
+/**
+ * Drain the claim-coordinator/delivery microtask chains. The claim
+ * coordinator serializes acquisition through the Web Locks shim, so
+ * delivery and claim writes complete within one macrotask turn.
+ */
+const flush = async (): Promise<void> => {
+  await act(async () => {
+    await Promise.resolve();
+  });
+};
 
 function useAlerts(props: {
   medications: Medication[];
@@ -87,13 +111,14 @@ describe('useStockAlerts — gating', () => {
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it('fires critical alert when critical preference is ON (independent of dose reminders)', () => {
+  it('fires critical alert when critical preference is ON (independent of dose reminders)', async () => {
     renderHook(() =>
       useAlerts({
         medications: [makeMed({ currentPills: 0, dailyDose: 1 })],
         criticalStockAlertsEnabled: true,
       })
     );
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-1']?.claimed).toBe(true);
   });
@@ -121,35 +146,40 @@ describe('useStockAlerts — gating', () => {
 });
 
 describe('useStockAlerts — one notification per critical episode', () => {
-  it('fires ONE critical alert when the med becomes critical, and persists the claim', () => {
+  it('fires ONE critical alert when the med becomes critical, and persists the claim', async () => {
     renderHook(() =>
       useAlerts({
         medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
       })
     );
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
   });
 
-  it('fires for out_of_stock too (0 pills)', () => {
+  it('fires for out_of_stock too (0 pills)', async () => {
     renderHook(() =>
       useAlerts({
         medications: [makeMed({ currentPills: 0, dailyDose: 1 })],
       })
     );
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
   });
 
-  it('does NOT duplicate on re-render while still critical', () => {
+  it('does NOT duplicate on re-render while still critical', async () => {
     const med = makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 });
     const { rerender } = renderHook(({ medications }) => useAlerts({ medications }), {
       initialProps: { medications: [med] },
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
 
     rerender({ medications: [{ ...med }] });
+    await flush();
     rerender({ medications: [{ ...med }] });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
 
@@ -159,6 +189,7 @@ describe('useStockAlerts — one notification per critical episode', () => {
         medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
       },
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
 
     // A day passes and auto-deduction consumed a pill: still critical.
@@ -168,6 +199,7 @@ describe('useStockAlerts — one notification per critical episode', () => {
         makeMed({ currentPills: 6, dailyDose: 1, warningThresholdDays: 7}),
       ],
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
 
     // Manual consumption while critical.
@@ -176,6 +208,7 @@ describe('useStockAlerts — one notification per critical episode', () => {
         makeMed({ currentPills: 3, dailyDose: 1, warningThresholdDays: 7}),
       ],
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
 
     // Critical → out_of_stock: same episode, no second notification.
@@ -184,16 +217,18 @@ describe('useStockAlerts — one notification per critical episode', () => {
         makeMed({ currentPills: 0, dailyDose: 1, warningThresholdDays: 7}),
       ],
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
 
-  it('does NOT duplicate after an app restart while still critical (claim persists)', () => {
+  it('does NOT duplicate after an app restart while still critical (claim persists)', async () => {
     // First launch.
     const first = renderHook(({ medications }) => useAlerts({ medications }), {
       initialProps: {
         medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
       },
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
     first.unmount();
 
@@ -203,26 +238,29 @@ describe('useStockAlerts — one notification per critical episode', () => {
         medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
       },
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
 
-  it('allows a NEW notification after Critical → Sufficient → Critical (new episode)', () => {
+  it('allows a NEW notification after Critical → Sufficient → Critical (new episode)', async () => {
     const { rerender } = renderHook(({ medications }) => useAlerts({ medications }), {
       initialProps: {
         medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
       },
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
 
     // Refill → sufficient. This hook OWNS the episode end: the claim is
-    // cleared SYNCHRONOUSLY on this very render — no manual storage
-    // edits, no waiting for any async scheduler cleanup.
+    // cleared by THIS very render's synchronous decision (the durable
+    // write lands within the same tick — no scheduler cleanup involved).
     rerender({
       medications: [
         makeMed({ currentPills: 40, dailyDose: 1, warningThresholdDays: 7 }),
       ],
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-1']).toBeUndefined();
 
@@ -232,16 +270,18 @@ describe('useStockAlerts — one notification per critical episode', () => {
         makeMed({ currentPills: 6, dailyDose: 1, warningThresholdDays: 7 }),
       ],
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(2);
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
   });
 
-  it('changing currentPills / elapsed-day settlement does not create a new episode while critical', () => {
+  it('changing currentPills / elapsed-day settlement does not create a new episode while critical', async () => {
     const { rerender } = renderHook(({ medications }) => useAlerts({ medications }), {
       initialProps: {
         medications: [makeMed({ currentPills: 4, dailyDose: 1, warningThresholdDays: 5 })],
       },
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
 
     for (const pills of [3, 2, 1]) {
@@ -250,6 +290,7 @@ describe('useStockAlerts — one notification per critical episode', () => {
           makeMed({ currentPills: pills, dailyDose: 1, warningThresholdDays: 5 }),
         ],
       });
+      await flush();
     }
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
@@ -297,21 +338,22 @@ describe('useStockAlerts — claim backed by a scheduled alarm', () => {
         medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
       })
     );
-    expect(sendMock).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => {
+      expect(sendMock).toHaveBeenCalledTimes(1);
       expect(cancelMock).toHaveBeenCalledWith('med-1');
     });
   });
 });
 
 describe('useStockAlerts — Sufficient clears the claim synchronously (episode ownership)', () => {
-  it('clears a consumed claim immediately when the med becomes sufficient', () => {
+  it('clears a consumed claim immediately when the med becomes sufficient', async () => {
     writeClaim('med-1', { claimed: true, alarmTime: null });
     renderHook(() =>
       useAlerts({
         medications: [makeMed({ currentPills: 30, dailyDose: 1, warningThresholdDays: 5 })],
       })
     );
+    await flush();
     expect(sendMock).not.toHaveBeenCalled();
     expect(readClaims()['med-1']).toBeUndefined();
     // alarmTime was null — no armed alarm to cancel.
@@ -320,15 +362,17 @@ describe('useStockAlerts — Sufficient clears the claim synchronously (episode 
 
   it('clears a stale still-future claim when sufficient and cancels the armed alarm it references', async () => {
     // Episode A ended (refill) while an alarm armed for its (early)
-    // crossing was still pending: the claim is cleared synchronously and
-    // the now-stale alarm is cancelled natively.
+    // crossing was still pending: the claim is cleared by this render's
+    // synchronous ownership decision and the now-stale alarm is
+    // cancelled natively.
     writeClaim('med-1', { claimed: true, alarmTime: Date.now() + 24 * 60 * 60 * 1000 });
     renderHook(() =>
       useAlerts({
         medications: [makeMed({ currentPills: 30, dailyDose: 1, warningThresholdDays: 5 })],
       })
     );
-    // Cleared synchronously — before any async operation resolves.
+    // Cleared by this render — before any async operation resolves.
+    await flush();
     expect(readClaims()['med-1']).toBeUndefined();
     await vi.waitFor(() => {
       expect(cancelMock).toHaveBeenCalledWith('med-1');
@@ -336,9 +380,10 @@ describe('useStockAlerts — Sufficient clears the claim synchronously (episode 
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it('does NOT touch the scheduler\u2019s live armed record (claim === current projection)', () => {
+  it('does NOT touch the scheduler\u2019s live armed record (claim === current projection)', async () => {
     const med = makeMed({ currentPills: 30, dailyDose: 1, warningThresholdDays: 5 });
     const projectedT = getCriticalAlarmDate(med, getTodayDateString()) as number;
+    expect(projectedT).not.toBeNull();
     writeClaim('med-1', { claimed: true, alarmTime: projectedT });
     const { rerender } = renderHook(({ medications }) => useAlerts({ medications }), {
       initialProps: { medications: [med] },
@@ -347,13 +392,14 @@ describe('useStockAlerts — Sufficient clears the claim synchronously (episode 
     // Signature-neutral re-render: the live record (and the alarm it
     // books) must survive untouched.
     rerender({ medications: [{ ...med }] });
+    await flush();
 
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: projectedT });
     expect(cancelMock).not.toHaveBeenCalled();
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it('clears an ended episode\u2019s claim while critical preference is OFF (bookkeeping, not notification)', () => {
+  it('clears an ended episode\u2019s claim while critical preference is OFF (bookkeeping, not notification)', async () => {
     writeClaim('med-1', { claimed: true, alarmTime: null });
     renderHook(() =>
       useAlerts({
@@ -361,11 +407,12 @@ describe('useStockAlerts — Sufficient clears the claim synchronously (episode 
         criticalStockAlertsEnabled: false,
       })
     );
+    await flush();
     expect(sendMock).not.toHaveBeenCalled();
     expect(readClaims()['med-1']).toBeUndefined();
   });
 
-  it('a frozen sufficient med\u2019s stale claim is cleared synchronously; nothing live is cancelled', () => {
+  it('a frozen sufficient med\u2019s stale claim is cleared synchronously; nothing live is cancelled', async () => {
     writeClaim('med-1', { claimed: true, alarmTime: Date.now() - 86_400_000 });
     renderHook(() =>
       useAlerts({
@@ -379,6 +426,7 @@ describe('useStockAlerts — Sufficient clears the claim synchronously (episode 
         ],
       })
     );
+    await flush();
     expect(readClaims()['med-1']).toBeUndefined();
     expect(sendMock).not.toHaveBeenCalled();
     // alarmTime in the past — nothing live to cancel.
@@ -414,7 +462,7 @@ describe('useStockAlerts — failures and cleanup', () => {
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
   });
 
-  it('removes the claim when the medication is deleted', () => {
+  it('removes the claim when the medication is deleted', async () => {
     writeClaim('med-1', { claimed: true, alarmTime: null });
     writeClaim('med-other', { claimed: true, alarmTime: null });
     renderHook(() =>
@@ -428,6 +476,7 @@ describe('useStockAlerts — failures and cleanup', () => {
         ],
       })
     );
+    await flush();
     const claims = readClaims();
     expect(claims['med-1']).toBeUndefined();
     expect(claims['med-other']).toEqual({ claimed: true, alarmTime: null });
@@ -435,7 +484,7 @@ describe('useStockAlerts — failures and cleanup', () => {
 });
 
 describe('useStockAlerts — threshold semantics (user-configured threshold only)', () => {
-  it('warningThresholdDays = 7: 8 days sufficient, 7 critical, 6 critical, 0 out of stock', () => {
+  it('warningThresholdDays = 7: 8 days sufficient, 7 critical, 6 critical, 0 out of stock', async () => {
     const cases: Array<{ pills: number; expected: boolean }> = [
       { pills: 8, expected: false },
       { pills: 7, expected: true },
@@ -450,6 +499,7 @@ describe('useStockAlerts — threshold semantics (user-configured threshold only
           medications: [makeMed({ currentPills: pills, dailyDose: 1, warningThresholdDays: 7 })],
         })
       );
+      await flush();
       if (expected) {
         expect(sendMock).toHaveBeenCalledTimes(1);
       } else {
@@ -460,7 +510,7 @@ describe('useStockAlerts — threshold semantics (user-configured threshold only
 });
 
 describe('useStockAlerts — re-enabling alerts mid-episode', () => {
-  it('disabling then re-enabling while still critical allows exactly one notification', () => {
+  it('disabling then re-enabling while still critical allows exactly one notification', async () => {
     const { rerender } = renderHook(
       ({ medications, criticalStockAlertsEnabled }) =>
         useAlerts({ medications, criticalStockAlertsEnabled }),
@@ -471,6 +521,7 @@ describe('useStockAlerts — re-enabling alerts mid-episode', () => {
         },
       }
     );
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
 
     // Disabled: nothing sent, nothing claimed.
@@ -478,6 +529,7 @@ describe('useStockAlerts — re-enabling alerts mid-episode', () => {
       medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
       criticalStockAlertsEnabled: false,
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
 
     // Re-enabled while STILL critical — the episode already consumed its
@@ -486,10 +538,11 @@ describe('useStockAlerts — re-enabling alerts mid-episode', () => {
       medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
       criticalStockAlertsEnabled: true,
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
 
-  it('an episode that became critical while disabled notifies exactly once when re-enabled', () => {
+  it('an episode that became critical while disabled notifies exactly once when re-enabled', async () => {
     const { rerender } = renderHook(
       ({ medications, criticalStockAlertsEnabled }) =>
         useAlerts({ medications, criticalStockAlertsEnabled }),
@@ -500,35 +553,21 @@ describe('useStockAlerts — re-enabling alerts mid-episode', () => {
         },
       }
     );
+    await flush();
     expect(sendMock).not.toHaveBeenCalled();
 
     rerender({
       medications: [makeMed({ currentPills: 7, dailyDose: 1, warningThresholdDays: 7 })],
       criticalStockAlertsEnabled: true,
     });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
   });
 });
 
-describe('useStockAlerts — medication-level Auto projection', () => {
-  it('Medication ON with past lastSync: can send critical for projected depletion', () => {
-    renderHook(() =>
-      useAlerts({
-        medications: [
-          makeMed({
-            currentPills: 30,
-            dailyDose: 2,
-            autoDeductEnabled: true,
-            warningThresholdDays: 5,
-          }),
-        ],
-      })
-    );
-    expect(sendMock).toHaveBeenCalled();
-  });
-
-  it('Medication OFF: frozen stock does not send critical from auto projection alone', () => {
+describe('useStockAlerts — medication-level Auto boundary', () => {
+  it('Medication OFF: frozen stock does not send critical from auto projection alone', async () => {
     renderHook(() =>
       useAlerts({
         medications: [
@@ -541,10 +580,11 @@ describe('useStockAlerts — medication-level Auto projection', () => {
         ],
       })
     );
+    await flush();
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it('Medication ON: live armed record matching current projection is preserved', () => {
+  it('Medication ON: live armed record matching current projection is preserved', async () => {
     const med = makeMed({
       currentPills: 30,
       dailyDose: 1,
@@ -555,7 +595,9 @@ describe('useStockAlerts — medication-level Auto projection', () => {
     expect(projectedT).toBeGreaterThan(Date.now());
     writeClaim('med-1', { claimed: true, alarmTime: projectedT });
     renderHook(() => useAlerts({ medications: [med] }));
+    await flush();
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: projectedT });
     expect(cancelMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
   });
 });

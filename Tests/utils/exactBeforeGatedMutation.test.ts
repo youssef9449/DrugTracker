@@ -409,7 +409,7 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
       durabilityBlocked: false,
     }));
 
-    const formMed = durable.medications[0];
+    const formMed = requireDefined(durable.medications[0], 'durable.medications[0]');
     const { id: _id, createdAt: _c, ...medData } = {
       ...formMed,
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
@@ -448,7 +448,7 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
     mockExactFirst(durable, callOrder, 2);
 
     const { id: _id, createdAt: _c, ...medData } = {
-      ...durable.medications[0],
+      ...requireDefined(durable.medications[0], 'durable.medications[0]'),
       dailyDose: 3,
       doseSchedule: [{ id: 'd1', amount: 3, time: '08:00' }],
       doseConsumptionHistory: { d1: ['2026-09-13'], orphan: ['2026-01-01'] },

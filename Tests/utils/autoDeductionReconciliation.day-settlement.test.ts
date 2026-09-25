@@ -261,8 +261,8 @@ describe('exact event day must not be double-settled', () => {
     });
     const r1 = reconcileFiredEvents([med], [], [e]);
     const r2 = reconcileFiredEvents(r1.medications, r1.logs, [e]);
-    expect(requireDefined(requireDefined(r1.medications[0], 'r1.medications[0]'), 'requireDefined(r1.medications[0], 'r1.medications[0]')').currentPills).toBe(8);
-    expect(requireDefined(requireDefined(r2.medications[0], 'r2.medications[0]'), 'requireDefined(r2.medications[0], 'r2.medications[0]')').currentPills).toBe(8);
+    expect(requireDefined(r1.medications[0], 'r1.medications[0]').currentPills).toBe(8);
+    expect(requireDefined(r2.medications[0], 'r2.medications[0]').currentPills).toBe(8);
     expect(requireDefined(r2.details[0], 'r2.details[0]').outcome).toBe('already_applied');
   });
 

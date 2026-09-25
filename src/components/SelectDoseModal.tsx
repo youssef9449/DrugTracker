@@ -59,7 +59,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
 }) => {
   if (!medication) return null;
   const today = getTodayDateString();
-  const now = new Date();
   const schedule: MedicationDose[] = Array.isArray(medication.doseSchedule)
     ? medication.doseSchedule
     : [];

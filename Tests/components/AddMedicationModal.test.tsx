@@ -456,14 +456,14 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
 describe('AddMedicationModal — stock helper fields allow empty mid-edit', () => {
   afterEach(() => cleanup());
 
-  it('علب كاملة / أشرطة إضافية / حبات منفردة can be cleared then retyped', () => {
+  it('علب كاملة / أشرطة إضافية / أقراص منفردة can be cleared then retyped', () => {
     render(<AddMedicationModal {...baseProps()} />);
 
     fireEvent.click(screen.getByText(/احسب من العلب والأشرطة المتوفرة/));
     expect(screen.getByText('علب كاملة')).toBeInTheDocument();
     expect(screen.getByText('أشرطة إضافية')).toBeInTheDocument();
     expect(screen.getByText('حبات منفردة')).toBeInTheDocument();
-    expect(screen.queryByText('حبات فَرط')).not.toBeInTheDocument();
+    expect(screen.getByText('أقراص منفردة')).toBeInTheDocument();
 
     for (const label of ['علب كاملة', 'أشرطة إضافية', 'حبات منفردة'] as const) {
       const labelEl = screen.getByText(label);

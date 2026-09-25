@@ -41,7 +41,7 @@ const TODAY = '2026-09-16';
 
 
 
-describe('Phase 4 — mutationSeq monotonic invariant', () => {
+describe('mutationSeq monotonic invariant', () => {
   afterEach(() => {
     __resetStockMutationOrderingForTests();
   });

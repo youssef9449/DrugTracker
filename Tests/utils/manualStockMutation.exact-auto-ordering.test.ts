@@ -49,7 +49,7 @@ const TODAY = '2026-09-16';
 
 
 
-describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
+describe('Exact Auto and Manual envelope ordering', () => {
   let durable: AutoStockDurableState;
   let manualEnvelope: TestManualStockEnvelope | null;
   let failLogs: boolean;

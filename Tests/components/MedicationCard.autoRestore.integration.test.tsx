@@ -162,7 +162,7 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
     await waitFor(() => {
       const m = readPersistedMedications()[0];
       expect(requireDefined(m, 'm').currentPills).toBe(pillsBefore + 2);
-      expect(isDoseConsumedOnDate(m, 's1', getTodayDateString())).toBe(false);
+      expect(isDoseConsumedOnDate(requireDefined(m, 'm'), 's1', getTodayDateString())).toBe(false);
     });
   });
 
@@ -253,7 +253,7 @@ describe('MedicationCard Manual Take → Restore (auto OFF)', () => {
 
     await waitFor(() => {
       const m = readPersistedMedications()[0];
-      expect(isDoseConsumedOnDate(m, 's1', getTodayDateString())).toBe(true);
+      expect(isDoseConsumedOnDate(requireDefined(m, 'm'), 's1', getTodayDateString())).toBe(true);
       expect(requireDefined(m, 'm').currentPills).toBe(pillsBefore - 2);
     });
 
@@ -263,8 +263,8 @@ describe('MedicationCard Manual Take → Restore (auto OFF)', () => {
 
     await waitFor(() => {
       const m = readPersistedMedications()[0];
-      expect(isDoseConsumedOnDate(m, 's1', getTodayDateString())).toBe(false);
-      expect(isDoseSkippedOnDate(m, 's1', getTodayDateString())).toBe(true);
+      expect(isDoseConsumedOnDate(requireDefined(m, 'm'), 's1', getTodayDateString())).toBe(false);
+      expect(isDoseSkippedOnDate(requireDefined(m, 'm'), 's1', getTodayDateString())).toBe(true);
       expect(requireDefined(m, 'm').currentPills).toBe(pillsBefore);
       expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
     });

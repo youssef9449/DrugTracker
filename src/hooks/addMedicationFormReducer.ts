@@ -27,6 +27,7 @@ export interface AddMedicationFormModel {
     dosesPerDay: number;
     doseSchedule: MedicationDose[];
     warningThresholdDays: string;
+    criticalStockAlertsEnabled: boolean;
   };
   treatment: {
     isChronic: boolean;
@@ -60,6 +61,7 @@ export type AddMedicationFormAction =
   | { type: 'SET_DOSES_PER_DAY'; value: number }
   | { type: 'SET_DOSE_SCHEDULE'; value: MedicationDose[] }
   | { type: 'SET_WARNING_THRESHOLD_DAYS'; value: string }
+  | { type: 'SET_CRITICAL_STOCK_ALERTS_ENABLED'; value: boolean }
   | { type: 'SET_IS_CHRONIC'; value: boolean }
   | { type: 'SET_DURATION_DAYS_STR'; value: string }
   | { type: 'SET_TREATMENT_START_DATE_STR'; value: string }
@@ -95,6 +97,7 @@ export function createDefaultFormModel(
       dosesPerDay: 1,
       doseSchedule: defaultSchedule,
       warningThresholdDays: '5',
+      criticalStockAlertsEnabled: true,
     },
     treatment: {
       isChronic: true,
@@ -161,6 +164,7 @@ export function createEditFormModel(medication: Medication): AddMedicationFormMo
       dosesPerDay: schedule.length,
       doseSchedule: schedule,
       warningThresholdDays: String(medication.warningThresholdDays ?? 5),
+      criticalStockAlertsEnabled: medication.criticalStockAlertsEnabled !== false,
     },
     treatment: {
       isChronic: medication.isChronic !== false,
@@ -309,6 +313,14 @@ export function addMedicationFormReducer(
       return {
         ...state,
         dosage: { ...state.dosage, warningThresholdDays: action.value },
+      };
+    case 'SET_CRITICAL_STOCK_ALERTS_ENABLED':
+      return {
+        ...state,
+        dosage: {
+          ...state.dosage,
+          criticalStockAlertsEnabled: action.value,
+        },
       };
     case 'SET_IS_CHRONIC':
       return {

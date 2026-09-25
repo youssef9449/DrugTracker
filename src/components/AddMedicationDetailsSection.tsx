@@ -15,8 +15,6 @@ interface Props {
   setDosesPerDay: (value: number) => void;
   setDoseSchedule: Dispatch<SetStateAction<MedicationDose[]>>;
   resizeDoseSchedule: (schedule: MedicationDose[], count: number) => MedicationDose[];
-  warningThresholdDays: string;
-  setWarningThresholdDays: (value: string) => void;
   category: string;
   setCategory: (value: string) => void;
   colorTag: string;
@@ -24,8 +22,8 @@ interface Props {
 }
 
 export const AddMedicationDetailsSection: FC<Props> = ({
-  dosesPerDay, setDosesPerDay, setDoseSchedule, warningThresholdDays, setWarningThresholdDays,
-  category, setCategory, colorTag, setColorTag, resizeDoseSchedule,
+  dosesPerDay, setDosesPerDay, setDoseSchedule, category, setCategory, colorTag, setColorTag,
+  resizeDoseSchedule,
 }) => (
   <>
     <div className="grid grid-cols-2 gap-3 items-end">
@@ -46,19 +44,13 @@ export const AddMedicationDetailsSection: FC<Props> = ({
         </select>
       </div>
       <div className="min-w-0">
-        <label className="block text-xs font-bold text-slate-700 mb-1.5 leading-snug">التنبيه قبل النفاذ (أيام)</label>
-        <input type="number" min="1" max="100000" inputMode="numeric" value={warningThresholdDays}
-          onChange={(e) => setWarningThresholdDays(e.target.value)} placeholder="مثال: 5"
-          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white" />
-      </div>
-    </div>
-    <div className="grid grid-cols-2 gap-3">
-      <div>
         <label className="block text-xs font-bold text-slate-700 mb-1.5">التصنيف (اختياري)</label>
         <input type="text" value={category} onChange={(e) => setCategory(e.target.value)}
           placeholder="ضغط، سكري، فيتامينات..."
           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white" />
       </div>
+    </div>
+    <div className="grid grid-cols-2 gap-3">
       <div>
         <label className="block text-xs font-bold text-slate-700 mb-1.5">لون البطاقة</label>
         <div className="flex items-center gap-1.5 h-[42px]">

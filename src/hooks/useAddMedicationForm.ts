@@ -197,6 +197,7 @@ export function useAddMedicationForm({
         dailyDose: doseNum,
         unit: details.unit,
         warningThresholdDays: savedWarningThreshold,
+        criticalStockAlertsEnabled: dosage.criticalStockAlertsEnabled,
         category: details.category.trim(),
         notes: initialData?.notes || '',
         colorTag: details.colorTag,
@@ -241,6 +242,9 @@ export function useAddMedicationForm({
     warningThresholdDays: dosage.warningThresholdDays,
     setWarningThresholdDays: (v: string) =>
       dispatch({ type: 'SET_WARNING_THRESHOLD_DAYS', value: v }),
+    criticalStockAlertsEnabled: dosage.criticalStockAlertsEnabled,
+    setCriticalStockAlertsEnabled: (v: boolean) =>
+      dispatch({ type: 'SET_CRITICAL_STOCK_ALERTS_ENABLED', value: v }),
     category: details.category,
     setCategory: (v: string) => dispatch({ type: 'SET_CATEGORY', value: v }),
     colorTag: details.colorTag,

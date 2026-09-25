@@ -240,6 +240,49 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     expect(screen.queryByText('الجرعة 2')).not.toBeInTheDocument();
   });
 
+  it('shows stock notification settings and saves the per-medication preference', () => {
+    const onSave = vi.fn();
+    render(<AddMedicationModal {...baseProps({ onSave })} />);
+
+    const stockToggle = screen.getByRole('switch', {
+      name: 'إشعارات المخزون مفعّلة — انقر للإيقاف',
+    });
+    expect(stockToggle).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(stockToggle);
+    expect(stockToggle).toHaveAttribute('aria-checked', 'false');
+
+    const thresholdInput = screen.getByPlaceholderText('مثال: 5') as HTMLInputElement;
+    fireEvent.change(thresholdInput, { target: { value: '9' } });
+
+    fireEvent.change(screen.getByPlaceholderText(/بانادول|كونكور/), {
+      target: { value: 'Stock Alert Med' },
+    });
+
+    fireEvent.click(screen.getByText('إضافة الدواء'));
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = requireDefined(onSave.mock.calls[0], 'onSave.mock.calls[0]')[0];
+    expect(saved.criticalStockAlertsEnabled).toBe(false);
+    expect(saved.warningThresholdDays).toBe(9);
+  });
+
+  it('loads disabled stock notifications when editing a medication', () => {
+    const med = makeMed({
+      criticalStockAlertsEnabled: false,
+      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+      dosesPerDay: 1,
+    });
+
+    render(<AddMedicationModal {...baseProps({ initialData: med })} />);
+
+    expect(
+      screen.getByRole('switch', {
+        name: 'إشعارات المخزون متوقفة — انقر للتفعيل',
+      })
+    ).toHaveAttribute('aria-checked', 'false');
+  });
+
   it('uses the global Auto-Deduction default for new medication and allows an explicit override', () => {
     const onSave = vi.fn();
     render(

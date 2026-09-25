@@ -9,7 +9,6 @@ import { getTodayDateString, tomorrowDateString, localEpochMs } from '../utils/d
 import {
   getAutoDeductionDefinitionForDate,
   getAutoDeductionDefinitionSignature,
-  medicationIdsWithoutAutoSchedule,
 } from '../utils/autoDeductionDefinition';
 import {
   cancelAutoDeduction,
@@ -188,11 +187,6 @@ export interface AutoDeductionSchedulerStatus {
    * should surface the actionable exact-alarm prerequisite (#500).
    */
   schedulingBlockedByExactAlarmPermission: boolean;
-  /**
-   * Auto-enabled medication IDs with NO usable explicit doseSchedule
-   * (#502 explicit unsupported state — no silent zero-occurrence schedule).
-   */
-  medicationIdsMissingDoseSchedule: string[];
 }
 
 export function useAutoDeductionScheduler({
@@ -209,10 +203,6 @@ export function useAutoDeductionScheduler({
     new ScheduledOperationCoordinator<string>()
   );
   const recoveryBoundaryRef = useRef<string | null>(null);
-  const missingScheduleMedicationIds = useMemo(
-    () => medicationIdsWithoutAutoSchedule(medications),
-    [medications]
-  );
   const signature = useMemo(
     () =>
       [
@@ -399,6 +389,5 @@ export function useAutoDeductionScheduler({
   return {
     schedulingBlockedByExactAlarmPermission:
       isAutoDeductionBlockedByExactAlarmPermission(exactAlarmPermission),
-    medicationIdsMissingDoseSchedule: missingScheduleMedicationIds,
   };
 }

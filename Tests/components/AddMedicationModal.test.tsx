@@ -95,7 +95,7 @@ describe('AddMedicationModal — noStrips edit preserves packageSize (#14)', () 
     fireEvent.click(screen.getByText('حفظ التعديلات'));
 
     expect(onSave).toHaveBeenCalledTimes(1);
-    const savedData = onSave.mock.calls[0][0];
+    const savedData = requireDefined(onSave.mock.calls[0], 'onSave.mock.calls[0]')[0];
     // packageSize must still be 15, not 3.
     expect(savedData.packageSize).toBe(15);
     // stripsPerBox/pillsPerStrip must be undefined (noStrips).
@@ -138,7 +138,7 @@ describe('AddMedicationModal — noStrips edit preserves packageSize (#14)', () 
     fireEvent.click(screen.getByText('إضافة الدواء'));
 
     expect(onSave).toHaveBeenCalledTimes(1);
-    const savedData = onSave.mock.calls[0][0];
+    const savedData = requireDefined(onSave.mock.calls[0], 'onSave.mock.calls[0]')[0];
     expect(savedData.packageSize).toBe(20);
     expect(savedData.stripsPerBox).toBeUndefined();
   });
@@ -186,7 +186,7 @@ describe('AddMedicationModal — noStrips edit preserves packageSize (#14)', () 
     fireEvent.click(screen.getByText('إضافة الدواء'));
 
     expect(onSave).toHaveBeenCalledTimes(1);
-    const savedData = onSave.mock.calls[0][0];
+    const savedData = requireDefined(onSave.mock.calls[0], 'onSave.mock.calls[0]')[0];
     expect(savedData.unit).toBe('مل');
     expect(savedData.packageSize).toBe(120);
     expect(savedData.stripsPerBox).toBeUndefined();
@@ -258,7 +258,7 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     fireEvent.click(screen.getByText('إضافة الدواء'));
 
     expect(onSave).toHaveBeenCalledTimes(1);
-    expect(onSave.mock.calls[0][0].autoDeductEnabled).toBe(true);
+    expect(requireDefined(onSave.mock.calls[0], 'onSave.mock.calls[0]')[0].autoDeductEnabled).toBe(true);
   });
 
   it('ignores malformed persisted dose description instead of throwing', () => {
@@ -350,7 +350,7 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     fireEvent.click(screen.getByText('حفظ التعديلات'));
 
     expect(onSave).toHaveBeenCalledTimes(1);
-    const saved = onSave.mock.calls[0][0];
+    const saved = requireDefined(onSave.mock.calls[0], 'onSave.mock.calls[0]')[0];
     expect(saved.currentPills).toBe(42);
     expect(saved.doseSchedule).toHaveLength(1);
     expect(saved.dosesPerDay).toBe(1);

@@ -49,7 +49,7 @@ const TODAY = '2026-09-16';
 
 
 
-describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
+describe('Manual envelope recovery and persistence failure', () => {
   let durable: AutoStockDurableState;
   let manualEnvelope: TestManualStockEnvelope | null;
   let failLogs: boolean;

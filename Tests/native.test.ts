@@ -1,19 +1,54 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Hoisted NotificationRuntime plugin mock: production bridges the listener
+// and channel flows through the custom NotificationRuntime plugin
+// (registerPlugin('NotificationRuntime')), so the mock must be stable
+// across vi.resetModules() re-imports and name-aware.
+const notificationRuntimePlugin = vi.hoisted(() => {
+  const listeners: Record<string, (event: Record<string, unknown>) => void> = {};
+  return {
+    listeners,
+    addListener: vi.fn(
+      (eventName: string, cb: (event: Record<string, unknown>) => void) => {
+        listeners[eventName] = cb;
+        return Promise.resolve({ remove: vi.fn(() => Promise.resolve()) });
+      }
+    ),
+    ensureChannel: vi.fn(
+      (_options: {
+        channelId: string;
+        channelName: string;
+        channelImportance: number;
+        channelVisibility?: number;
+      }) => Promise.resolve({ ok: true })
+    ),
+    checkChannel: vi.fn(() => Promise.resolve({ enabled: true })),
+    checkPermission: vi.fn(() => Promise.resolve({ enabled: true })),
+    retryPersistedNotificationDeliveries: vi.fn(() => Promise.resolve({ retried: 0 })),
+    post: vi.fn(() => Promise.resolve({ ok: true })),
+    cancel: vi.fn(() => Promise.resolve({ ok: true })),
+  };
+});
+const getPlatform = vi.hoisted(() => vi.fn(() => 'android'));
+
 // Mock the Capacitor modules before importing native.ts.
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
-    getPlatform: vi.fn(() => 'android'),
+    getPlatform,
   },
-  registerPlugin: () => ({
-    getNextOccurrence: () => Promise.resolve({ valid: false, nextOccurrenceMs: 0 }),
-    clearReArm: () => Promise.resolve({ ok: true }),
-  }),
+  registerPlugin: (name: string) => {
+    if (name === 'NotificationRuntime') return notificationRuntimePlugin;
+    return {
+      getNextOccurrence: () => Promise.resolve({ valid: false, nextOccurrenceMs: 0 }),
+      clearReArm: () => Promise.resolve({ ok: true }),
+    };
+  },
 }));
 vi.mock('@capacitor/status-bar', () => ({
   StatusBar: {
     setBackgroundColor: vi.fn(() => Promise.resolve()),
+    setStyle: vi.fn(() => Promise.resolve()),
   },
   Style: { Light: 'LIGHT' },
 }));
@@ -128,147 +163,151 @@ describe('native.ts — createChannel cast removed (#37)', () => {
 });
 
 /**
- * Notification channel creation — verifies the two-channel design:
- * - dose-reminder-v3: background/killed channel, HIGH importance, no
- *   custom sound (system default).
+ * Channel bootstrap — verifies the two-channel dose-reminder design at its
+ * CURRENT seam. JS-side LocalNotifications.createChannel no longer exists:
+ * Notification Runtime (native plugin) owns channel creation, and startup
+ * bootstraps the channels via initializeNativeRuntime →
+ * ensureNotificationChannel (#503):
+ * - dose-reminder-v3: background/killed channel, HIGH importance (audible,
+ *   system default sound).
  * - dose-reminder-foreground-v1: foreground channel, LOW importance
- *   (silent — no Android sound), no custom sound.
- * - Old v1/v2 channels are deleted on migration.
- * - The unrelated low-stock channel is also created.
+ *   (guaranteed silent).
  */
-describe('native.ts — two-channel dose-reminder design', () => {
-  it('creates both dose-reminder channels + low-stock with correct config', async () => {
+describe('native channel bootstrap — two-channel dose-reminder design', () => {
+  it('bootstraps both dose-reminder channels with correct config and no custom sound', async () => {
     // Reset the initialized flag so initNativeBridge runs again.
     vi.resetModules();
 
-    const { LocalNotifications } = await import('@capacitor/local-notifications');
     const { initNativeBridge } = await import('@/native');
+    const { initializeNativeRuntime } = await import('@/utils/appHydrationPhases');
     const {
       DOSE_REMINDER_CHANNEL_ID,
       DOSE_REMINDER_FOREGROUND_CHANNEL_ID,
     } = await import('./utils/notificationTestFacade');
 
-    vi.mocked(LocalNotifications.listChannels).mockResolvedValue({ channels: [] });
-    vi.mocked(LocalNotifications.createChannel).mockClear();
-    vi.mocked(LocalNotifications.deleteChannel).mockClear();
-
     await initNativeBridge();
+    notificationRuntimePlugin.ensureChannel.mockClear();
+    await initializeNativeRuntime(vi.fn());
 
-    // createChannel should have been called for each channel.
-    const created = vi.mocked(LocalNotifications.createChannel).mock.calls.map(
+    // ensureChannel should have been called for each dose-reminder channel.
+    const created = notificationRuntimePlugin.ensureChannel.mock.calls.map(
       (c) => c[0]
     );
-    const createdIds = new Set(created.map((c) => c.id));
+    const createdIds = new Set(created.map((c) => c.channelId));
 
     // ── Background channel (dose-reminder-v3) ──
-    // Must produce the Android SYSTEM DEFAULT notification sound (not silence,
-    // not a custom wav). The chain is:
-    //   1. We pass NO `sound` property on the channel object.
-    //   2. Capacitor 6.x NotificationChannelManager.createChannel() reads
-    //      `sound` and only calls NotificationChannel.setSound() when it's a
-    //      non-empty string. With no `sound`, setSound is never called.
-    //   3. The Android NotificationChannel constructor sets the default sound
-    //      to Settings.System.DEFAULT_NOTIFICATION_URI.
-    //   4. HIGH importance (4) makes the channel audible + heads-up.
-    // So: no sound key + HIGH importance = system default sound. ✓
+    // HIGH importance (4) makes the channel audible + heads-up. The channel
+    // carries NO `sound` property at all: the ensureChannel contract has no
+    // sound field, so the Android channel keeps the SYSTEM DEFAULT sound.
     expect(createdIds.has(DOSE_REMINDER_CHANNEL_ID)).toBe(true);
-    const bgChannel = created.find((c) => c.id === DOSE_REMINDER_CHANNEL_ID)!;
-    expect(bgChannel.importance).toBe(4); // HIGH → audible
-    // The `sound` key must be ABSENT (not just null/empty). Capacitor's
-    // createChannel only calls setSound for non-empty strings, so an absent
-    // sound key → no setSound call → constructor default → system sound.
-    expect(bgChannel.sound).toBeUndefined();
-    expect('sound' in bgChannel).toBe(false); // key truly absent
+    const bgChannel = created.find((c) => c.channelId === DOSE_REMINDER_CHANNEL_ID)!;
+    expect(bgChannel.channelImportance).toBe(4); // HIGH → audible
+    expect('sound' in bgChannel).toBe(false); // no custom sound crosses the bridge
 
     // ── Foreground channel (dose-reminder-foreground-v1) ──
     // Must be SILENT. Achieved via LOW importance (2) — Android never plays
-    // sound for LOW-importance channels regardless of the sound URI. The
-    // absent `sound` property is consistent with the background channel but
-    // the silence is GUARANTEED by importance=2, not by the missing sound.
+    // sound for LOW-importance channels regardless of the sound URI.
     expect(createdIds.has(DOSE_REMINDER_FOREGROUND_CHANNEL_ID)).toBe(true);
     const fgChannel = created.find(
-      (c) => c.id === DOSE_REMINDER_FOREGROUND_CHANNEL_ID
+      (c) => c.channelId === DOSE_REMINDER_FOREGROUND_CHANNEL_ID
     )!;
-    expect(fgChannel.importance).toBe(2); // LOW → guaranteed silent
-    expect(fgChannel.sound).toBeUndefined();
-
-    // Low-stock channel also created.
-    expect(createdIds.has('low-stock')).toBe(true);
+    expect(fgChannel.channelImportance).toBe(2); // LOW → guaranteed silent
+    expect('sound' in fgChannel).toBe(false);
   });
 
-  it('background channel would NOT pass a sound string to createChannel (the only path Capacitor treats as custom sound)', async () => {
-    // This test guards against a future regression where someone adds a
-    // `sound` field to the background channel thinking it's needed for
-    // "system default". In Capacitor 6.x, ANY non-empty sound string is
-    // treated as a custom res/raw/ resource — passing one would BREAK
-    // the system-default behavior. The background channel must have NO
-    // sound string at all.
+  it('initNativeBridge sets StatusBar color/style and registers Notification Runtime listeners even if StatusBar setup fails', async () => {
+    // The bridge contract: safe-area/status-bar setup is best-effort (wrapped
+    // in try/catch) and must never block listener registration, while the
+    // dose-reminder listeners register through the NotificationRuntime plugin
+    // (LocalNotifications.addListener is iOS-only now).
     vi.resetModules();
 
-    const { LocalNotifications } = await import('@capacitor/local-notifications');
+    const { StatusBar } = await import('@capacitor/status-bar');
+    const { Style } = (await import('@capacitor/status-bar')) as { Style: { Light: string } };
     const { initNativeBridge } = await import('@/native');
-    const { DOSE_REMINDER_CHANNEL_ID } = await import('./utils/notificationTestFacade');
 
-    vi.mocked(LocalNotifications.listChannels).mockResolvedValue({ channels: [] });
-    vi.mocked(LocalNotifications.createChannel).mockClear();
     await initNativeBridge();
 
-    const created = vi.mocked(LocalNotifications.createChannel).mock.calls.map(
-      (c) => c[0]
-    );
-    const bgChannel = created.find((c) => c.id === DOSE_REMINDER_CHANNEL_ID)!;
+    expect(vi.mocked(StatusBar.setBackgroundColor)).toHaveBeenCalledWith({ color: '#0f766e' });
+    expect(vi.mocked(StatusBar.setStyle)).toHaveBeenCalledWith({ style: Style.Light });
 
-    // A non-empty string here would make Capacitor call setSound() with a
-    // res/raw/<sound> URI — a custom sound. Must be absent.
-    expect(typeof bgChannel.sound).not.toBe('string');
-    expect(bgChannel.sound).toBeFalsy();
+    // Both dose-reminder listeners register through NotificationRuntime.
+    expect(notificationRuntimePlugin.addListener).toHaveBeenCalledWith(
+      'notificationReceived',
+      expect.any(Function)
+    );
+    expect(notificationRuntimePlugin.addListener).toHaveBeenCalledWith(
+      'notificationActionPerformed',
+      expect.any(Function)
+    );
+    // JS-side LocalNotifications channel/listener setup is gone on Android.
+    expect(notificationRuntimePlugin.addListener).not.toHaveBeenCalledWith(
+      'localNotificationReceived',
+      expect.anything()
+    );
+
+    // StatusBar failure must not block listener registration (fresh module
+    // instance so the bridge's once-only guard does not skip init).
+    vi.resetModules();
+    const native2 = await import('@/native');
+    vi.mocked(StatusBar.setStyle).mockRejectedValueOnce(new Error('status bar boom'));
+    notificationRuntimePlugin.addListener.mockClear();
+    await native2.initNativeBridge();
+    expect(notificationRuntimePlugin.addListener).toHaveBeenCalledWith(
+      'notificationReceived',
+      expect.any(Function)
+    );
+    expect(notificationRuntimePlugin.addListener).toHaveBeenCalledWith(
+      'notificationActionPerformed',
+      expect.any(Function)
+    );
   });
 
 });
 
-describe('native.ts — localNotificationReceived dose isolation', () => {
+/**
+ * Dose isolation on the received-notification path. The payload contract is
+ * now namespace+identity based: a dose reminder carries
+ * namespace 'dose-reminder' and identity '<medicationId>::<doseId>'
+ * (built from trimmed ids at scheduling time — a blank doseId never
+ * produces an identity). Any other namespace (e.g. critical-stock) must not
+ * reach the dose handler.
+ */
+describe('native.ts — received-notification dose isolation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getPlatform.mockReturnValue('android');
   });
 
-  async function captureReceivedListener(): Promise<(n: { extra?: { medicationId?: string; doseId?: string } }) => void> {
+  async function captureReceivedListener(): Promise<(n: Record<string, unknown>) => void> {
     vi.resetModules();
-    const { LocalNotifications } = await import('@capacitor/local-notifications');
     const { initNativeBridge } = await import('@/native');
     const { cleanupNativeListeners } = await import('@/native');
     await cleanupNativeListeners();
-    vi.mocked(LocalNotifications.addListener).mockImplementation((event, cb) => {
-      (LocalNotifications as unknown as { __cb?: Record<string, unknown> }).__cb =
-        (LocalNotifications as unknown as { __cb?: Record<string, unknown> }).__cb || {};
-      (LocalNotifications as unknown as { __cb: Record<string, unknown> }).__cb[event as string] = cb;
-      return Promise.resolve({ remove: vi.fn(() => Promise.resolve()) });
-    });
+    delete notificationRuntimePlugin.listeners.notificationReceived;
+    delete notificationRuntimePlugin.listeners.notificationActionPerformed;
     await initNativeBridge();
-    const cb = (LocalNotifications as unknown as { __cb: Record<string, (n: unknown) => void> }).__cb[
-      'localNotificationReceived'
-    ];
-    if (!cb) throw new Error('localNotificationReceived listener not registered');
-    return cb as (n: { extra?: { medicationId?: string; doseId?: string } }) => void;
+    const cb = notificationRuntimePlugin.listeners['notificationReceived'];
+    if (!cb) throw new Error('notificationReceived listener not registered');
+    return cb as (n: Record<string, unknown>) => void;
   }
 
-  it('does not call doseReceivedHandler for Critical Stock shape (medicationId only)', async () => {
+  it('does not call doseReceivedHandler for Critical Stock shape (different namespace, no dose identity)', async () => {
     const handler = vi.fn();
-    const { registerDoseReceivedHandler } = await import('@/native');
-    registerDoseReceivedHandler(handler);
     const received = await captureReceivedListener();
     // Re-register after module reset inside capture
     const mod = await import('@/native');
     mod.registerDoseReceivedHandler(handler);
-    received({ extra: { medicationId: 'med-1' } });
+    received({ namespace: 'critical-stock', identity: 'med-1', extra: { medicationId: 'med-1' } });
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('calls doseReceivedHandler for dose reminder (medicationId + doseId)', async () => {
+  it('calls doseReceivedHandler for dose reminder (medicationId + doseId identity)', async () => {
     const handler = vi.fn();
     const received = await captureReceivedListener();
     const mod = await import('@/native');
     mod.registerDoseReceivedHandler(handler);
-    received({ extra: { medicationId: 'med-1', doseId: 'd1' } });
+    received({ namespace: 'dose-reminder', identity: 'med-1::d1' });
     expect(handler).toHaveBeenCalledWith('med-1', 'd1');
   });
 
@@ -277,7 +316,45 @@ describe('native.ts — localNotificationReceived dose isolation', () => {
     const received = await captureReceivedListener();
     const mod = await import('@/native');
     mod.registerDoseReceivedHandler(handler);
-    received({ extra: { medicationId: 'med-1', doseId: '   ' } });
+    // A blank doseId is trimmed away at scheduling time, so it can only
+    // appear as an empty identity segment — never a valid dose identity.
+    received({ namespace: 'dose-reminder', identity: 'med-1::' });
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('does not call doseReceivedHandler for a dose-reminder event without an identity separator', async () => {
+    const handler = vi.fn();
+    const received = await captureReceivedListener();
+    const mod = await import('@/native');
+    mod.registerDoseReceivedHandler(handler);
+    received({ namespace: 'dose-reminder', identity: 'med-1' });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('registers the iOS received listener through LocalNotifications with the namespace+identity payload', async () => {
+    getPlatform.mockReturnValue('ios');
+    vi.resetModules();
+    const { LocalNotifications } = await import('@capacitor/local-notifications');
+    const { initNativeBridge } = await import('@/native');
+    const mod = await import('@/native');
+
+    const handler = vi.fn();
+    mod.registerDoseReceivedHandler(handler);
+
+    // Capture every LocalNotifications event registration (iOS path).
+    const iosListeners: Record<string, (n: unknown) => void> = {};
+    vi.mocked(LocalNotifications.addListener).mockImplementation(((
+      event: string,
+      cb: (n: unknown) => void
+    ) => {
+      iosListeners[event] = cb;
+      return Promise.resolve({ remove: () => Promise.resolve() });
+    }) as never);
+    await initNativeBridge();
+
+    const received = iosListeners['localNotificationReceived'];
+    expect(typeof received).toBe('function');
+    received!({ extra: { namespace: 'dose-reminder', identity: 'med-1::d1' } });
+    expect(handler).toHaveBeenCalledWith('med-1', 'd1');
   });
 });

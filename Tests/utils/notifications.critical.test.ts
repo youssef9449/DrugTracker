@@ -13,6 +13,10 @@ const mocks = vi.hoisted(() => ({
   criticalCancel: vi.fn(),
   criticalVerify: vi.fn(),
   criticalList: vi.fn(),
+  // Android notification-runtime permission gate (see notificationRuntime.ts:
+  // getNotificationPermissionResult reads NotificationRuntime.checkPermission
+  // on Android — LocalNotifications.checkPermissions is iOS-only now).
+  runtimeCheckPermission: vi.fn(),
   platform: vi.fn(() => 'web'),
 }));
 
@@ -27,6 +31,11 @@ vi.mock('@capacitor/core', () => ({
         cancel: mocks.criticalCancel,
         verify: mocks.criticalVerify,
         listScheduled: mocks.criticalList,
+      };
+    }
+    if (name === 'NotificationRuntime') {
+      return {
+        checkPermission: mocks.runtimeCheckPermission,
       };
     }
     return {
@@ -56,6 +65,7 @@ beforeEach(() => {
   mocks.platform.mockReturnValue('web');
   mocks.checkPermissions.mockResolvedValue({ display: 'granted' });
   mocks.checkExactNotificationSetting.mockResolvedValue({ exact_alarm: 'granted' });
+  mocks.runtimeCheckPermission.mockResolvedValue({ enabled: true });
   mocks.getPending.mockResolvedValue({ notifications: [] });
   mocks.schedule.mockResolvedValue({ notifications: [] });
 });
@@ -153,7 +163,7 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
   beforeEach(() => {
     // Switch the platform mock to 'android' just for this describe block.
     mocks.platform.mockReturnValue('android');
-    mocks.checkPermissions.mockResolvedValue({ display: 'granted' });
+    mocks.runtimeCheckPermission.mockResolvedValue({ enabled: true });
     // The plugin resolves with the descriptors it actually registered.
     mocks.criticalSchedule.mockResolvedValue({ ok: true });
     mocks.criticalCancel.mockResolvedValue({ ok: true, status: 'SUCCESS' });
@@ -230,7 +240,7 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
   });
 
   it('skips scheduling when permission is not granted and reports failure', async () => {
-    mocks.checkPermissions.mockResolvedValue({ display: 'denied' });
+    mocks.runtimeCheckPermission.mockResolvedValue({ enabled: false });
     await expect(
       scheduleCriticalAlarm('med-1', 'Test Med', Date.now() + 1000)
     ).resolves.toMatchObject({ ok: false, errorCode: 'permission_denied' });
@@ -309,19 +319,22 @@ describe('verifyCriticalAlarmPending — the claim is not proof the alarm exists
     });
   });
 
-  it('display permission lost → NOT verified (an alarm that cannot display must not stay armed)', async () => {
+  it('display permission lost → NOT verified: a hard permission failure never confirms an alarm', async () => {
+    // Contract (notificationRuntime.getNotificationPermissionResult): when the
+    // Android notification runtime reports permissions disabled, verify
+    // fails closed with permission_denied instead of answering pending:false.
     mocks.platform.mockReturnValue('android');
-    mocks.checkPermissions.mockResolvedValue({ display: 'denied' });
+    mocks.runtimeCheckPermission.mockResolvedValue({ enabled: false });
     const t = Date.now() + 7 * 24 * 60 * 60 * 1000;
     mocks.criticalVerify.mockResolvedValue({ ok: true });
     await expect(verifyCriticalAlarmPending('med-1', t)).resolves.toMatchObject({
-      ok: true,
-      pending: false,
+      ok: false,
+      errorCode: 'permission_denied',
     });
     expect(mocks.criticalVerify).not.toHaveBeenCalled();
   });
 
-  it('BLOCKER: exact-alarm setting denied on Android 12+ → NOT verified (the OS cancels exact alarms; the pending record may still list them)', async () => {
+  it('BLOCKER: native verify reports the alarm as not pending → NOT verified (the OS may cancel exact alarms even when an armed claim exists)', async () => {
     mocks.platform.mockReturnValue('android');
     const t = Date.now() + 7 * 24 * 60 * 60 * 1000;
     mocks.criticalVerify.mockResolvedValue({ ok: false });

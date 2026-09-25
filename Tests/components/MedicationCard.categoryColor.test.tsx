@@ -161,19 +161,23 @@ describe('MedicationCard — Category Badge Color matching colorTag', () => {
 
     const heading = screen.getByRole('heading', { level: 3 });
     expect(heading).toHaveTextContent(baseMed.name);
-    expect(heading).toHaveClass('block');
-    expect(heading).toHaveClass('w-full');
+    // Current layout: the name is a truncating flex-1 element on its own
+    // header row; the category badge renders in a separate row below it.
+    expect(heading).toHaveClass('truncate');
 
     const badge = screen.getByText('السكري');
     expect(badge).toBeInTheDocument();
     expect(badge).toHaveClass('bg-sky-50');
     expect(badge).toHaveClass('text-sky-800');
+    expect(heading.parentElement!).not.toContainElement(badge);
   });
 
   it('renders medication name on its own line in alerts view with badges below it and simplified refill button', () => {
     render(
       <MedicationCard
-        medication={{ ...baseMed, currentPills: 1, colorTag: 'rose', category: 'السكري' }}
+        // currentPills 0 → out_of_stock (daysLeft 0 with stock left is
+        // 'critical' under the current status model, not 'نفد').
+        medication={{ ...baseMed, currentPills: 0, colorTag: 'rose', category: 'السكري' }}
         viewFilter="alerts"
         onOpenRefill={vi.fn()}
         onEdit={vi.fn()}
@@ -184,10 +188,11 @@ describe('MedicationCard — Category Badge Color matching colorTag', () => {
 
     const heading = screen.getByRole('heading', { level: 3 });
     expect(heading).toHaveTextContent(baseMed.name);
-    expect(heading).toHaveClass('block');
-    expect(heading).toHaveClass('w-full');
+    expect(heading).toHaveClass('truncate');
+    const badge = screen.getByText('السكري');
+    expect(heading.parentElement!).not.toContainElement(badge);
     expect(screen.getAllByText('نفد المخزون بالكامل').length).toBeGreaterThan(0);
-    expect(screen.getByText('السكري')).toBeInTheDocument();
+    expect(badge).toBeInTheDocument();
 
     // Refill button has "تعبئة رصيد" only without (+ علبة)
     const refillBtn = screen.getByRole('button', { name: /تعبئة رصيد/i });
@@ -210,9 +215,10 @@ describe('MedicationCard — Category Badge Color matching colorTag', () => {
 
     const heading = screen.getByRole('heading', { level: 3 });
     expect(heading).toHaveTextContent(baseMed.name);
-    expect(heading).toHaveClass('block');
-    expect(heading).toHaveClass('w-full');
+    expect(heading).toHaveClass('truncate');
+    const badge = screen.getByText('السكري');
+    expect(heading.parentElement!).not.toContainElement(badge);
     expect(screen.getByText('مخزون آمن ومريح')).toBeInTheDocument();
-    expect(screen.getByText('السكري')).toBeInTheDocument();
+    expect(badge).toBeInTheDocument();
   });
 });

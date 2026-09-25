@@ -83,6 +83,9 @@ describe('AddMedicationModal — noStrips edit preserves packageSize (#14)', () 
       packageSize: 15,
       stripsPerBox: undefined,
       pillsPerStrip: undefined,
+      // Save now requires a valid dose schedule (explicit-schedule contract).
+      doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+      dosesPerDay: 1,
     });
     const onSave = vi.fn();
 
@@ -282,7 +285,11 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     );
 
     expect(screen.getByText('الجرعة 1')).toBeInTheDocument();
-    expect(screen.getByLabelText('توضيح للجرعة (اختياري)')).toHaveValue('');
+    // The dose-description input is not label-associated in the current
+    // markup; locate it by its placeholder.
+    expect(
+      screen.getByPlaceholderText('مثال: بعد الإفطار، قبل النوم، مع الغداء...')
+    ).toHaveValue('');
   });
 
   it('changing dosesPerDay from 1 → 3 creates three rows', () => {
@@ -408,7 +415,15 @@ describe('AddMedicationModal — durable failure stays retryable', () => {
     const onSave = vi.fn().mockResolvedValue(false);
     render(
       <AddMedicationModal
-        {...baseProps({ onClose, onSave, initialData: makeMed() })}
+        {...baseProps({
+          onClose,
+          onSave,
+          initialData: makeMed({
+            // Save requires a valid dose schedule (explicit-schedule contract).
+            doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
+            dosesPerDay: 1,
+          }),
+        })}
       />
     );
 

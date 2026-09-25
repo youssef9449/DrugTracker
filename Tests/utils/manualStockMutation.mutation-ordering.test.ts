@@ -111,7 +111,7 @@ describe('Phase 4 — mutationSeq monotonic invariant', () => {
 
   it('allocation persistence failure prevents envelope creation path', async () => {
     let durable: AutoStockDurableState = {
-      medications: [med()],
+      medications: [med({ currentPills: 10 })],
       logs: [],
     };
     __setAutoStockGateTestHooks({

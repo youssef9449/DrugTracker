@@ -236,14 +236,21 @@ describe('SelectDoseModal', () => {
       />
     );
 
+    // Manage mode: status + amount live on the dose ROW; the action lives on
+    // the row's action button.
+    const d1Row = document.querySelector<HTMLElement>(
+      '[data-dose-row-dose-id="d1"]'
+    );
+    expect(d1Row).not.toBeNull();
+    expect(d1Row).toHaveAttribute('data-dose-status', 'auto');
+    expect(d1Row).toHaveTextContent('2 قرص');
+    expect(d1Row).toHaveTextContent('الحالة: تم الخصم تلقائيًا');
+
     const d1 = screen
       .getAllByRole('button')
       .find((b) => b.getAttribute('data-dose-id') === 'd1');
-
-    expect(d1).toHaveAttribute('data-dose-status', 'auto');
-    expect(d1).toHaveTextContent('2 قرص');
-    expect(d1).toHaveTextContent('الحالة: تم الخصم تلقائيًا');
     expect(d1).toHaveAttribute('data-dose-action', 'restore');
+    expect(d1).toHaveTextContent('استرجاع الجرعة (+2)');
   });
 
   it('marks consumed doses and blocks re-selection', () => {
@@ -286,16 +293,45 @@ describe('SelectDoseModal', () => {
   });
 
   describe('mode=restore', () => {
-    it('shows restore subtitle and enables only completed doses', () => {
+    it('shows restore subtitle and enables only durably consumed doses with deduction evidence', () => {
       const today = getTodayDateString();
       const onSelect = vi.fn();
       // 12:00 — d1 elapsed (auto), d2/d3 still ahead
       vi.setSystemTime(new Date(2026, 8, 13, 12, 0, 0));
+      // Restore is evidence-gated: a dose is selectable only when it was
+      // durably consumed AND an ACTIVE deduction log exists for the
+      // occurrence. Pure time-elapsed projection (d3) is never restorable.
       render(
         <SelectDoseModal
           isOpen
           mode="restore"
-          medication={makeMulti({ doseConsumptionHistory: { d2: [today] } })}
+          medication={makeMulti({
+            doseConsumptionHistory: { d1: [today], d2: [today] },
+          })}
+          logs={[
+            {
+              id: 'exact-auto:med-multi:d1:' + today,
+              medicationId: 'med-multi',
+              medicationName: 'Multi Med',
+              type: 'exact_auto',
+              amount: -2,
+              date: today,
+              timestamp: '2026-09-13T08:00:00.000Z',
+              description: 'Exact Auto deduction',
+              doseId: 'd1',
+            },
+            {
+              id: 'take-d2',
+              medicationId: 'med-multi',
+              medicationName: 'Multi Med',
+              type: 'dose_taken',
+              amount: -1,
+              date: today,
+              timestamp: '2026-09-13T12:00:00.000Z',
+              description: 'تناول جرعة يدوياً (-1 قرص)',
+              doseId: 'd2',
+            },
+          ]}
           onSelect={onSelect}
           onClose={() => {}}
         />
@@ -312,11 +348,11 @@ describe('SelectDoseModal', () => {
         .getAllByRole('button')
         .find((b) => b.getAttribute('data-dose-id') === 'd3');
 
-      // d1 auto-elapsed → restorable
+      // d1 auto-consumed + exact_auto evidence → restorable
       expect(d1).not.toBeDisabled();
-      // d2 manually consumed → restorable
+      // d2 manually consumed + dose_taken evidence → restorable
       expect(d2).not.toBeDisabled();
-      // d3 not yet elapsed or consumed → not restorable
+      // d3 not consumed and no evidence → not restorable
       expect(d3).toBeDisabled();
 
       fireEvent.click(d2!);
@@ -325,8 +361,9 @@ describe('SelectDoseModal', () => {
 
     it('disables already-restored (skipped) doses', () => {
       const today = getTodayDateString();
-      // d2 still manually consumed → list is shown (not empty state).
-      // d1 skipped → present with data-dose-id, real disabled, not actionable.
+      // d2 durably consumed with active dose_taken evidence → selectable, so
+      // the list is shown (not the empty state). d1 skipped/restored →
+      // rendered disabled, not actionable.
       render(
         <SelectDoseModal
           isOpen
@@ -335,6 +372,19 @@ describe('SelectDoseModal', () => {
             doseSkippedHistory: { d1: [today] },
             doseConsumptionHistory: { d2: [today] },
           })}
+          logs={[
+            {
+              id: 'take-d2',
+              medicationId: 'med-multi',
+              medicationName: 'Multi Med',
+              type: 'dose_taken',
+              amount: -1,
+              date: today,
+              timestamp: '2026-09-13T12:00:00.000Z',
+              description: 'تناول جرعة يدوياً (-1 قرص)',
+              doseId: 'd2',
+            },
+          ]}
           onSelect={() => {}}
           onClose={() => {}}
         />

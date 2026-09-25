@@ -114,6 +114,30 @@ async function clickCardManage(medId: string = MED_ID): Promise<void> {
   fireEvent.click(btn);
 }
 
+/**
+ * Durable deduction evidence for one occurrence. Current production Restore
+ * (UI + durable domain) is evidence-gated: it reverses an ACTIVE (un-reversed)
+ * dose_taken / exact_auto log for (medicationId + doseId + calendarDate).
+ */
+function makeDoseTakenLog(doseId: string, amount: number): ConsumptionLog {
+  return {
+    id: `seed-take-${doseId}`,
+    medicationId: MED_ID,
+    medicationName: 'Restore Select Med',
+    type: 'dose_taken',
+    amount: -amount,
+    date: TEST_DATE,
+    timestamp: `${TEST_DATE}T12:00:00.000Z`,
+    description: `تناول جرعة يدوياً (-${amount} قرص)`,
+    doseId,
+  };
+}
+
+/** Evidence for the makeMulti fixture: d1 (amount 1) and d2 (amount 2) consumed. */
+function makeMultiEvidenceLogs(): ConsumptionLog[] {
+  return [makeDoseTakenLog('d1', 1), makeDoseTakenLog('d2', 2)];
+}
+
 /** Explicit single-slot Card restore path — no manage modal, direct restore button. */
 async function clickCardRestoreDirect(medId: string): Promise<void> {
   const btn = await screen.findByTestId(`restore-dose-${medId}`);
@@ -177,7 +201,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
   it('Test 2 — selecting d2 restores doseId=d2 with amount=2 (not dailyDose)', async () => {
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMulti()]));
-    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify(makeMultiEvidenceLogs()));
 
     render(<App />);
     await waitFor(() => {
@@ -190,7 +214,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     await selectDoseInModal('d2');
 
     await waitFor(() => {
-      const med = readPersistedMedications()[0];
+      const med = requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]');
       const restores = readLogs().filter(
         (l) => l.type === 'skipped_day' && l.doseId === 'd2'
       );
@@ -206,7 +230,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
   it('Test 3 — sibling isolation: restore d2 does not change d1', async () => {
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMulti()]));
-    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify(makeMultiEvidenceLogs()));
 
     render(<App />);
     await waitFor(() => {
@@ -217,11 +241,11 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     await selectDoseInModal('d2');
 
     await waitFor(() => {
-      const med = readPersistedMedications()[0];
-      expect(requireDefined(med, 'med').doseConsumptionHistory?.d1).toBe(TEST_DATE);
-      expect(requireDefined(med, 'med').doseSkippedHistory?.d1).toBeUndefined();
-      expect(requireDefined(med, 'med').doseConsumptionHistory?.d2).toBeUndefined();
-      expect(requireDefined(med, 'med').doseSkippedHistory?.d2).toEqual([getTodayDateString()]);
+      const med = requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]');
+      expect(med.doseConsumptionHistory?.d1).toEqual([TEST_DATE]);
+      expect(med.doseSkippedHistory?.d1).toBeUndefined();
+      expect(med.doseConsumptionHistory?.d2).toBeUndefined();
+      expect(med.doseSkippedHistory?.d2).toEqual([getTodayDateString()]);
       expect(
         readLogs().filter((l) => l.type === 'skipped_day' && l.doseId === 'd1')
       ).toHaveLength(0);
@@ -230,7 +254,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
   it('Test 4 — reverse selection: restore d1 only affects d1', async () => {
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMulti()]));
-    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify(makeMultiEvidenceLogs()));
 
     render(<App />);
     await waitFor(() => {
@@ -243,11 +267,11 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
     await selectDoseInModal('d1');
 
     await waitFor(() => {
-      const med = readPersistedMedications()[0];
-      expect(requireDefined(med, 'med').doseConsumptionHistory?.d1).toBeUndefined();
-      expect(requireDefined(med, 'med').doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
-      expect(requireDefined(med, 'med').doseConsumptionHistory?.d2).toBe(TEST_DATE);
-      expect(requireDefined(med, 'med').doseSkippedHistory?.d2).toBeUndefined();
+      const med = requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]');
+      expect(med.doseConsumptionHistory?.d1).toBeUndefined();
+      expect(med.doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
+      expect(med.doseConsumptionHistory?.d2).toEqual([TEST_DATE]);
+      expect(med.doseSkippedHistory?.d2).toBeUndefined();
       const restores = readLogs().filter(
         (l) => l.type === 'skipped_day' && l.doseId === 'd1'
       );
@@ -259,7 +283,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
   it('Test 5 — repeated restore of same d2 is blocked by existing guards', async () => {
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeMulti()]));
-    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify(makeMultiEvidenceLogs()));
 
     render(<App />);
     await waitFor(() => {
@@ -316,7 +340,23 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
   it('Test 6 — single-dose does not open SelectDoseModal; restores directly', async () => {
     localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([makeSingle()]));
-    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+    // Direct Card Restore is evidence-gated too — seed the 'only' occurrence.
+    localStorage.setItem(
+      STORAGE_LOGS_KEY,
+      JSON.stringify([
+        {
+          id: 'seed-take-only',
+          medicationId: 'med-single',
+          medicationName: 'Single Dose Med',
+          type: 'dose_taken',
+          amount: -1,
+          date: TEST_DATE,
+          timestamp: `${TEST_DATE}T12:00:00.000Z`,
+          description: 'تناول جرعة يدوياً (-1 قرص)',
+          doseId: 'only',
+        },
+      ] satisfies ConsumptionLog[])
+    );
 
     render(<App />);
     await waitFor(() => {
@@ -357,7 +397,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
         }),
       ])
     );
-    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify(makeMultiEvidenceLogs()));
 
     render(<App />);
     await waitFor(() => {
@@ -378,7 +418,7 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(requireDefined(restores[0], 'restores[0]').amount).not.toBe(3);
       expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills).toBe(before + 2);
       // siblings unchanged
-      expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').doseConsumptionHistory?.d1).toBe(TEST_DATE);
+      expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').doseConsumptionHistory?.d1).toEqual([TEST_DATE]);
     });
 
   });

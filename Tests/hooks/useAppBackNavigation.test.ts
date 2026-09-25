@@ -24,6 +24,16 @@ describe('useAppBackNavigation', () => {
     };
   }
 
+  // A back press runs the registered handler, which may setActiveTab —
+  // wrap in act() so the state update flushes before assertions.
+  function pressBack(): boolean {
+    let handled = false;
+    act(() => {
+      handled = backHandler?.() ?? false;
+    });
+    return handled;
+  }
+
   it('restores contextual destinations before allowing app exit', () => {
     const { result } = renderHook(() => useHarness());
 
@@ -31,11 +41,11 @@ describe('useAppBackNavigation', () => {
     act(() => result.current.navigateToTab('user-data'));
 
     expect(result.current.activeTab).toBe('user-data');
-    expect(backHandler?.()).toBe(true);
+    expect(pressBack()).toBe(true);
     expect(result.current.activeTab).toBe('shopping');
-    expect(backHandler?.()).toBe(true);
+    expect(pressBack()).toBe(true);
     expect(result.current.activeTab).toBe('stock');
-    expect(backHandler?.()).toBe(false);
+    expect(pressBack()).toBe(false);
   });
 
   it('closes the highest-priority overlay before navigation history', () => {
@@ -58,16 +68,16 @@ describe('useAppBackNavigation', () => {
       );
     });
 
-    expect(backHandler?.()).toBe(true);
+    expect(pressBack()).toBe(true);
     expect(closeCalls).toEqual(['high']);
     expect(result.current.activeTab).toBe('stock');
 
     act(() => unregisterHigh?.());
-    expect(backHandler?.()).toBe(true);
+    expect(pressBack()).toBe(true);
     expect(closeCalls).toEqual(['high', 'low']);
 
     act(() => unregisterLow?.());
-    expect(backHandler?.()).toBe(false);
+    expect(pressBack()).toBe(false);
   });
 
   it('clears contextual history when selecting a tab directly', () => {
@@ -77,7 +87,7 @@ describe('useAppBackNavigation', () => {
     act(() => result.current.selectTab('logs'));
 
     expect(result.current.activeTab).toBe('logs');
-    expect(backHandler?.()).toBe(false);
+    expect(pressBack()).toBe(false);
     expect(result.current.activeTab).toBe('logs');
   });
 
@@ -90,10 +100,10 @@ describe('useAppBackNavigation', () => {
       result.current.navigateToTab('user-data');
     });
 
-    expect(backHandler?.()).toBe(true);
+    expect(pressBack()).toBe(true);
     expect(result.current.activeTab).toBe('shopping');
-    expect(backHandler?.()).toBe(true);
+    expect(pressBack()).toBe(true);
     expect(result.current.activeTab).toBe('stock');
-    expect(backHandler?.()).toBe(false);
+    expect(pressBack()).toBe(false);
   });
 });

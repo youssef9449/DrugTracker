@@ -47,22 +47,25 @@ const mocks = vi.hoisted(() => ({
   schedule: vi.fn(),
   cancel: vi.fn(),
   verify: vi.fn(),
+  list: vi.fn(),
 }));
 
-vi.mock('../utils/notificationTestFacade', async () => {
-  const actual = await vi.importActual<typeof import('../utils/notificationTestFacade')>(
-    '../utils/notificationTestFacade'
-  );
-  return {
-    ...actual,
-    sendCriticalStockAlert: mocks.send,
-    scheduleCriticalAlarm: mocks.schedule,
-    cancelCriticalAlarm: mocks.cancel,
-    verifyCriticalAlarmPending: mocks.verify,
-  };
-});
+// Both hooks import the production source modules directly, so the mocks
+// must be installed on those module ids (mocking the test facade would
+// not intercept production calls).
+vi.mock('@/utils/notifications/criticalStockNotifications', () => ({
+  sendCriticalStockAlert: mocks.send,
+}));
+vi.mock('@/utils/criticalAlarmScheduling', () => ({
+  scheduleCriticalAlarm: mocks.schedule,
+  cancelCriticalAlarm: mocks.cancel,
+  verifyCriticalAlarmPending: mocks.verify,
+}));
+vi.mock('@/utils/criticalAlarmNative', () => ({
+  listScheduledCriticalMedicationIdsNative: mocks.list,
+}));
 
-import { sendCriticalStockAlert } from '../utils/notificationTestFacade';
+import { sendCriticalStockAlert } from '@/utils/notifications/criticalStockNotifications';
 import { installWebLocksShim, type WebLocksShimHandle } from '../helpers/webLocksShim';
 
 // #484: foreground claim acquisition requires the cross-document Web Lock;
@@ -76,16 +79,23 @@ const cancelMock = vi.mocked(mocks.cancel);
 const verifyMock = mocks.verify;
 
 function makeMed(overrides: Partial<Medication> = {}): Medication {
+  const dailyDose = overrides.dailyDose ?? 1;
   return {
     id: 'med-1',
     name: 'Test Med',
     currentPills: 30,
-    dailyDose: 1,
+    dailyDose,
     unit: 'قرص',
     warningThresholdDays: 5,
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
     autoDeductEnabled: true,
+    // The unified critical-stock policy requires the per-medication flag
+    // to be explicitly ON before any delivery/scheduling decision.
+    criticalStockAlertsEnabled: true,
+    // The crossing projection reads the explicit dose schedule; mirror
+    // dailyDose so status semantics are unchanged.
+    doseSchedule: [{ id: 'd1', amount: dailyDose, time: '20:00' }],
     ...overrides,
   };
 }
@@ -129,6 +139,9 @@ beforeEach(() => {
   cancelMock.mockResolvedValue({ ok: true });
   verifyMock.mockReset();
   verifyMock.mockResolvedValue({ ok: true, pending: false });
+  // Native durable schedule listing: nothing armed in a fresh test run.
+  mocks.list.mockReset();
+  mocks.list.mockResolvedValue({ ok: true, ids: [] });
 });
 
 afterEach(() => {
@@ -155,14 +168,25 @@ describe('critical notification flow — both hooks integrated', () => {
     expect(sendMock).not.toHaveBeenCalled();
 
     // Early crossing (manual consumption) while the alarm is still
-    // future: the foreground releases the stale alarm and sends exactly
-    // one notification for this episode.
+    // future: the alarm-relevant change runs BOTH hooks' effects in the
+    // same commit. The scheduler's cleanup (cancel of the stale armed
+    // alarm) bumps the per-medication alarm generation, which supersedes
+    // THIS commit's foreground delivery pass (#539) — the in-flight
+    // foreground claim is released and the opportunity re-opens.
     const critical = makeMed({ currentPills: 3, warningThresholdDays: 5 });
     rerender({ medications: [critical] });
     await flush();
 
-    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(sendMock).not.toHaveBeenCalled();
     expect(cancelMock).toHaveBeenCalledWith('med-1');
+    expect(readClaims()['med-1']).toEqual({ claimed: false, alarmTime: null });
+
+    // The re-opened opportunity is delivered by the NEXT reconciliation
+    // pass (the scheduler effect is signature-skipped here, so nothing
+    // invalidates this one): exactly one notification for the episode.
+    rerender({ medications: [{ ...critical }] });
+    await flush();
+    expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
 
     // Re-renders while still critical (same episode) never duplicate.
@@ -199,27 +223,54 @@ describe('critical notification flow — both hooks integrated', () => {
 
   it('critical → refill → critical again: exactly one NEW notification for the new episode', async () => {
     const critical = makeMed({ currentPills: 3, warningThresholdDays: 5 });
-    const { rerender } = renderHook((props) => useBothHooks(props), {
-      initialProps: { medications: [critical] },
-    });
+    const { rerender } = renderHook<void, { medications: Medication[]; resumeTick?: number }>(
+      (props) => useBothHooks(props),
+      {
+        initialProps: { medications: [critical] },
+      }
+    );
+    await flush();
+    // Cold-start pass: the scheduler's same-commit per-medication
+    // generation bump supersedes this pass's foreground delivery (#539);
+    // the claim is released for the next pass.
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(readClaims()['med-1']).toEqual({ claimed: false, alarmTime: null });
+    rerender({ medications: [{ ...critical }] });
     await flush();
     expect(sendMock).toHaveBeenCalledTimes(1); // episode 1 notified
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
 
-    // Refill → sufficient. The scheduler re-arms the alarm for the next
-    // projected crossing and the claim transfers to it.
+    // Refill → sufficient. The consumed foreground claim is released
+    // synchronously (foreground owns the episode end); the scheduler's
+    // snapshot on THIS pass still sees the consumed claim, so it defers
+    // re-arming (never arms a competing fallback while the foreground
+    // claim is unsettled).
     const refilled = makeMed({ currentPills: 40, warningThresholdDays: 5 });
-    const nextT = getCriticalAlarmDate(refilled, getTodayDateString()) as number;
     rerender({ medications: [refilled] });
+    await flush();
+    expect(sendMock).toHaveBeenCalledTimes(1); // no duplicate on refill
+    expect(scheduleMock).not.toHaveBeenCalled(); // re-arm deferred on this pass
+    expect(readClaims()['med-1']).toBeUndefined();
+
+    // A later reconciliation pass (here: an app resume tick) finds no
+    // blocking claim and re-arms the next projected crossing; the claim
+    // transfers to the scheduled alarm.
+    const nextT = getCriticalAlarmDate(refilled, getTodayDateString()) as number;
+    rerender({ medications: [refilled], resumeTick: 1 });
     await flush();
     expect(sendMock).toHaveBeenCalledTimes(1); // no duplicate on refill
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: nextT });
 
     // Stock drops into the critical zone again → new episode → the
-    // still-future claimed alarm is released and exactly one new
-    // notification fires.
+    // still-future claimed alarm is released; the crossing commit's own
+    // foreground pass is superseded by the scheduler's cleanup (#539),
+    // and the next pass delivers exactly one new notification.
     const criticalAgain = makeMed({ currentPills: 4, warningThresholdDays: 5 });
     rerender({ medications: [criticalAgain] });
+    await flush();
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(readClaims()['med-1']).toEqual({ claimed: false, alarmTime: null });
+    rerender({ medications: [{ ...criticalAgain }] });
     await flush();
     expect(sendMock).toHaveBeenCalledTimes(2);
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
@@ -249,41 +300,56 @@ describe('critical notification flow — both hooks integrated', () => {
     expect(scheduleMock).toHaveBeenCalledTimes(1);
 
     // The med crosses while the schedule is still pending. The
-    // foreground hook runs on this render: claim not yet written → it
-    // sends the one notification and claims the episode.
+    // foreground hook runs on this render, but the scheduler's same-commit
+    // cleanup (it can no longer own a scheduling decision for a critical
+    // med) supersedes the pass (#539): the in-flight claim is released,
+    // nothing is sent yet, and the opportunity re-opens.
     const critical = makeMed({ currentPills: 3, warningThresholdDays: 5 });
     rerender({ medications: [critical] });
     await flush();
-    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(readClaims()['med-1']).toEqual({ claimed: false, alarmTime: null });
 
     // The in-flight schedule now resolves — stale. The scheduler must
-    // not overwrite the foreground's claim.
+    // not overwrite the foreground's re-opened claim.
     resolveSchedule({ ok: true });
     await flush();
 
-    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
+    expect(readClaims()['med-1']).toEqual({ claimed: false, alarmTime: null });
     // The scheduler compensated by cancelling the alarm it armed.
     expect(cancelMock).toHaveBeenCalledWith('med-1');
-    // Still exactly one user-facing notification.
+    // Still exactly one user-facing notification: the next pass delivers.
+    rerender({ medications: [{ ...critical }] });
+    await flush();
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
     rerender({ medications: [{ ...critical }] });
     await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
 
   it('BLOCKER RACE: Critical → Sufficient → Critical before async cleanup resolves still notifies exactly once', async () => {
-    // 1. Episode A: Critical → the foreground sends once and claims.
+    // 1. Episode A: Critical → the foreground sends once and claims
+    // (delivery lands on the second pass — see #539 in test 1).
     const criticalA = makeMed({ currentPills: 3, warningThresholdDays: 5 });
-    const { rerender } = renderHook((props) => useBothHooks(props), {
-      initialProps: { medications: [criticalA] },
-    });
+    const { rerender } = renderHook<void, { medications: Medication[]; resumeTick?: number }>(
+      (props) => useBothHooks(props),
+      {
+        initialProps: { medications: [criticalA] },
+      }
+    );
+    await flush();
+    expect(sendMock).toHaveBeenCalledTimes(0);
+    rerender({ medications: [{ ...criticalA }] });
     await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
 
-    // 2. Refill → Sufficient. The scheduler's follow-up schedule is
-    // gated, so no async operation can COMPLETE before episode B starts.
-    // (The flush lets the enqueued operation START — capturing the real
-    // promise resolver — while the schedule itself stays pending.)
+    // 2. Refill → Sufficient. The consumed foreground claim is released
+    // synchronously; the scheduler's same-pass snapshot still sees it and
+    // defers re-arming, so the follow-up schedule must be triggered by a
+    // later reconciliation pass (resume tick). It is gated there so no
+    // async operation can COMPLETE before episode B starts.
     let resolveSchedule: (v: CriticalAlarmOperationResult) => void = () => undefined;
     scheduleMock.mockImplementationOnce(
       () =>
@@ -294,18 +360,32 @@ describe('critical notification flow — both hooks integrated', () => {
     const sufficient = makeMed({ currentPills: 40, warningThresholdDays: 5 });
     rerender({ medications: [sufficient] });
     await flush();
+    expect(scheduleMock).not.toHaveBeenCalled(); // deferred (foreground claim unsettled)
+    expect(readClaims()['med-1']).toBeUndefined();
+
+    // The reconciliation pass arms the follow-up schedule — in flight.
+    rerender({ medications: [sufficient], resumeTick: 1 });
+    await flush();
     expect(scheduleMock).toHaveBeenCalledTimes(1); // in flight, unresolved
 
-    // 3. The claim is cleared IMMEDIATELY — synchronously, on this very
-    // render, before any async scheduler operation completes. This is
-    // the ownership that makes step 4 safe.
+    // 3. The claim stays cleared — it does not wait for the still-pending
+    // native schedule (foreground owns the episode end). This is the
+    // ownership that makes step 4 safe.
     expect(readClaims()['med-1']).toBeUndefined();
 
     // 4. The user consumes pills again BEFORE the old async operation
     // resolves. Episode B must NOT inherit episode A's claim: the
-    // foreground sees no claim → sends exactly ONE new notification.
+    // foreground sees no claim → its delivery pass runs (the crossing
+    // commit's own pass is superseded by the scheduler's cleanup bump,
+    // #539 — the claim is released and the next pass delivers exactly
+    // ONE new notification).
     const criticalB = makeMed({ currentPills: 4, warningThresholdDays: 5 });
     rerender({ medications: [criticalB] });
+    await flush();
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(readClaims()['med-1']).toEqual({ claimed: false, alarmTime: null });
+    rerender({ medications: [{ ...criticalB }] });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(2);
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
 
@@ -349,19 +429,27 @@ describe('critical notification flow — both hooks integrated', () => {
       initialProps: { medications: [sufficient] },
     });
 
-    // The claim is cleared SYNCHRONOUSLY on this render (it is episode A
-    // residue — not the scheduler's live projection record), and the
-    // stale alarm's cancellation is requested through the queue.
+    // Let the render's synchronous claim-clear decision (and its durable
+    // write) land while the native cancel is still gated/pending.
+    await flush();
+    // The claim is cleared by this render — it does not wait for the
+    // still-pending native cancel (foreground owns the episode end).
     expect(readClaims()['med-1']).toBeUndefined();
 
-    // Let the queued cancel op actually START (pending, unresolved).
-    await flush();
+    // The queued cancel op actually STARTED (pending, unresolved).
     expect(cancelMock).toHaveBeenCalledTimes(1);
 
     // Episode B starts BEFORE the native cancel resolves: the foreground
-    // finds no claim → sends exactly ONE notification for episode B.
+    // finds no claim → its delivery pass runs for episode B. The crossing
+    // commit's own pass is superseded by the scheduler's cleanup bump
+    // (#539); the next pass delivers exactly ONE notification.
     const criticalB = makeMed({ currentPills: 4, warningThresholdDays: 5 });
     rerender({ medications: [criticalB] });
+    await flush();
+    expect(sendMock).toHaveBeenCalledTimes(0);
+    expect(readClaims()['med-1']).toEqual({ claimed: false, alarmTime: null });
+    rerender({ medications: [{ ...criticalB }] });
+    await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
 
@@ -409,10 +497,16 @@ describe('critical notification flow — both hooks integrated', () => {
     // no foreground notification was sent (and none is due yet).
     expect(sendMock).not.toHaveBeenCalled();
 
-    // The med crosses later → the (re-armed) future claim is released
-    // and exactly ONE notification fires for this episode.
+    // The med crosses later → the (re-armed) future claim is released;
+    // the crossing commit's own foreground pass is superseded by the
+    // scheduler's cleanup bump (#539) and the next pass fires exactly ONE
+    // notification for this episode.
     const critical = makeMed({ currentPills: 4, warningThresholdDays: 5 });
     rerender({ medications: [critical] });
+    await flush();
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(readClaims()['med-1']).toEqual({ claimed: false, alarmTime: null });
+    rerender({ medications: [{ ...critical }] });
     await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });
@@ -470,9 +564,16 @@ describe('critical notification flow — both hooks integrated', () => {
     expect(readClaims()['med-1']).toEqual({ claimed: false, alarmTime: null });
     expect(sendMock).not.toHaveBeenCalled(); // still sufficient — nothing sent yet
 
-    // The med crosses → the foreground fallback delivers exactly once.
+    // The med crosses → the open claim lets the foreground own the
+    // episode. The crossing commit's own pass is superseded by the
+    // scheduler's cleanup bump (#539); the next pass delivers exactly
+    // once.
     const critical = makeMed({ currentPills: 4, warningThresholdDays: 5 });
     rerender({ medications: [critical] });
+    await flush();
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(readClaims()['med-1']).toEqual({ claimed: false, alarmTime: null });
+    rerender({ medications: [{ ...critical }] });
     await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(readClaims()['med-1']).toEqual({ claimed: true, alarmTime: null });

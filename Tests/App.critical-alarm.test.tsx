@@ -33,6 +33,25 @@ vi.mock('@/utils/sound', () => ({
   stopAllSounds: vi.fn(),
 }));
 
+// The scheduler consumes src/utils/criticalAlarmScheduling directly (the
+// notificationTestFacade merely re-exports it, so mocking the facade does
+// NOT intercept the App's scheduling calls). Mock the production module
+// itself and assert on those doubles.
+vi.mock('@/utils/criticalAlarmScheduling', () => ({
+  scheduleCriticalAlarm: vi.fn(() => Promise.resolve({ ok: true })),
+  cancelCriticalAlarm: vi.fn(() => Promise.resolve({ ok: true })),
+  verifyCriticalAlarmPending: vi.fn(() => Promise.resolve({ ok: true, pending: false })),
+}));
+
+// Hydration probes the REAL permission module (the facade re-export is not
+// consumed by production). Return 'granted' so a persisted
+// notificationsEnabled=true survives launch, per the current contract.
+vi.mock('@/utils/notifications/notificationPermissions', () => ({
+  getNotificationPermission: vi.fn(() => Promise.resolve('granted')),
+  requestNotificationPermission: vi.fn(() => Promise.resolve(true)),
+  openNotificationSettings: vi.fn(),
+}));
+
 // Phase 4: the gated stock mutations use the reconciliation result as the
 // fresh durable state inside the critical section (reconcileExact-
 // BeforeLegacySettlement). The mock must therefore honor the REAL identity
@@ -62,7 +81,7 @@ import { getTodayDateString } from '@/utils/dateCalculations';
 
 
 
-import { scheduleCriticalAlarm, cancelCriticalAlarm } from './utils/notificationTestFacade';
+import { scheduleCriticalAlarm, cancelCriticalAlarm } from '@/utils/criticalAlarmScheduling';
 
 
 
@@ -92,6 +111,9 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
   });
 
   it('schedules a critical alarm for each saved medication when alerts are enabled', async () => {
+    // Current hydration defaults criticalStockAlertsEnabled to false — the
+    // feature is opt-in via its persisted preference.
+    localStorage.setItem('android_med_tracker_critical_alerts_v1', 'true');
     localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([
       {
         id: 'med-alarm-1',
@@ -104,6 +126,12 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
         createdAt: '2024-01-01T00:00:00.000Z',
         autoDeductEnabled: true,
         reminderEnabled: false,
+        // Policy contract: delivery needs BOTH the global master switch and
+        // the per-medication criticalStockAlertsEnabled === true, and the
+        // crossing projection requires a dose schedule (Auto + schedule rows
+        // are what make stock decline into the critical zone).
+        criticalStockAlertsEnabled: true,
+        doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       },
     ]));
 
@@ -122,6 +150,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
   });
 
   it('cancels all alarms when the user opts out of critical alerts', async () => {
+    localStorage.setItem('android_med_tracker_critical_alerts_v1', 'true');
     localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([
       {
         id: 'med-alarm-2',
@@ -134,6 +163,8 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
         createdAt: '2024-01-01T00:00:00.000Z',
         autoDeductEnabled: true,
         reminderEnabled: false,
+        criticalStockAlertsEnabled: true,
+        doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       },
     ]));
 
@@ -167,6 +198,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     // the app triggers the reschedule effect to re-arm all alarms
     // from the current medication state. This test verifies that
     // re-arming works for multiple meds on app launch.
+    localStorage.setItem('android_med_tracker_critical_alerts_v1', 'true');
     localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([
       {
         id: 'med-reboot-1',
@@ -179,6 +211,8 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
         createdAt: '2024-01-01T00:00:00.000Z',
         autoDeductEnabled: true,
         reminderEnabled: false,
+        criticalStockAlertsEnabled: true,
+        doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       },
       {
         id: 'med-reboot-2',
@@ -191,6 +225,8 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
         createdAt: '2024-01-01T00:00:00.000Z',
         autoDeductEnabled: true,
         reminderEnabled: false,
+        criticalStockAlertsEnabled: true,
+        doseSchedule: [{ id: 'd1', amount: 2, time: '08:00' }],
       },
       {
         id: 'med-reboot-3',
@@ -203,6 +239,8 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
         createdAt: '2024-01-01T00:00:00.000Z',
         autoDeductEnabled: true,
         reminderEnabled: false,
+        criticalStockAlertsEnabled: true,
+        doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       },
     ]));
 
@@ -237,6 +275,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     // alarm is only for FUTURE crossings. The existing alert effect
     // (which runs when the app is open and tracks already-alerted
     // statuses) handles the immediate notification once.
+    localStorage.setItem('android_med_tracker_critical_alerts_v1', 'true');
     localStorage.setItem('android_med_tracker_items_v2', JSON.stringify([
       {
         id: 'med-already-critical',
@@ -249,6 +288,8 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
         createdAt: '2024-01-01T00:00:00.000Z',
         autoDeductEnabled: true,
         reminderEnabled: false,
+        criticalStockAlertsEnabled: true,
+        doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
       },
     ]));
 
@@ -450,8 +491,11 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
 
     // Even though getNotificationPermission mock returns 'granted',
     // the saved preference 'false' must be preserved.
+    // Current header bell labels:
+    //   enabled  → "تذكيرات مواعيد الجرعات مفعّلة — انقر للإيقاف"
+    //   disabled → "تذكيرات مواعيد الجرعات متوقفة — انقر للتفعيل"
     await waitFor(() => {
-      const bellBtn = screen.getByRole('button', { name: /التنبيهات متوقفة/ });
+      const bellBtn = screen.getByRole('button', { name: /تذكيرات مواعيد الجرعات متوقفة/ });
       expect(bellBtn).toBeInTheDocument();
       expect(bellBtn).toHaveAttribute('aria-pressed', 'false');
     });
@@ -465,7 +509,7 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     render(<App />);
 
     await waitFor(() => {
-      const bellBtn = screen.getByRole('button', { name: /التنبيهات مفعلة/ });
+      const bellBtn = screen.getByRole('button', { name: /تذكيرات مواعيد الجرعات مفعّلة/ });
       expect(bellBtn).toBeInTheDocument();
       expect(bellBtn).toHaveAttribute('aria-pressed', 'true');
     });
@@ -479,15 +523,15 @@ describe('App — one-shot critical-alarm reschedule effect', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /التنبيهات مفعلة/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /تذكيرات مواعيد الجرعات مفعّلة/ })).toBeInTheDocument();
     });
 
-    const bellBtn = screen.getByRole('button', { name: /التنبيهات مفعلة/ });
+    const bellBtn = screen.getByRole('button', { name: /تذكيرات مواعيد الجرعات مفعّلة/ });
     fireEvent.click(bellBtn);
 
     await waitFor(() => {
       expect(localStorage.getItem('android_med_tracker_notifications_v1')).toBe('false');
-      expect(screen.getByRole('button', { name: /التنبيهات متوقفة/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /تذكيرات مواعيد الجرعات متوقفة/ })).toBeInTheDocument();
     });
   });
 });

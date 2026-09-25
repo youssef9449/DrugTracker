@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { runWithBoundedRetry, DEFAULT_RETRY_BACKOFF_MS } from '@/utils/async/BoundedRetry';
-import { pruneConsumptionLogs, DOSE_HISTORY_RETENTION_DAYS } from '@/utils/pruneDoseConsumption';
+import {
+  pruneConsumptionLogs,
+  consumptionLogRetentionCutoff,
+  DOSE_HISTORY_RETENTION_DAYS,
+} from '@/utils/pruneDoseConsumption';
+import { addCalendarDays } from '@/utils/dateCalculations';
 import type { ConsumptionLog } from '@/types';
 
 describe('feature-neutral bounded retry primitive (#521)', () => {
@@ -93,9 +98,15 @@ describe('centralized bounded retention (#507)', () => {
   }
 
   it('keeps rows inside the retention window and drops older ones', () => {
+    // Derive the exact boundary from the production policy so the test
+    // documents the real inclusive cutoff (a literal like '2025-05-10' is
+    // off-by-one relative to the 400-day window and timezone-fragile):
+    // cutoff = local date of `now` minus 400 calendar days; rows with
+    // date >= cutoff are kept, anything older is dropped.
+    const cutoff = consumptionLogRetentionCutoff(now);
     const fresh = log('fresh', '2026-06-14');
-    const edge = log('edge', '2025-05-10'); // 400 days before 2026-06-15
-    const stale = log('stale', '2025-05-09');
+    const edge = log('edge', cutoff); // exactly 400 days before now — kept
+    const stale = log('stale', addCalendarDays(cutoff, -1)); // one day beyond — dropped
     const result = pruneConsumptionLogs([stale, fresh, edge], now);
     expect(result.map((l) => l.id)).toEqual(['fresh', 'edge']);
   });

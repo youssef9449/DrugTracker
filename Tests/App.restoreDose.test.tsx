@@ -104,6 +104,25 @@ function advanceClockPastMorningDoses(): void {
   vi.setSystemTime(new Date(`${TEST_DATE}T15:00:00`));
 }
 
+/**
+ * Durable deduction evidence for one occurrence: the active `dose_taken` log
+ * the current evidence-gated Restore UI/production requires (amount from the
+ * schedule row: d1/d2 → 1).
+ */
+function makeDoseTakenLog(doseId: string): ConsumptionLog {
+  return {
+    id: `seed-take-${doseId}`,
+    medicationId: MED_ID,
+    medicationName: 'Restore Handler Med',
+    type: 'dose_taken',
+    amount: -1,
+    date: TEST_DATE,
+    timestamp: new Date(`${TEST_DATE}T12:00:00`).toISOString(),
+    description: 'تناول جرعة يدوياً (-1 قرص)',
+    doseId,
+  };
+}
+
 async function goToStockTab(): Promise<void> {
   fireEvent.click(screen.getByText('المخزون'));
   // The manage-doses button lives only on the MedicationCard (not on the
@@ -138,8 +157,12 @@ async function takeDoseViaCard(doseId: string): Promise<void> {
     );
   expect(target).toBeTruthy();
   fireEvent.click(target!);
+  // doseConsumptionHistory is Record<doseId, YYYY-MM-DD[]> (append-only).
   await waitFor(() => {
-    expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').doseConsumptionHistory?.[doseId]).toBe(getTodayDateString());
+    expect(
+      requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]')
+        .doseConsumptionHistory?.[doseId]
+    ).toContain(getTodayDateString());
   });
 }
 
@@ -292,7 +315,16 @@ describe('App — independent multi-dose Restore via SelectDoseModal', () => {
         }),
       ])
     );
-    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+    // Restore UI/production is evidence-gated: an active dose_taken log per
+    // occurrence (medicationId + doseId + date) is required to offer/perform
+    // a Restore. Seed the durable deduction evidence for d1 and d2.
+    localStorage.setItem(
+      STORAGE_LOGS_KEY,
+      JSON.stringify([
+        makeDoseTakenLog('d1'),
+        makeDoseTakenLog('d2'),
+      ])
+    );
     render(<App />);
     await waitFor(() => expect(screen.getByText('Restore Handler Med')).toBeInTheDocument());
 
@@ -319,7 +351,7 @@ describe('App — independent multi-dose Restore via SelectDoseModal', () => {
     await waitFor(() => {
       const med = readPersistedMedications()[0];
       // d1 untouched
-      expect(requireDefined(med, 'med').doseConsumptionHistory?.d1).toBe(TEST_DATE);
+      expect(requireDefined(med, 'med').doseConsumptionHistory?.d1).toEqual([TEST_DATE]);
       expect(readLogs().filter((l) => l.type === 'skipped_day' && l.doseId === 'd1')).toHaveLength(
         0
       );
@@ -365,7 +397,7 @@ describe('App — Take → Restore → Take → Restore for the SAME doseId (car
     await takeDoseViaCard('d1');
     await waitFor(() => {
       const med = readPersistedMedications()[0];
-      expect(requireDefined(med, 'med').doseConsumptionHistory?.d1).toBe(getTodayDateString());
+      expect(requireDefined(med, 'med').doseConsumptionHistory?.d1).toContain(getTodayDateString());
       expect(requireDefined(med, 'med').doseSkippedHistory?.d1).toBeUndefined();
       const taken = readLogs().filter(
         (l) => l.type === 'dose_taken' && l.doseId === 'd1'

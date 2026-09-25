@@ -6,6 +6,7 @@ import {
   sortDoseSchedule,
   totalDailyAmount,
   validateAndNormalizeDoseSchedule,
+  normalizeTimeString,
   isValidDoseTime,
   MAX_DOSES_PER_DAY,
   DEFAULT_DOSE_TIMES } from '@/utils/doseSchedule';
@@ -223,7 +224,18 @@ describe('doseSchedule helpers', () => {
     expect(isValidDoseTime('23:59')).toBe(true);
     expect(isValidDoseTime('00:00')).toBe(true);
     expect(isValidDoseTime('24:00')).toBe(false);
-    expect(isValidDoseTime('9:00')).toBe(true);
+    // Strict persisted contract (#time.ts isValidTimeHhmm): validation requires
+    // the canonical two-digit HH:mm shape — H:mm input is padded by
+    // normalizeTimeString at the UI boundary before validation.
+    expect(isValidDoseTime('9:00')).toBe(false);
+    expect(normalizeTimeString('9:00')).toBe('09:00');
+    // The save path normalizes H:mm input before strict validation, so a
+    // '9:00' row persists as canonical '09:00'.
+    const paddedInput = validateAndNormalizeDoseSchedule(1, [
+      dose({ amount: 1, time: '9:00' }),
+    ]);
+    expect(paddedInput.ok).toBe(true);
+    expect(paddedInput.schedule?.[0]?.time).toBe('09:00');
 
     const badAmount = validateAndNormalizeDoseSchedule(1, [
       dose({ amount: 0, time: '08:00' }),

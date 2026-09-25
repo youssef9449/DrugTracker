@@ -60,9 +60,34 @@ describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation orde
     scheduleCalls.length = 0;
     durable = {
       medications: [
-        med({ id: 'a', name: 'A', autoDeductEnabled: true, currentPills: 11 }),
-        med({ id: 'b', name: 'B', autoDeductEnabled: false, currentPills: 22 }),
-        med({ id: 'c', name: 'C', autoDeductEnabled: true, currentPills: 33 }),
+        // isChronic: compensation only re-schedules occurrences inside an
+        // ACTIVE treatment window; a chronic med is always active.
+        // Both dose times are in the FUTURE relative to the fake clock
+        // (15:00): compensation restore of a past occurrence goes through
+        // the native-only missed-occurrence recovery (unavailable in this
+        // web test runtime), while future occurrences restore through the
+        // cross-platform schedule path this suite exercises.
+        med({
+          id: 'a', name: 'A', autoDeductEnabled: true, currentPills: 11, isChronic: true,
+          doseSchedule: [
+            { id: 'd1', amount: 1, time: '16:00' },
+            { id: 'd2', amount: 1, time: '20:00' },
+          ],
+        }),
+        med({
+          id: 'b', name: 'B', autoDeductEnabled: false, currentPills: 22, isChronic: true,
+          doseSchedule: [
+            { id: 'd1', amount: 1, time: '16:00' },
+            { id: 'd2', amount: 1, time: '20:00' },
+          ],
+        }),
+        med({
+          id: 'c', name: 'C', autoDeductEnabled: true, currentPills: 33, isChronic: true,
+          doseSchedule: [
+            { id: 'd1', amount: 1, time: '16:00' },
+            { id: 'd2', amount: 1, time: '20:00' },
+          ],
+        }),
       ],
       logs: [],
       globalAutoDeductEnabled: true,
@@ -147,12 +172,14 @@ describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation orde
     expect(result.settleLogs).toEqual([]);
     expect(result.logs.length).toBe(logsBefore);
     expect(durable.globalAutoDeductEnabled).toBe(false);
-    // Invalidation ran for each dose of each med before durable commit.
+    // Invalidation ran for each dose of each med whose state actually changed
+    // before the durable commit. A med already at the target state (b) is
+    // skipped — production never re-invalidates an unchanged med.
     expect(invalidationCalls.length).toBeGreaterThan(0);
     const medIdsInvalidated = new Set(invalidationCalls.map((c) => c.medId));
     expect(medIdsInvalidated.has('a')).toBe(true);
-    expect(medIdsInvalidated.has('b')).toBe(true);
     expect(medIdsInvalidated.has('c')).toBe(true);
+    expect(medIdsInvalidated.has('b')).toBe(false);
     expect(commitCalls).toBe(1);
   });
 
@@ -213,8 +240,10 @@ describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation orde
     autoSchedulingMocks.invalidateAutoDeductionRecurrence.mockImplementation(
       async (medicationId, doseId) => {
         invalidationCalls.push({ medId: medicationId, doseId });
-        // Fail after med a fully invalidated (all its doses succeed first).
-        if (medicationId === 'b') {
+        // Fail after med a is fully invalidated (all its doses succeed
+        // first). Med b is already OFF and is skipped by the bulk toggle;
+        // med c is the next med whose state actually changes.
+        if (medicationId === 'c') {
           return { ok: false, error: 'partial_fail' };
         }
         return { ok: true, generation: 1 };

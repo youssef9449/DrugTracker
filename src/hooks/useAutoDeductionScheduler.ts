@@ -74,7 +74,13 @@ type GuardedCancelResult = {
  */
 async function scheduleExactOccurrenceFromDurable(slot: AutoDeductionSlot) {
   return withAutoStockMutationGate(async (fresh) => {
-    // Medication-level Auto is authoritative (Global bulk-sets med flags; not a runtime kill switch).
+    // The durable global switch is the final native-write kill switch.
+    // Re-check it inside the stock gate so an older queued React render can
+    // never arm a new Auto occurrence after Global Auto has been disabled.
+    if (fresh.globalAutoDeductEnabled === false) {
+      return { ok: true, skipped: true } as const;
+    }
+    // Per-medication Auto remains the configuration source for each medication.
     const med = fresh.medications.find((m) => m.id === slot.medId);
     if (!med) return { ok: true, skipped: true } as const;
     const current = getAutoDeductionSlotsForDate(med, slot.calendarDate).find(
@@ -116,8 +122,9 @@ async function cancelUndesiredExactOccurrence(
 ): Promise<GuardedCancelResult> {
   return withAutoStockMutationGate(async (fresh) => {
     const med = fresh.medications.find((m) => m.id === medId);
-    // stillDesired depends on medication Auto + dose slot presence only.
-    const stillDesired = !!med &&
+    // Global OFF overrides per-med configuration for runtime scheduling.
+    const stillDesired = fresh.globalAutoDeductEnabled !== false &&
+      !!med &&
       getAutoDeductionSlotsForDate(med, calendarDate).some(
         (slot) => slot.doseId === doseId
       );
@@ -225,28 +232,51 @@ export function useAutoDeductionScheduler({
     if (decision.action !== 'schedule') {
       if (decision.action === 'cancel_armed_and_wait') {
         const gen = operationCoordinatorRef.current.bump('auto-deduction');
+        const globalDisabled = globalAutoDeductEnabled === false;
         const toCancel = Array.from(trackedRef.current);
         operationCoordinatorRef.current.enqueue(
           'auto-deduction',
           gen,
           async () => {
-          if (!operationCoordinatorRef.current.isCurrent('auto-deduction', gen)) return;
-          for (const key of toCancel) {
-            const [medId, doseId, date] = key.split('::');
-            if (medId && doseId && date) {
-              const res = await cancelUndesiredExactOccurrence(
-                medId,
-                doseId,
-                date,
-                /* force */ true
-              );
-              // Only drop tracking when native reports terminal success.
-              if (res.ok && operationCoordinatorRef.current.isCurrent('auto-deduction', gen)) {
-                trackedRef.current.delete(key);
+            if (!operationCoordinatorRef.current.isCurrent('auto-deduction', gen)) return;
+
+            if (globalDisabled) {
+              // Global OFF is a durable kill switch. Use the authoritative
+              // native list so the switch also works after app restart, when
+              // trackedRef is empty. A native list failure is fail-closed.
+              const listResult = await listScheduledAutoDeductionOccurrences();
+              if (!listResult.ok) return;
+              for (const s of listResult.schedules) {
+                if (!operationCoordinatorRef.current.isCurrent('auto-deduction', gen)) return;
+                await cancelUndesiredExactOccurrence(
+                  s.medicationId,
+                  s.doseId,
+                  s.calendarDate
+                );
+              }
+              return;
+            }
+
+            // Exact-alarm denial keeps the existing force-cancel behavior:
+            // configuration remains intact while currently armed alarms are
+            // removed from the platform.
+            for (const key of toCancel) {
+              const [medId, doseId, date] = key.split('::');
+              if (medId && doseId && date) {
+                const res = await cancelUndesiredExactOccurrence(
+                  medId,
+                  doseId,
+                  date,
+                  /* force */ true
+                );
+                // Only drop tracking when native reports terminal success.
+                if (res.ok && operationCoordinatorRef.current.isCurrent('auto-deduction', gen)) {
+                  trackedRef.current.delete(key);
+                }
               }
             }
           }
-        });
+        );
       }
       return;
     }
@@ -255,15 +285,19 @@ export function useAutoDeductionScheduler({
     const tomorrow = tomorrowDateString(today);
     const now = Date.now();
     const desired = new Map<string, AutoDeductionSlot>();
-    // Per-medication Auto only (getAutoDeductionSlotsForDate returns [] when OFF).
-    for (const med of medications) {
-      for (const date of [today, tomorrow]) {
-        for (const slot of getAutoDeductionSlotsForDate(med, date)) {
-          const epoch = localEpochMs(slot.calendarDate, slot.time);
-          if (epoch == null) continue;
-          if (epoch <= now - 2000) continue;
-          const key = autoDeductionScheduleKey(slot.medId, slot.doseId, slot.calendarDate);
-          desired.set(key, slot);
+    // Global OFF means the desired native Auto set is empty. Individual
+    // medication preferences remain unchanged and become active again when the
+    // global switch is re-enabled.
+    if (globalAutoDeductEnabled) {
+      for (const med of medications) {
+        for (const date of [today, tomorrow]) {
+          for (const slot of getAutoDeductionSlotsForDate(med, date)) {
+            const epoch = localEpochMs(slot.calendarDate, slot.time);
+            if (epoch == null) continue;
+            if (epoch <= now - 2000) continue;
+            const key = autoDeductionScheduleKey(slot.medId, slot.doseId, slot.calendarDate);
+            desired.set(key, slot);
+          }
         }
       }
     }
@@ -272,23 +306,25 @@ export function useAutoDeductionScheduler({
       gen,
       async () => {
       if (!operationCoordinatorRef.current.isCurrent('auto-deduction', gen)) return;
-      // Recovery boundary: rebuild/promo any past native schedule entries before
-      // the destructive desired-state comparison. This makes missed fires
-      // recoverable after app restart/resume/midnight without foreground polling.
-      const recoveryBoundary = recoveryBoundaryKey(resumeTick, midnightTick);
-      if (recoveryBoundaryRef.current !== recoveryBoundary) {
-        const restoreResult = await restoreFutureSchedulesOnce(recoveryBoundary);
-        if (!restoreResult.ok) {
-          // Fail-closed: incomplete recovery must not drive destructive cleanup.
-          // Leave recoveryBoundaryRef unchanged so a later pass retries restore.
-          console.warn(
-            '[App] AutoDeduction restoreFutureSchedules failed — skipping desired-state cleanup:',
-            restoreResult.error || 'restore_failed'
-          );
-          return;
+      if (globalAutoDeductEnabled) {
+        // Recovery boundary: rebuild/promo any past native schedule entries before
+        // the destructive desired-state comparison. This makes missed fires
+        // recoverable after app restart/resume/midnight without foreground polling.
+        const recoveryBoundary = recoveryBoundaryKey(resumeTick, midnightTick);
+        if (recoveryBoundaryRef.current !== recoveryBoundary) {
+          const restoreResult = await restoreFutureSchedulesOnce(recoveryBoundary);
+          if (!restoreResult.ok) {
+            // Fail-closed: incomplete recovery must not drive destructive cleanup.
+            // Leave recoveryBoundaryRef unchanged so a later pass retries restore.
+            console.warn(
+              '[App] AutoDeduction restoreFutureSchedules failed — skipping desired-state cleanup:',
+              restoreResult.error || 'restore_failed'
+            );
+            return;
+          }
+          recoveryBoundaryRef.current = recoveryBoundary;
+          if (!operationCoordinatorRef.current.isCurrent('auto-deduction', gen)) return;
         }
-        recoveryBoundaryRef.current = recoveryBoundary;
-        if (!operationCoordinatorRef.current.isCurrent('auto-deduction', gen)) return;
       }
       // Reconcile against durable native schedule metadata (not process-local
       // trackedRef alone). After restart trackedRef is empty; native may still

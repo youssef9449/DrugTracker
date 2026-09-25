@@ -6,9 +6,11 @@ export function normalizeArabicDigits(input: string): string {
   const arabicEasternDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
   const persianDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
   let res = input;
-  for (let i = 0; i < 10; i++) {
-    res = res.replace(new RegExp(arabicEasternDigits[i], 'g'), i.toString());
-    res = res.replace(new RegExp(persianDigits[i], 'g'), i.toString());
+  for (const [i, digit] of arabicEasternDigits.entries()) {
+    res = res.replace(new RegExp(digit, 'g'), i.toString());
+  }
+  for (const [i, digit] of persianDigits.entries()) {
+    res = res.replace(new RegExp(digit, 'g'), i.toString());
   }
   return res;
 }

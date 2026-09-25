@@ -23,7 +23,7 @@ export interface NotificationRuntimePostOptions {
     id: string;
     title: string;
     foreground?: boolean | undefined;
-  };
+  } | undefined;
   /** iOS-only scheduled delivery time. Android timing belongs to ExactAlarmRuntime. */
   at?: Date | undefined;
   /** Preserve feature fallback behavior when an iOS schedule operation fails. */

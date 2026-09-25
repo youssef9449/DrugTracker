@@ -24,19 +24,19 @@ public class DisableVsRecurrenceTest {
 
     @Before
     public void setUp() {
-        Phase2TestSupport.clearAllDurableState();
-        Phase2TestSupport.seedAutoStock("med-a", 10.0);
-        Phase2TestSupport.seedAutoStock("med-b", 10.0);
-        Phase2TestSupport.seedAutoStock("med-c", 10.0);
-        scheduler = new AutoDeductionScheduler(Phase2TestSupport.appContext());
+        AutoDeductionTestSupport.clearAllDurableState();
+        AutoDeductionTestSupport.seedAutoStock("med-a", 10.0);
+        AutoDeductionTestSupport.seedAutoStock("med-b", 10.0);
+        AutoDeductionTestSupport.seedAutoStock("med-c", 10.0);
+        scheduler = new AutoDeductionScheduler(AutoDeductionTestSupport.appContext());
     }
 
     private static String futureDate(int days) {
-        return Phase2TestSupport.futureCalendarDate(days);
+        return AutoDeductionTestSupport.futureCalendarDate(days);
     }
 
     private static long readGen(String med, String dose) {
-        SharedPreferences p = Phase2TestSupport.appContext().getSharedPreferences(
+        SharedPreferences p = AutoDeductionTestSupport.appContext().getSharedPreferences(
                 AutoDeductionContract.PREFS_RECURRENCE_AUTH, 0);
         return p.getLong(
                 AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX
@@ -46,7 +46,7 @@ public class DisableVsRecurrenceTest {
 
     private boolean hasSchedule(String med, String dose, String date) {
         String key = AutoDeductionContract.occurrenceKey(med, dose, date);
-        return Phase2TestSupport.schedulePrefs().contains(Phase2TestSupport.schKey(key));
+        return AutoDeductionTestSupport.schedulePrefs().contains(AutoDeductionTestSupport.schKey(key));
     }
 
     private long genFromScheduleMeta(String med, String dose, String date) {
@@ -67,8 +67,8 @@ public class DisableVsRecurrenceTest {
     private static DeliveryTokens tokensFromMeta(String med, String dose, String date)
             throws Exception {
         String key = AutoDeductionContract.occurrenceKey(med, dose, date);
-        String raw = Phase2TestSupport.schedulePrefs().getString(
-                Phase2TestSupport.schKey(key), null);
+        String raw = AutoDeductionTestSupport.schedulePrefs().getString(
+                AutoDeductionTestSupport.schKey(key), null);
         assertTrue(raw != null && !raw.isEmpty());
         JSONObject o = new JSONObject(raw);
         String v = o.getString(ExactAlarmContract.FIELD_OPERATION_VERSION);
@@ -129,10 +129,10 @@ public class DisableVsRecurrenceTest {
         assertTrue(next.ok);
 
         String d1Date = null;
-        for (String k : Phase2TestSupport.schedulePrefs().getAll().keySet()) {
-            if (!k.startsWith(Phase2TestSupport.SCH_PREFIX)) continue;
+        for (String k : AutoDeductionTestSupport.schedulePrefs().getAll().keySet()) {
+            if (!k.startsWith(AutoDeductionTestSupport.SCH_PREFIX)) continue;
             JSONObject o = new JSONObject(
-                    Phase2TestSupport.schedulePrefs().getString(k, "{}"));
+                    AutoDeductionTestSupport.schedulePrefs().getString(k, "{}"));
             if (med.equals(o.optString("medicationId"))
                     && dose.equals(o.optString("doseId"))
                     && !d.equals(o.optString("calendarDate"))) {
@@ -245,7 +245,7 @@ public class DisableVsRecurrenceTest {
                 };
         AutoDeductionScheduler.InvalidateResult failed =
                 new AutoDeductionScheduler(
-                        Phase2TestSupport.appContext(),
+                        AutoDeductionTestSupport.appContext(),
                         failGenerationCommit)
                         .invalidateRecurrenceAuthorization(med, dose);
 
@@ -357,10 +357,10 @@ public class DisableVsRecurrenceTest {
             assertEquals("recurrence_authorization_invalid", after.error);
 
             // If race-created successor existed, cancelAll must have removed it.
-            for (String k : Phase2TestSupport.schedulePrefs().getAll().keySet()) {
-                if (!k.startsWith(Phase2TestSupport.SCH_PREFIX)) continue;
+            for (String k : AutoDeductionTestSupport.schedulePrefs().getAll().keySet()) {
+                if (!k.startsWith(AutoDeductionTestSupport.SCH_PREFIX)) continue;
                 org.json.JSONObject o = new org.json.JSONObject(
-                        Phase2TestSupport.schedulePrefs().getString(k, "{}"));
+                        AutoDeductionTestSupport.schedulePrefs().getString(k, "{}"));
                 if (!med.equals(o.optString("medicationId"))
                         || !dose.equals(o.optString("doseId"))) {
                     continue;

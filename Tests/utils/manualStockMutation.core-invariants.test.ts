@@ -44,7 +44,7 @@ const TODAY = '2026-09-16';
 
 
 
-describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
+describe('Manual Take ↔ Exact Auto-Deduction', () => {
   let durable: AutoStockDurableState;
 
   beforeEach(() => {

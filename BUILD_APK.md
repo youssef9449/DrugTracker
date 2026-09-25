@@ -66,7 +66,13 @@ For a release-signed APK you can share with others, see the official Android doc
 
 Quick summary:
 
-1. **Generate a release keystore** (one-time, save it forever — losing it means you can never publish an update to the same app):
+1. **Generate a release keystore** (one-time, save it forever — losing it means you can never publish an update to the same app).
+   
+   Supply the signing secrets through the shell environment before running the command:
+   ```bash
+   export RELEASE_KEYSTORE_PASSWORD='<your-keystore-password>'
+   export RELEASE_KEY_PASSWORD='<your-key-password>'
+   ```
    ```bash
    keytool -genkeypair \
      -keystore nagnagh-release.keystore \

@@ -19,7 +19,7 @@ export function useMedicationAlarmHandlers(deps: MedicationHandlersDeps, state: 
   ) => {
     const result = await runGatedManualConsume({
       medicationId,
-      doseId,
+      ...(doseId !== undefined ? { doseId } : {}),
       source: 'alarm',
     });
     const displayName = result.medicationName ?? fallbackMed?.name ?? '';

@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setExactAutoEnvelopeStorageTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
@@ -138,7 +139,7 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
       todayStr: TODAY,
     });
     expect(take.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     const newerLogs = durable.logs.map((l) => ({ ...l }));
 
     // Plant older Manual envelope (seq 1 already applied) with contradictory stock=10.
@@ -205,10 +206,10 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
     // Older Manual (seq 1) discarded; Exact Auto seq 2 applied once.
     expect(manualEnvelope).toBeNull();
     expect(exactEnv).toBeNull();
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
     expect(durable.logs.some((l) => l.id === 'exact-extra')).toBe(true);
     // Manual old stock=10 must not win.
-    expect(durable.medications[0].currentPills).not.toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).not.toBe(10);
     // ACK only from Exact Auto toAcknowledge (FIRED ownership at envelope time).
     expect(marked).toEqual([`med-1|d2|${TODAY}`]);
     expect(recon.recoveredEnvelope).toBe(true);
@@ -283,9 +284,9 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
       },
     });
 
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
     expect(durable.logs.some((l) => l.id === 'seq2-log')).toBe(true);
-    expect(durable.medications[0].currentPills).not.toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).not.toBe(10);
   });
   it('both pending: higher Exact Auto seq recovered before older Manual can write', async () => {
     // lastApplied=0; durable still at base stock=10
@@ -367,7 +368,7 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
     });
 
     // Higher seq wins: stock=8 not Manual's 9
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
     expect(durable.logs.some((l) => l.id === 'exact-seq11')).toBe(true);
     expect(manualEnvelope).toBeNull();
     expect(exactEnv).toBeNull();
@@ -448,9 +449,9 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
       },
     });
 
-    expect(durable.medications[0].currentPills).toBe(7);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(7);
     expect(durable.logs.some((l) => l.id === 'manual-seq11')).toBe(true);
-    expect(durable.medications[0].currentPills).not.toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).not.toBe(9);
   });
   it('Exact Auto envelope seq<=lastApplied still returns toAcknowledge for orchestrator ACK', async () => {
     // Simulate finalized mutation (lastApplied covers seq) but envelope still present.
@@ -514,7 +515,7 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
     expect(recon.markedCount).toBe(2);
     expect(exactEnv).toBeNull();
     // No stock mutation on cleanup-only path.
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
   });
   it('Exact envelope missing mutationSeq is rejected (no Phase 4 recovery)', () => {
     // Legacy/pre-fix payload without mutationSeq must not be accepted.
@@ -596,7 +597,7 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
     // If d2 take applied: stock 7; if already blocked etc.
     expect(exactEnv).toBeNull();
     // Durable must reflect at least the Exact Auto snapshot base (not still 10)
-    expect(durable.medications[0].currentPills).toBeLessThan(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBeLessThan(10);
     expect(durable.logs.some((l: { id: string }) => l.id === 'exact-pending')).toBe(true);
 
     __setExactAutoEnvelopeStorageTestHooks(null);
@@ -636,7 +637,7 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
 
     // Snapshot matched → finalize (no-op, seq 3 <= lastApplied 3) + clear + ACK.
     expect(phase4Exact).toBeNull();
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
     expect(durable.logs.filter((l) => l.id === 'match-clear')).toHaveLength(1);
     expect(marked).toEqual([`med-1|d1|${TODAY}`]);
     expect(recon.markedCount).toBe(1);
@@ -672,7 +673,7 @@ describe('Phase 4 — Exact Auto and Manual envelope ordering', () => {
     });
 
     // Snapshot re-applied: durable now matches envelope (currentPills=7).
-    expect(durable.medications[0].currentPills).toBe(7);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(7);
     expect(durable.logs.some((l) => l.id === 'mismatch-apply')).toBe(true);
     expect(phase4Exact).toBeNull();
     expect(lastApplied).toBe(4);

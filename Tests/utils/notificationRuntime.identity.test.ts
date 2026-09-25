@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -68,7 +69,7 @@ describe('notification logical identity boundary', () => {
     await postNativeNotification(baseOptions);
 
     expect(mocks.nativePost).toHaveBeenCalledTimes(1);
-    const payload = mocks.nativePost.mock.calls[0][0];
+    const payload = requireDefined(mocks.nativePost.mock.calls[0], 'mocks.nativePost.mock.calls[0]')[0];
 
     expect(payload.namespace).toBe('dose-reminder');
     expect(payload.identity).toBe('med-1::dose-morning');
@@ -83,8 +84,8 @@ describe('notification logical identity boundary', () => {
 
     expect(mocks.schedule).toHaveBeenCalledTimes(2);
 
-    const first = mocks.schedule.mock.calls[0][0].notifications[0];
-    const second = mocks.schedule.mock.calls[1][0].notifications[0];
+    const first = requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].requireDefined(notifications[0], 'notifications[0]');
+    const second = requireDefined(mocks.schedule.mock.calls[1], 'mocks.schedule.mock.calls[1]')[0].requireDefined(notifications[0], 'notifications[0]');
 
     expect(first.id).toBe(second.id);
     expect(first.extra.namespace).toBe('dose-reminder');
@@ -127,7 +128,7 @@ describe('notification logical identity boundary', () => {
 
     await scheduleNotification(baseOptions);
     const scheduledId =
-      mocks.schedule.mock.calls[0][0].notifications[0].id;
+      requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].requireDefined(notifications[0], 'notifications[0]').id;
 
     await cancelNotification(
       baseOptions.namespace,
@@ -144,7 +145,7 @@ describe('notification logical identity boundary', () => {
 
     await scheduleNotification(baseOptions);
     const scheduledId =
-      mocks.schedule.mock.calls[0][0].notifications[0].id;
+      requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].requireDefined(notifications[0], 'notifications[0]').id;
 
     mocks.getPending.mockResolvedValue({
       notifications: [

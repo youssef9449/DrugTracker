@@ -18,7 +18,7 @@ function durableMatchesEnvelopeSnapshot(
 
 const TODAY = '2026-09-16';
 
-describe('Phase 4 — durableMatchesEnvelopeSnapshot pure contract', () => {
+describe('durableMatchesEnvelopeSnapshot pure contract', () => {
   it('durableMatchesEnvelopeSnapshot requires complete medication array', () => {
     const full = {
       medications: [med({ currentPills: 9 }), med({ id: 'med-2', currentPills: 5 })],

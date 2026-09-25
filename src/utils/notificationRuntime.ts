@@ -206,25 +206,27 @@ export async function scheduleNotification(
         console.warn('[notification-runtime] iOS platform ID allocation failed');
         return false;
       }
+      const notification = {
+        id: platformId,
+        title: options.title,
+        body: options.body,
+        schedule: {
+          at: options.at ?? new Date(Date.now() + 500),
+          allowWhileIdle: true,
+        },
+        channelId: options.channelId,
+        ongoing: options.ongoing ?? false,
+        autoCancel: options.autoCancel ?? true,
+        extra: {
+          namespace: options.namespace,
+          identity: options.identity,
+        },
+        ...(options.smallIcon !== undefined ? { smallIcon: options.smallIcon } : {}),
+        ...(options.action?.id !== undefined ? { actionTypeId: options.action.id } : {}),
+      };
+
       await LocalNotifications.schedule({
-        notifications: [{
-          id: platformId,
-          title: options.title,
-          body: options.body,
-          schedule: {
-            at: options.at ?? new Date(Date.now() + 500),
-            allowWhileIdle: true,
-          },
-          smallIcon: options.smallIcon,
-          channelId: options.channelId,
-          actionTypeId: options.action?.id,
-          ongoing: options.ongoing ?? false,
-          autoCancel: options.autoCancel ?? true,
-          extra: {
-            namespace: options.namespace,
-            identity: options.identity,
-          },
-        }],
+        notifications: [notification],
       });
       return true;
     } catch (err) {
@@ -335,7 +337,7 @@ export async function cancelNotification(
 }
 
 export type NotificationPendingResult =
-  | { ok: true; pending: { schedule?: { at?: unknown } } | null }
+  | { ok: true; pending: { schedule?: { at?: unknown } | undefined } | null }
   | NativeBoundaryFailure;
 
 export async function getPendingNotificationResult(
@@ -371,9 +373,10 @@ export async function getPendingNotificationResult(
     if (platformId === null) return { ok: true, pending: null };
     const entry = pending.notifications.find((notification) => notification.id === platformId);
     if (!entry) return { ok: true, pending: null };
+    const schedule = entry.schedule;
     return {
       ok: true,
-      pending: { schedule: entry.schedule as { at?: unknown } | undefined },
+      pending: schedule === undefined ? {} : { schedule },
     };
   } catch (error) {
     const boundaryError = toNativeBoundaryError(error, 'platform_failure');

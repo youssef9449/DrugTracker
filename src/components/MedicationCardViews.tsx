@@ -74,6 +74,8 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
     onEdit,
     onDelete,
     onToggleAutoDeduct,
+    onToggleMedicationReminder,
+    onToggleMedicationCriticalStockAlerts,
     onNavigateToShopping,
     onOpenHistory,
     onRegisterBackHandler,
@@ -158,6 +160,8 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
           onEdit={onEdit}
           onDelete={onDelete}
           onToggleAutoDeduct={onToggleAutoDeduct}
+          onToggleMedicationReminder={onToggleMedicationReminder}
+          onToggleMedicationCriticalStockAlerts={onToggleMedicationCriticalStockAlerts}
           onOpenHistory={onOpenHistory}
           onRegisterBackHandler={onRegisterBackHandler}
         />
@@ -257,6 +261,8 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
     onEdit,
     onDelete,
     onToggleAutoDeduct,
+    onToggleMedicationReminder,
+    onToggleMedicationCriticalStockAlerts,
     onOpenHistory,
     onRegisterBackHandler,
   } = props;
@@ -318,6 +324,8 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
           onEdit={onEdit}
           onDelete={onDelete}
           onToggleAutoDeduct={onToggleAutoDeduct}
+          onToggleMedicationReminder={onToggleMedicationReminder}
+          onToggleMedicationCriticalStockAlerts={onToggleMedicationCriticalStockAlerts}
           onOpenHistory={onOpenHistory}
           onRegisterBackHandler={onRegisterBackHandler}
         />

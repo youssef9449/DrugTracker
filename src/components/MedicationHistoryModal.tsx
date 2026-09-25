@@ -1,8 +1,10 @@
-import type { FC } from 'react';
-import { History, X, ArrowUpRight, ArrowDownLeft, Minus } from 'lucide-react';
+import { useState, useEffect, type FC } from 'react';
+import { History, X, ArrowUpRight, ArrowDownLeft, Minus, ChevronRight, ChevronLeft } from 'lucide-react';
 import type { ConsumptionLog, Medication } from '../types';
 import { formatArabicDate, formatLogTime } from '../utils/medicationPresentation';
 import { Modal } from './ui/Modal';
+
+const LOGS_PER_PAGE = 10;
 
 interface MedicationHistoryModalProps {
   isOpen: boolean;
@@ -50,9 +52,31 @@ export const MedicationHistoryModal: FC<MedicationHistoryModalProps> = ({
   logs,
   onClose,
 }) => {
+  const [currentPage, setCurrentPage] = useState<number>(1);
+
+  useEffect(() => {
+    if (isOpen) {
+      setCurrentPage(1);
+    }
+  }, [isOpen, medication?.id]);
+
   if (!medication) return null;
 
   const medLogs = filterLogsForMedication(logs, medication.id);
+
+  // Pagination calculations
+  const totalLogs = medLogs.length;
+  const totalPages = Math.max(1, Math.ceil(totalLogs / LOGS_PER_PAGE));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+
+  const startIndex = (safeCurrentPage - 1) * LOGS_PER_PAGE;
+  const currentLogs = medLogs.slice(startIndex, startIndex + LOGS_PER_PAGE);
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= totalPages) {
+      setCurrentPage(newPage);
+    }
+  };
 
   return (
     <Modal
@@ -75,6 +99,7 @@ export const MedicationHistoryModal: FC<MedicationHistoryModalProps> = ({
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
                 المتبقي الحالي: <span className="font-mono font-bold text-slate-800">{medication.currentPills}</span> {medication.unit}
+                {totalLogs > 0 && ` · ${totalLogs} حركة مسجلة`}
               </p>
             </div>
           </div>
@@ -102,7 +127,7 @@ export const MedicationHistoryModal: FC<MedicationHistoryModalProps> = ({
               </p>
             </div>
           ) : (
-            medLogs.map((log) => {
+            currentLogs.map((log) => {
               const presentation = historyAmountPresentation(log);
               const amountNum = Number(log.amount);
               return (
@@ -153,6 +178,35 @@ export const MedicationHistoryModal: FC<MedicationHistoryModalProps> = ({
             })
           )}
         </div>
+
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between shrink-0">
+            <button
+              type="button"
+              onClick={() => handlePageChange(safeCurrentPage - 1)}
+              disabled={safeCurrentPage <= 1}
+              className="w-9 h-9 flex items-center justify-center rounded-full text-slate-600 disabled:opacity-30 hover:bg-slate-200/80 active:bg-slate-300 transition cursor-pointer"
+              aria-label="الصفحة السابقة"
+              title="الصفحة السابقة"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <span className="text-xs font-semibold text-slate-600">
+              {safeCurrentPage} / {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => handlePageChange(safeCurrentPage + 1)}
+              disabled={safeCurrentPage >= totalPages}
+              className="w-9 h-9 flex items-center justify-center rounded-full text-slate-600 disabled:opacity-30 hover:bg-slate-200/80 active:bg-slate-300 transition cursor-pointer"
+              aria-label="الصفحة التالية"
+              title="الصفحة التالية"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="p-3 border-t border-slate-100 bg-slate-50/50 flex justify-end shrink-0">

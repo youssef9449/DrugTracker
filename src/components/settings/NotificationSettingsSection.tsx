@@ -2,6 +2,7 @@ import type { FC } from 'react';
 import {
   Bell,
   BellOff,
+  PillBottle,
   AlertTriangle,
   CheckCircle2,
 } from 'lucide-react';
@@ -77,7 +78,7 @@ export const NotificationSettingsSection: FC<NotificationSettingsSectionProps> =
                         draftCritical ? 'bg-rose-100 text-rose-600' : 'bg-slate-200 text-slate-500'
                       }`}
                     >
-                      <AlertTriangle
+                      <PillBottle
                         className={`w-4 h-4 ${
                           draftCritical ? 'fill-rose-500/30' : ''
                         }`}

@@ -1,5 +1,5 @@
 import { type FC } from 'react';
-import { Bell, BellOff, Search, Smartphone, Monitor, Settings, AlertTriangle, Check, X, Zap, ZapOff } from 'lucide-react';
+import { Bell, BellOff, PillBottle, Search, Smartphone, Monitor, Settings, Check, X, Zap, ZapOff } from 'lucide-react';
 import { ActiveTab } from './AndroidBottomNav';
 import { ICON_BUTTON_CLASS } from '../lib/styles';
 
@@ -171,7 +171,7 @@ export const AppHeader: FC<AppHeaderProps> = ({
                 : 'text-teal-200/80 hover:text-white hover:bg-teal-700/60'
             }`}
           >
-            <AlertTriangle
+            <PillBottle
               className={`w-5 h-5 ${
                 criticalStockAlertsEnabled ? 'fill-rose-300/30 text-rose-200' : 'opacity-70'
               }`}

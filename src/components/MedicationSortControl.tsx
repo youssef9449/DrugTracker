@@ -19,8 +19,8 @@ const OPTIONS: { value: MedicationSortField; label: string }[] = [
 
 function getDirectionDescription(field: MedicationSortField, direction: MedicationSortDirection, short = false): string {
   if (field === 'name') {
-    if (short) return direction === 'asc' ? 'A-Z / أ-ي' : 'Z-A / ي-أ';
-    return direction === 'asc' ? 'تصاعدي (A-Z ثم أ-ي)' : 'تنازلي (ي-أ ثم Z-A)';
+    if (short) return direction === 'asc' ? 'A-Z' : 'Z-A';
+    return direction === 'asc' ? 'تصاعدي (A-Z)' : 'تنازلي (Z-A)';
   }
   if (field === 'quantity') {
     if (short) return direction === 'asc' ? 'الأقل أولاً' : 'الأكثر أولاً';

@@ -1,5 +1,23 @@
 import type { FC } from 'react';
-import { Layers, Box, PauseCircle, Bell, BellOff, AlertTriangle, AlertCircle, CheckCircle, CheckCircle2, Clock, ListChecks, RotateCcw, Calendar, ShoppingCart } from 'lucide-react';
+import {
+  Layers,
+  Box,
+  PauseCircle,
+  Bell,
+  BellOff,
+  PillBottle,
+  Pill,
+  Droplets,
+  Syringe,
+  AlertCircle,
+  CheckCircle,
+  CheckCircle2,
+  Clock,
+  ListChecks,
+  RotateCcw,
+  Calendar,
+  ShoppingCart,
+} from 'lucide-react';
 import type { ConsumptionLog, Medication, MedicationStatusInfo } from '../types';
 import { getCardDoseToggleTarget } from '../utils/doseSchedule';
 import { getHistoricalRestoreDisplayAmount } from '../utils/medActions';
@@ -149,18 +167,18 @@ export const MedicationNotificationStatusBadge: FC<MedicationNotificationStatusB
         isXs ? 'w-5 h-5' : 'w-6 h-6'
       } ${
         enabled
-          ? isDose
-            ? 'bg-teal-50 text-teal-800 border-teal-200/90 hover:bg-teal-100 hover:border-teal-300'
-            : 'bg-teal-50 text-teal-800 border-teal-200/90 hover:bg-teal-100 hover:border-teal-300'
-          : 'bg-slate-100 text-slate-500 border-slate-200/90 hover:bg-slate-200 hover:border-slate-300'
+          ? 'bg-teal-100 text-teal-800 border-teal-300/70 hover:bg-teal-200 hover:border-teal-400'
+          : 'bg-slate-200/90 text-slate-600 border-slate-300 hover:bg-slate-300 hover:text-slate-700'
       }`}
     >
       {isDose ? (
-        enabled
-          ? <Bell className="w-3 h-3" aria-hidden />
-          : <BellOff className="w-3 h-3" aria-hidden />
+        enabled ? (
+          <Bell className={`${isXs ? 'w-3 h-3' : 'w-3.5 h-3.5'} fill-teal-600/30`} aria-hidden />
+        ) : (
+          <BellOff className={`${isXs ? 'w-3 h-3' : 'w-3.5 h-3.5'}`} aria-hidden />
+        )
       ) : (
-        <AlertTriangle className="w-3 h-3" aria-hidden />
+        <PillBottle className={`${isXs ? 'w-3 h-3' : 'w-3.5 h-3.5'} ${enabled ? 'fill-teal-600/30' : ''}`} aria-hidden />
       )}
     </button>
   );
@@ -384,7 +402,13 @@ export const MedicationCardDoseActions: FC<MedicationCardDoseActionsProps> = ({
         className={`${btn} flex items-center justify-center rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/80 focus-visible:ring-offset-1 transition-colors active:scale-95 cursor-pointer`}
         data-testid={`take-dose-${medication.id}`}
       >
-        <ListChecks className={btnIcon} strokeWidth={2.25} aria-hidden />
+        {medication.unit === 'مل' ? (
+          <Droplets className={btnIcon} strokeWidth={2.25} aria-hidden />
+        ) : medication.unit === 'جرعة' ? (
+          <Syringe className={btnIcon} strokeWidth={2.25} aria-hidden />
+        ) : (
+          <Pill className={btnIcon} strokeWidth={2.25} aria-hidden />
+        )}
       </button>
     );
   }

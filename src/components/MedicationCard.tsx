@@ -61,22 +61,22 @@ function colorTagClasses(colorTag: string | undefined): { bg: string; border: st
 }
 interface MedicationCardProps {
   medication: Medication;
-  viewFilter?: 'all' | 'alerts' | 'sufficient';
-  isCompact?: boolean;
+  viewFilter?: 'all' | 'alerts' | 'sufficient' | undefined;
+  isCompact?: boolean | undefined;
   onOpenRefill: (medication: Medication) => void;
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
   onToggleAutoDeduct: (id: string) => void;
-  onToggleMedicationReminder?: (id: string) => void;
-  onToggleMedicationCriticalStockAlerts?: (id: string) => void;
-  onNavigateToShopping?: () => void;
-  onConsumeDose?: (medicationId: string, doseId?: string) => void;
+  onToggleMedicationReminder?: (id: string) => void | undefined;
+  onToggleMedicationCriticalStockAlerts?: (id: string) => void | undefined;
+  onNavigateToShopping?: () => void | undefined;
+  onConsumeDose?: (medicationId: string, doseId?: string) => void | undefined;
   /** Restore a manually consumed dose via the same App path as logs. */
-  onRestoreDose?: (medicationId: string, doseId?: string) => void;
-  onOpenHistory?: (medication: Medication) => void;
+  onRestoreDose?: (medicationId: string, doseId?: string) => void | undefined;
+  onOpenHistory?: (medication: Medication) => void | undefined;
   /** Durable stock logs used to display the exact historical Restore amount. */
-  logs?: ConsumptionLog[];
-  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
+  logs?: ConsumptionLog[] | undefined;
+  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void | undefined;
 }
 export const MedicationCard: FC<MedicationCardProps> = ({
   medication,

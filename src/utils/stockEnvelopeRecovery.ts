@@ -450,7 +450,7 @@ export async function recoverAllPendingStockEnvelopes(
       // Auto deduction that happened after the envelope was created.
       if (nativeResult.stocks && nativeResult.stocks.length > 0) {
         const nativeById = new Map(
-          nativeResult.stocks.map((stock) => [
+          nativeResult.stocks.map((stock: { medicationId: string; currentPills: number }) => [
             stock.medicationId,
             Number(stock.currentPills),
           ])

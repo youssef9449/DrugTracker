@@ -240,17 +240,29 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     expect(screen.queryByText('الجرعة 2')).not.toBeInTheDocument();
   });
 
-  it('shows stock notification settings and saves the per-medication preference', () => {
+  it('defaults stock notifications and auto-deduction off and places them below the dose reminder', () => {
     const onSave = vi.fn();
     render(<AddMedicationModal {...baseProps({ onSave })} />);
 
-    const stockToggle = screen.getByRole('switch', {
-      name: 'إشعارات المخزون مفعّلة — انقر للإيقاف',
+    const reminderToggle = screen.getByRole('switch', {
+      name: 'تفعيل اشعار التنبيه بالجرعة',
     });
-    expect(stockToggle).toHaveAttribute('aria-checked', 'true');
+    const stockToggle = screen.getByRole('switch', {
+      name: 'إشعارات المخزون متوقفة — انقر للتفعيل',
+    });
+    const autoToggle = screen.getByRole('switch', {
+      name: 'تفعيل الخصم التلقائي لهذا الدواء',
+    });
 
-    fireEvent.click(stockToggle);
     expect(stockToggle).toHaveAttribute('aria-checked', 'false');
+    expect(autoToggle).toHaveAttribute('aria-checked', 'false');
+
+    expect(
+      reminderToggle.compareDocumentPosition(stockToggle) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      stockToggle.compareDocumentPosition(autoToggle) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
 
     const thresholdInput = screen.getByPlaceholderText('مثال: 5') as HTMLInputElement;
     fireEvent.change(thresholdInput, { target: { value: '9' } });
@@ -264,6 +276,7 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     expect(onSave).toHaveBeenCalledTimes(1);
     const saved = requireDefined(onSave.mock.calls[0], 'onSave.mock.calls[0]')[0];
     expect(saved.criticalStockAlertsEnabled).toBe(false);
+    expect(saved.autoDeductEnabled).toBe(false);
     expect(saved.warningThresholdDays).toBe(9);
   });
 
@@ -283,30 +296,7 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     ).toHaveAttribute('aria-checked', 'false');
   });
 
-  it('uses the global Auto-Deduction default for new medication and allows an explicit override', () => {
-    const onSave = vi.fn();
-    render(
-      <AddMedicationModal
-        {...baseProps({ onSave, defaultAutoDeductEnabled: false })}
-      />
-    );
 
-    const toggle = screen.getByRole('switch', {
-      name: 'تفعيل الخصم التلقائي لهذا الدواء',
-    });
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
-
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-checked', 'true');
-
-    fireEvent.change(screen.getByPlaceholderText(/بانادول|كونكور/), {
-      target: { value: 'OverrideMed' },
-    });
-    fireEvent.click(screen.getByText('إضافة الدواء'));
-
-    expect(onSave).toHaveBeenCalledTimes(1);
-    expect(requireDefined(onSave.mock.calls[0], 'onSave.mock.calls[0]')[0].autoDeductEnabled).toBe(true);
-  });
 
   it('ignores malformed persisted dose description instead of throwing', () => {
     const malformedDescriptionMed = makeMed({

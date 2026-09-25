@@ -49,7 +49,7 @@ export const AutoDeductPausedNote: FC = () => (
 );
 interface AutoDeductStatusBadgeProps {
   isAutoActive: boolean;
-  onToggle?: () => void | undefined;
+  onToggle?: (() => void) | undefined;
   size?: 'xs' | 'sm' | undefined;
   medicationId?: string | undefined;
   className?: string | undefined;
@@ -101,7 +101,7 @@ export const AutoDeductStatusBadge: FC<AutoDeductStatusBadgeProps> = ({
  */
 interface MedicationNotificationStatusBadgeProps {
   enabled: boolean;
-  onToggle?: () => void | undefined;
+  onToggle?: (() => void) | undefined;
   type: 'dose' | 'critical';
   size?: 'xs' | 'sm' | undefined;
   medicationId?: string | undefined;
@@ -214,8 +214,8 @@ export interface MedicationCardHeaderProps {
   density: Density;
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
-  onOpenHistory?: (medication: Medication) => void | undefined;
-  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void | undefined;
+  onOpenHistory?: ((medication: Medication) => void) | undefined;
+  onRegisterBackHandler?: ((id: string, close: () => void, priority?: number) => () => void) | undefined;
 }
 
 /** Shared name + overflow menu row for compact/detailed cards. */
@@ -305,8 +305,8 @@ export interface MedicationCardDoseActionsProps {
   currentPills: number;
   logs?: ConsumptionLog[] | undefined;
   density: Density;
-  onConsumeDose?: (medicationId: string, doseId?: string) => void | undefined;
-  onRestoreDose?: (medicationId: string, doseId?: string) => void | undefined;
+  onConsumeDose?: ((medicationId: string, doseId?: string) => void) | undefined;
+  onRestoreDose?: ((medicationId: string, doseId?: string) => void) | undefined;
 }
 
 /**

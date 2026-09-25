@@ -76,11 +76,11 @@ export interface OrderItem {
   name: string;
   quantity: number;
   unit: string;
-  currentStock?: number;
-  stripsPerBox?: number;
-  pillsPerStrip?: number;
-  packageSize?: number;
-  orderBreakdown?: OrderQuantitySelection[];
+  currentStock?: number | undefined;
+  stripsPerBox?: number | undefined;
+  pillsPerStrip?: number | undefined;
+  packageSize?: number | undefined;
+  orderBreakdown?: OrderQuantitySelection[] | undefined;
 }
 export function describeOrderQuantityBreakdown(
   breakdown: OrderQuantitySelection[],

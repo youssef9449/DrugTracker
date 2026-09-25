@@ -240,6 +240,12 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     expect(screen.queryByText('الجرعة 2')).not.toBeInTheDocument();
   });
 
+  it('does not render the removed treatment-duration progress explanation', () => {
+    render(<AddMedicationModal {...baseProps()} />);
+    fireEvent.click(screen.getByText('مدة محددة'));
+    expect(screen.queryByText('سيعتمد شريط التقدم')).not.toBeInTheDocument();
+  });
+
   it('defaults stock notifications and auto-deduction off and places them below the dose reminder', () => {
     const onSave = vi.fn();
     render(<AddMedicationModal {...baseProps({ onSave })} />);

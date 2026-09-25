@@ -31,7 +31,7 @@ export interface AppSettingsModalProps {
   soundEnabled: boolean;
   notificationsEnabled?: boolean | undefined;
   criticalStockAlertsEnabled?: boolean | undefined;
-  onSendTestNotification?: () => void | undefined;
+  onSendTestNotification?: (() => void) | undefined;
   autoDeductEnabled?: boolean | undefined;
   /**
    * Apply app preference toggles only when the user confirms with حفظ الإعدادات.
@@ -49,12 +49,12 @@ export interface AppSettingsModalProps {
    *  Android exact-alarm settings. */
   exactAlarmPermission?: ExactAlarmPermission | null | undefined;
   /** Open the Android settings screen to grant exact-alarm permission. */
-  onOpenExactAlarmSettings?: () => void | undefined;
+  onOpenExactAlarmSettings?: (() => void) | undefined;
   /**
    * Optional toast for permission-denial feedback when turning notification
    * toggles ON. Same message as the home notification toggle.
    */
-  showToast?: (message: string) => void | undefined;
+  showToast?: ((message: string) => void) | undefined;
 }
 export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   isOpen,

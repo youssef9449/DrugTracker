@@ -1,10 +1,15 @@
 /**
  * JS reconciliation of native exact-time auto-deduction FIRED events.
- * Idempotency:
- * - Per-dose consume/skip markers (same as Take)
- * - Existing exact auto log (deterministic id) for the occurrence
- *   NOT used to mark an occurrence as applied. Idempotency relies solely on
- *   durable occurrence-specific evidence.
+ * Idempotency (#532) — settlement is decided ONLY by the canonical
+ * {@link getExactOccurrenceSettlementState} policy over durable
+ * occurrence-specific evidence, in priority order:
+ * - deterministic exact-auto log row (logged)
+ * - per-dose consume marker (consumed, same as Take)
+ * - per-dose skip/restore marker (skipped)
+ * Any one of them marks the occurrence already applied; every settlement
+ * path (reconciliation runner, apply gate, evidence lookups) consumes the
+ * same decision, and callers pass the exact-log collection they hold so the
+ * `logged` branch is never silently dropped.
  * Log identity for exact events is deterministic so retries do not create
  * duplicate ConsumptionLog rows.
  */
@@ -160,16 +165,21 @@ export function getExactOccurrenceSettlementState(
 /**
  * Boolean convenience over {@link getExactOccurrenceSettlementState} —
  * whether the occurrence is already reflected in JS stock semantics.
- * Kept as the named evidence-consumption API for callers/tests that only
- * need the boolean; the typed decision is canonical.
+ * Callers MUST supply the exact-log evidence they hold (the same collection
+ * they would pass to the canonical decision): the helper never silently
+ * drops the `logged` branch by substituting an empty collection (#532).
+ * The typed decision remains canonical.
  */
 export function isExactAutoOccurrenceApplied(
+  logs: ConsumptionLog[],
   med: Medication,
   doseId: string,
   calendarDate: string
 ): boolean {
-  const settlement = getExactOccurrenceSettlementState([], med, doseId, calendarDate);
-  return settlement.state !== 'unsettled';
+  return (
+    getExactOccurrenceSettlementState(logs, med, doseId, calendarDate).state !==
+    'unsettled'
+  );
 }
 /**
  * Locate a native Exact Auto occurrence that is FIRED and not yet reconciled
@@ -205,6 +215,7 @@ export function findPendingExactAutoOccurrence(
 export function applyExactAutoEventToMedication(
   med: Medication,
   event: AutoDeductionEvent,
+  logs: ConsumptionLog[],
   now: Date = new Date()
 ): { ok: true; updatedMed: Medication; log: ConsumptionLog } | { ok: false; reason: string } {
   // A FIRED Exact occurrence is durable: the native
@@ -238,8 +249,13 @@ export function applyExactAutoEventToMedication(
   if (!doseId) {
     return { ok: false, reason: 'invalid_dose_id' };
   }
+  // Defensive already-applied gate (true trust boundary: this apply is a
+  // public API also invoked outside the reconciliation runner). It consumes
+  // the ONE canonical settlement decision with the caller-supplied log
+  // evidence — never an empty collection (#532).
   if (
-    getExactOccurrenceSettlementState([], med, doseId, calendarDate).state !== 'unsettled'
+    getExactOccurrenceSettlementState(logs, med, doseId, calendarDate).state !==
+    'unsettled'
   ) {
     return { ok: false, reason: 'already_applied' };
   }
@@ -405,7 +421,7 @@ export function reconcileFiredEvents(
       toAcknowledge.push({ medicationId, doseId, calendarDate });
       continue;
     }
-    const applied = applyExactAutoEventToMedication(med, event, now);
+    const applied = applyExactAutoEventToMedication(med, event, workingLogs, now);
     if (!applied.ok) {
       if (applied.reason === 'already_applied') {
         // Durable marker/log already reflects stock — safe to ACK.

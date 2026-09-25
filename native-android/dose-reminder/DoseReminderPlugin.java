@@ -32,7 +32,7 @@ public final class DoseReminderPlugin extends Plugin {
         Long triggerAt = call.getLong("triggerAtEpochMs");
 
         if (amount == null || triggerAt == null) {
-            call.reject("invalid_schedule");
+            call.reject("invalid_schedule", "invalid_schedule");
             return;
         }
 
@@ -61,7 +61,10 @@ public final class DoseReminderPlugin extends Plugin {
                 }
                 call.resolve(ret);
             } catch (Exception e) {
-                call.reject("dose_reminder_schedule_failed");
+                // #534: stable machine code as the second reject argument.
+                call.reject(
+                        "dose_reminder_schedule_failed",
+                        "dose_reminder_schedule_failed");
             }
         });
     }
@@ -87,7 +90,10 @@ public final class DoseReminderPlugin extends Plugin {
                 }
                 call.resolve(ret);
             } catch (Exception e) {
-                call.reject("dose_reminder_cancel_failed");
+                // #534: stable machine code as the second reject argument.
+                call.reject(
+                        "dose_reminder_cancel_failed",
+                        "dose_reminder_cancel_failed");
             }
         });
     }
@@ -105,7 +111,7 @@ public final class DoseReminderPlugin extends Plugin {
         Long triggerAt = call.getLong("triggerAtEpochMs");
 
         if (amount == null || triggerAt == null) {
-            call.reject("invalid_snooze");
+            call.reject("invalid_snooze", "invalid_snooze");
             return;
         }
 
@@ -135,7 +141,10 @@ public final class DoseReminderPlugin extends Plugin {
                 }
                 call.resolve(ret);
             } catch (Exception e) {
-                call.reject("dose_reminder_snooze_schedule_failed");
+                // #534: stable machine code as the second reject argument.
+                call.reject(
+                        "dose_reminder_snooze_schedule_failed",
+                        "dose_reminder_snooze_schedule_failed");
             }
         });
     }
@@ -160,7 +169,10 @@ public final class DoseReminderPlugin extends Plugin {
                 }
                 call.resolve(ret);
             } catch (Exception e) {
-                call.reject("dose_reminder_snooze_cancel_failed");
+                // #534: stable machine code as the second reject argument.
+                call.reject(
+                        "dose_reminder_snooze_cancel_failed",
+                        "dose_reminder_snooze_cancel_failed");
             }
         });
     }
@@ -188,9 +200,15 @@ public final class DoseReminderPlugin extends Plugin {
 
         JSObject ret = new JSObject();
         if (!pending.isOk()) {
-            call.reject(pending.error == null
+            String raw = pending.error == null
                     ? "dose_reminder_pending_state_failed"
-                    : pending.error);
+                    : pending.error;
+            // #534: stable machine code via the shared vocabulary; the raw
+            // message stays the human-readable diagnostic.
+            call.reject(
+                    raw,
+                    NativeErrorCodes.structuredCode(
+                            raw, "dose_reminder_pending_state_failed"));
             return;
         }
         ret.put("scheduled", pending.isPending());

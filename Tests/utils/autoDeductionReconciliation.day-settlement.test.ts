@@ -89,12 +89,12 @@ describe('exact event day must not be double-settled', () => {
       ]
     );
     expect(r.medications[0].currentPills).toBe(8);
-    expect(isExactAutoOccurrenceApplied(r.medications[0], 'morning', '2026-09-13')).toBe(
-      true
-    );
-    expect(isExactAutoOccurrenceApplied(r.medications[0], 'evening', '2026-09-13')).toBe(
-      false
-    );
+    expect(
+      isExactAutoOccurrenceApplied(r.logs, r.medications[0], 'morning', '2026-09-13')
+    ).toBe(true);
+    expect(
+      isExactAutoOccurrenceApplied(r.logs, r.medications[0], 'evening', '2026-09-13')
+    ).toBe(false);
   });
 
   it('twoEventsOnSameHistoricalDayDeductOnlyTheirOwnAmounts', () => {

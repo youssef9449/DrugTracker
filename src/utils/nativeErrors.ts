@@ -38,8 +38,11 @@ export class NativeBoundaryError extends Error {
  * tokens already used inside the native plugins) and new native codes must
  * be registered here; anything unregistered falls through to the narrow
  * string fallback and then to the deterministic fallback category.
+ *
+ * Exported so Tests/utils/nativeErrors.test.ts can prove the vocabulary
+ * stays synchronized with native-android/alarm-runtime/NativeErrorCodes.java.
  */
-const NATIVE_CODE_CATEGORIES: Readonly<Record<string, NativeErrorCode>> = {
+export const NATIVE_CODE_CATEGORIES: Readonly<Record<string, NativeErrorCode>> = {
   // Bridge/platform shape errors.
   not_android: 'not_android',
   invalid_request: 'invalid_argument',
@@ -58,6 +61,11 @@ const NATIVE_CODE_CATEGORIES: Readonly<Record<string, NativeErrorCode>> = {
   invalid_successor_obligation: 'invalid_argument',
   invalid_args_or_state: 'invalid_argument',
   invalid_snooze_request: 'invalid_argument',
+  invalid_snooze: 'invalid_argument',
+  invalid_schedule: 'invalid_argument',
+  invalid_occurrence_resolution: 'invalid_argument',
+  missing_params: 'invalid_argument',
+  missing_schedule_fields: 'invalid_argument',
   invalid_calendarDate: 'invalid_argument',
   invalid_time: 'invalid_argument',
   invalid_amount: 'invalid_argument',
@@ -86,6 +94,7 @@ const NATIVE_CODE_CATEGORIES: Readonly<Record<string, NativeErrorCode>> = {
   malformed_schedule_metadata_cleanup_failed: 'persistence_failed',
   retry_persist_failed: 'persistence_failed',
   retry_evicted: 'persistence_failed',
+  dose_reminder_pending_state_failed: 'persistence_failed',
 
   // Ownership / staleness / cancellation.
   ownership_lost: 'ownership_lost',
@@ -107,7 +116,10 @@ const NATIVE_CODE_CATEGORIES: Readonly<Record<string, NativeErrorCode>> = {
   restore_failed: 'recovery_required',
   recovery_failed: 'recovery_required',
 
-  // Platform-level delivery.
+  // Platform-level delivery and per-bridge failure families. Tokens
+  // emitted via the Capacitor call.reject(message, code) catch paths are
+  // registered here too so the JS vocabulary stays synchronized with the
+  // native authority (native-android/alarm-runtime/NativeErrorCodes.java).
   notification_post_failed: 'platform_failure',
   notification_cancel_failed: 'platform_failure',
   notification_manager_unavailable: 'platform_failure',
@@ -116,6 +128,21 @@ const NATIVE_CODE_CATEGORIES: Readonly<Record<string, NativeErrorCode>> = {
   trigger_in_past: 'platform_failure',
   open_settings_failed: 'platform_failure',
   channel_bootstrap_failed: 'platform_failure',
+  schedule_occurrence_failed: 'platform_failure',
+  cancel_occurrence_failed: 'platform_failure',
+  invalidate_recurrence_failed: 'platform_failure',
+  list_fired_events_failed: 'platform_failure',
+  mark_reconciled_failed: 'platform_failure',
+  list_schedules_failed: 'platform_failure',
+  stock_init_failed: 'platform_failure',
+  foreground_stock_failed: 'platform_failure',
+  auto_stock_apply_failed: 'platform_failure',
+  critical_stock_schedule_failed: 'platform_failure',
+  critical_stock_cancel_failed: 'platform_failure',
+  dose_reminder_schedule_failed: 'platform_failure',
+  dose_reminder_cancel_failed: 'platform_failure',
+  dose_reminder_snooze_schedule_failed: 'platform_failure',
+  dose_reminder_snooze_cancel_failed: 'platform_failure',
 };
 
 /** Shape of a structured native failure crossing the bridge. */

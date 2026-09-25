@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
+  NATIVE_CODE_CATEGORIES,
   NativeBoundaryError,
   classifyNativeError,
   classifyNativeFailure,
@@ -94,5 +97,76 @@ describe('#534 structured native error-code migration', () => {
         code
       ).toBe(expected);
     }
+  });
+
+  it('bridge catch-path codes classify deterministically regardless of the human-readable message', () => {
+    // Every stable code emitted by the plugin call.reject(msg, code) / result
+    // catch paths maps through its table entry — the exception text is NEVER
+    // consulted for classification.
+    const cases: Array<[string, string]> = [
+      ['schedule_occurrence_failed', 'platform_failure'],
+      ['cancel_occurrence_failed', 'platform_failure'],
+      ['invalidate_recurrence_failed', 'platform_failure'],
+      ['list_fired_events_failed', 'platform_failure'],
+      ['mark_reconciled_failed', 'platform_failure'],
+      ['list_schedules_failed', 'platform_failure'],
+      ['stock_init_failed', 'platform_failure'],
+      ['foreground_stock_failed', 'platform_failure'],
+      ['auto_stock_apply_failed', 'platform_failure'],
+      ['critical_stock_schedule_failed', 'platform_failure'],
+      ['critical_stock_cancel_failed', 'platform_failure'],
+      ['dose_reminder_schedule_failed', 'platform_failure'],
+      ['dose_reminder_cancel_failed', 'platform_failure'],
+      ['dose_reminder_snooze_schedule_failed', 'platform_failure'],
+      ['dose_reminder_snooze_cancel_failed', 'platform_failure'],
+      ['dose_reminder_pending_state_failed', 'persistence_failed'],
+      ['invalid_occurrence_resolution', 'invalid_argument'],
+      ['invalid_snooze', 'invalid_argument'],
+      ['invalid_schedule', 'invalid_argument'],
+      ['missing_params', 'invalid_argument'],
+      ['missing_schedule_fields', 'invalid_argument'],
+    ];
+    for (const [code, expected] of cases) {
+      expect(
+        classifyNativeFailure({
+          code,
+          // A message that would mislead the narrow substring classifier:
+          // without the code, "recover...storage" would read as recovery.
+          error: 'recover the storage state immediately: storage lost',
+        }),
+        code
+      ).toBe(expected);
+    }
+  });
+
+  it('an unknown structured code still falls back deterministically and keeps the raw error observable', () => {
+    const failure = {
+      code: 'totally_unregistered_token',
+      error: 'raw native diagnostic text',
+    };
+    expect(classifyNativeFailure(failure, 'platform_failure')).toBe(
+      'platform_failure'
+    );
+    // Same input, same fallback → same output (deterministic).
+    expect(classifyNativeFailure(failure, 'platform_failure')).toBe(
+      classifyNativeFailure(failure, 'platform_failure')
+    );
+  });
+
+  it('the native and JS code vocabularies stay synchronized (#534)', () => {
+    // NativeErrorCodes.java is the native authority: every double-quoted
+    // token it registers must exist in the JS mapping table, so a native
+    // code never silently degrades to message-wording classification.
+    const nativeSource = fs.readFileSync(
+      path.join(process.cwd(), 'native-android/alarm-runtime/NativeErrorCodes.java'),
+      'utf8'
+    );
+    const tokens = new Set<string>();
+    for (const match of nativeSource.matchAll(/"([A-Za-z_][A-Za-z0-9_]*)"/g)) {
+      tokens.add(match[1]);
+    }
+    expect(tokens.size).toBeGreaterThan(0);
+    const missing = [...tokens].filter((t) => !(t in NATIVE_CODE_CATEGORIES));
+    expect(missing).toEqual([]);
   });
 });

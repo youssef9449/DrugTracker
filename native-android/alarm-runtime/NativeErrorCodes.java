@@ -20,8 +20,7 @@ import java.util.Map;
  * be registered in BOTH places.
  *
  * This class carries NO business rules — it is shared vocabulary, safe for
- * every feature bridge (Auto Deduction, Critical Stock, Dose Reminder,
- * Notification Runtime, Exact Alarm) to consume.
+ * every feature bridge to consume.
  */
 public final class NativeErrorCodes {
     private NativeErrorCodes() {}
@@ -33,12 +32,14 @@ public final class NativeErrorCodes {
         // Invalid argument / request shape.
         for (String t : new String[] {
                 "invalid_request", "invalid_args", "invalid_argument", "invalid_json",
-                "invalid_snooze_request", "malformed_fields", "malformed_pending_record",
+                "invalid_snooze_request", "invalid_snooze", "invalid_schedule",
+                "malformed_fields", "malformed_pending_record",
                 "malformed_schedule_metadata", "invalid_schedule_record",
                 "invalid_event_record", "invalid_treatment_end_date", "invalid_next_date",
                 "invalid_auto_marker", "invalid_retry_evidence",
                 "invalid_successor_obligation", "invalid_args_or_state",
                 "invalid_calendarDate", "invalid_time", "invalid_amount", "invalid_datetime",
+                "invalid_occurrence_resolution", "missing_params", "missing_schedule_fields",
                 "missing_medicationId", "missing_doseId"}) {
             m.put(t, Boolean.TRUE);
         }
@@ -57,7 +58,8 @@ public final class NativeErrorCodes {
                 "snapshot_failed", "pending_promotion_failed",
                 "source_schedule_cleanup_failed",
                 "malformed_schedule_metadata_cleanup_failed",
-                "retry_persist_failed", "retry_evicted"}) {
+                "retry_persist_failed", "retry_evicted",
+                "dose_reminder_pending_state_failed"}) {
             m.put(t, Boolean.TRUE);
         }
         // Ownership / staleness / cancellation.
@@ -73,12 +75,23 @@ public final class NativeErrorCodes {
                 "recovery_required", "recover_required", "successor_catchup_failed"}) {
             m.put(t, Boolean.TRUE);
         }
-        // Platform-level delivery.
+        // Platform-level delivery and per-bridge failure families. Tokens
+        // emitted by the Capacitor call.reject(message, code) catch paths are
+        // registered here too so the native vocabulary stays synchronized
+        // with the JS mapping table (src/utils/nativeErrors.ts).
         for (String t : new String[] {
                 "notification_post_failed", "notification_cancel_failed",
                 "notification_manager_unavailable", "notification_security_exception",
                 "stock_not_initialized", "trigger_in_past", "open_settings_failed",
-                "channel_bootstrap_failed", "restore_failed", "recovery_failed"}) {
+                "channel_bootstrap_failed", "restore_failed", "recovery_failed",
+                "schedule_occurrence_failed", "cancel_occurrence_failed",
+                "invalidate_recurrence_failed", "list_fired_events_failed",
+                "mark_reconciled_failed", "list_schedules_failed",
+                "stock_init_failed", "foreground_stock_failed",
+                "auto_stock_apply_failed", "critical_stock_schedule_failed",
+                "critical_stock_cancel_failed", "dose_reminder_schedule_failed",
+                "dose_reminder_cancel_failed", "dose_reminder_snooze_schedule_failed",
+                "dose_reminder_snooze_cancel_failed"}) {
             m.put(t, Boolean.TRUE);
         }
         return Collections.unmodifiableMap(m);

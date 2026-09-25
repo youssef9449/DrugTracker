@@ -68,14 +68,36 @@ describe('#494 per-medication signature memoization', () => {
     expect(second).toContain('med-0|12|');
   });
 
-  it('recreating medication objects with identical scheduling state reuses the cache (no identity-only reliance)', () => {
+  it('recreating the medication object with unchanged scheduling state reuses the cache (no top-level-identity reliance)', () => {
     const memoizer = createCriticalSchedulingSignatureMemoizer();
-    const meds = [makeMed(), makeMed({ id: 'med-2' })];
-    memoizer.signature(meds, CUTOFF);
-    // Fresh objects, same content — callers recreate medication objects.
-    const recreated = [makeMed(), makeMed({ id: 'med-2' })];
-    memoizer.signature(recreated, CUTOFF);
+    // Immutable-writer contract (the real app data model): scheduling
+    // containers keep their references across medication rewrites and are
+    // replaced only when their content changes (medActions.ts/pruneDoseConsumption.ts).
+    const schedule = [{ id: 'dose-1', amount: 1, time: '09:00' }];
+    const consumption = { 'dose-1': ['2026-03-11'] };
+    const skipped = {};
+    const base = makeMed({
+      doseSchedule: schedule,
+      doseConsumptionHistory: consumption,
+      doseSkippedHistory: skipped,
+    });
+    const base2 = makeMed({
+      id: 'med-2',
+      doseSchedule: schedule,
+      doseConsumptionHistory: consumption,
+      doseSkippedHistory: skipped,
+    });
+    memoizer.signature([base, base2], CUTOFF);
+
+    // New medication objects with identical scalars and the SAME container
+    // references → the per-med fast path reuses; no re-serialization.
+    memoizer.signature([{ ...base }, { ...base2 }], CUTOFF);
     expect(memoizer.stats().reused).toBe(2);
+
+    // A changed scalar invalidates ONLY that medication — even though the
+    // top-level object was recreated AND the containers are unchanged.
+    memoizer.signature([{ ...base, currentPills: 12 }, { ...base2 }], CUTOFF);
+    expect(memoizer.stats()).toEqual({ reused: 3, recomputed: 3 });
   });
 
   it('large OLD histories do not trigger unnecessary full-history work for unchanged meds', () => {
@@ -88,9 +110,11 @@ describe('#494 per-medication signature memoization', () => {
       })
     );
     memoizer.signature(meds, CUTOFF);
+    // Immutable-writer model: the array is recreated with new medication
+    // objects whose scheduling containers keep their references — the same
+    // shape a top-level state rewrite produces. Every med must reuse its
+    // cached fragment; the big old histories are not re-serialized.
     memoizer.signature(meds.map((m) => ({ ...m })), CUTOFF);
-    // Every med reused its cached fragment — the big old histories were
-    // not re-serialized on the second pass.
     expect(memoizer.stats()).toEqual({ reused: 30, recomputed: 30 });
   });
 
@@ -121,6 +145,22 @@ describe('#494 per-medication signature memoization', () => {
     const second = memoizer.signature([changed], CUTOFF);
     expect(memoizer.stats()).toEqual({ reused: 0, recomputed: 2 });
     expect(second).not.toBe(first);
+  });
+
+  it('changing the skip history invalidates that medication only', () => {
+    const memoizer = createCriticalSchedulingSignatureMemoizer();
+    const base = makeMed({
+      doseSkippedHistory: { 'dose-1': ['2026-03-12'] },
+    });
+    const untouched = makeMed({ id: 'med-2' });
+    memoizer.signature([base, untouched], CUTOFF);
+
+    const skipChanged = makeMed({
+      doseSkippedHistory: { 'dose-1': ['2026-03-12', '2026-03-14'] },
+    });
+    memoizer.signature([skipChanged, untouched], CUTOFF);
+    // Exactly the skip-changed medication recomputed; the untouched one reused.
+    expect(memoizer.stats()).toEqual({ reused: 1, recomputed: 3 });
   });
 
   it('every scheduling-relevant field change invalidates: stock, rate, threshold, auto, per-med flag, schedule, metadata', () => {

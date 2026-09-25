@@ -64,10 +64,16 @@ public class PendingCleanupIdempotencyTest {
                 .commit();
 
         // The recovery pass re-cleans the marker without creating a second
-        // FIRED row: the containsEvent guard classifies it as stale.
+        // FIRED row: the containsEvent guard classifies it as stale. The
+        // promotion count is the pass-level contract (PendingFiresResult);
+        // the durable read-model below proves no duplicate row was created.
+        AutoDeductionEventStore.PendingFiresResult promotion =
+                store.promotePendingFiresResult();
+        assertTrue(promotion.ok);
+        assertEquals(1, promotion.promoted);
+
         AutoDeductionEventStore.FiredEventsResult first = store.listFiredEventsResult();
         assertTrue(first.ok);
-        assertEquals(1, first.promoted);
         assertEquals(1, first.records.size());
         assertTrue(eventPrefs().contains(evtKey(key)));
         assertNull(pendingPrefs().getString("pend:" + key, null));
@@ -75,7 +81,6 @@ public class PendingCleanupIdempotencyTest {
         // A following pass is a clean no-op.
         AutoDeductionEventStore.FiredEventsResult second = store.listFiredEventsResult();
         assertTrue(second.ok);
-        assertEquals(0, second.promoted);
         assertEquals(1, second.records.size());
     }
 
@@ -94,9 +99,13 @@ public class PendingCleanupIdempotencyTest {
 
         AutoDeductionEventStore store = newEventStore();
 
+        AutoDeductionEventStore.PendingFiresResult promotion =
+                store.promotePendingFiresResult();
+        assertTrue(promotion.ok);
+        assertEquals(1, promotion.promoted);
+
         AutoDeductionEventStore.FiredEventsResult first = store.listFiredEventsResult();
         assertTrue(first.ok);
-        assertEquals(1, first.promoted);
         assertEquals(1, first.records.size());
         assertTrue(eventPrefs().contains(evtKey(key)));
 
@@ -107,11 +116,16 @@ public class PendingCleanupIdempotencyTest {
                 .putString(pendingKey, firedPayload(date).toString())
                 .commit();
 
-        // The next pass must re-clean the surviving marker and must not
-        // produce a second FIRED record for the same occurrence.
+        // The next pass must re-clean the surviving marker (counted by the
+        // pass-level contract) and must not produce a second FIRED record
+        // for the same occurrence.
+        AutoDeductionEventStore.PendingFiresResult reClean =
+                store.promotePendingFiresResult();
+        assertTrue(reClean.ok);
+        assertEquals(1, reClean.promoted);
+
         AutoDeductionEventStore.FiredEventsResult second = store.listFiredEventsResult();
         assertTrue(second.ok);
-        assertEquals(1, second.promoted);
         assertEquals(1, second.records.size());
         assertNull(pendingPrefs().getString(pendingKey, null));
         assertNotNull(eventPrefs().getString(evtKey(key), null));

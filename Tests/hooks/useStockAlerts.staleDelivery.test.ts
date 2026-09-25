@@ -84,10 +84,13 @@ function installGatedLocks() {
   };
 }
 
-function useAlerts(props: {
+/** Props surface exercised by this regression file (hook options subset). */
+type UseAlertsProps = {
   medications: Medication[];
   criticalStockAlertsEnabled?: boolean;
-}) {
+};
+
+function useAlerts(props: UseAlertsProps) {
   return useStockAlerts({
     medications: props.medications,
     criticalStockAlertsEnabled: props.criticalStockAlertsEnabled ?? true,
@@ -227,9 +230,13 @@ describe('#539 post-send revalidation (state changed while delivery in flight)',
     const deferred = deferSend();
     sendMock.mockImplementation(() => deferred.promise);
     const { rerender } = renderHook(
-      (p: { medications: Medication[]; criticalStockAlertsEnabled?: boolean }) =>
-        useAlerts(p),
-      { initialProps: { medications: [makeMed()] } }
+      (p: UseAlertsProps) => useAlerts(p),
+      {
+        initialProps: {
+          medications: [makeMed()],
+          criticalStockAlertsEnabled: true,
+        },
+      }
     );
     await flush();
     expect(sendMock).toHaveBeenCalledTimes(1);

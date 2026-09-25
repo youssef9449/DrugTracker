@@ -78,7 +78,7 @@ public class AutoDeductionPlugin extends Plugin {
         Long scheduledAt = call.getLong("scheduledAtEpochMs");
         String treatmentEndDate = call.getString("treatmentEndDate", "");
         if (amountObj == null) {
-            call.reject("invalid_amount");
+            call.reject("invalid_amount", "invalid_amount");
             return;
         }
         double amount = amountObj;
@@ -96,12 +96,18 @@ public class AutoDeductionPlugin extends Plugin {
                         treatmentEndDate);
                 JSObject ret = new JSObject();
                 ret.put("ok", result.ok);
-                if (result.error != null) ret.put("error", result.error);
+                if (result.error != null) {
+                    // #534: structured machine code; the raw message stays in `error`.
+                    ret.put("error", result.error);
+                    ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+                }
                 if (result.occurrenceKey != null) ret.put("occurrenceKey", result.occurrenceKey);
                 call.resolve(ret);
             } catch (Exception e) {
                 Log.e(TAG, "scheduleOccurrence failed", e);
-                call.reject(e.getMessage() != null ? e.getMessage() : "schedule_occurrence_failed");
+                call.reject(
+                        e.getMessage() != null ? e.getMessage() : "schedule_occurrence_failed",
+                        "schedule_occurrence_failed");
             }
         });
     }
@@ -118,11 +124,17 @@ public class AutoDeductionPlugin extends Plugin {
                 JSObject ret = new JSObject();
                 ret.put("ok", result.isOk());
                 ret.put("status", result.status.name());
-                if (result.error != null) ret.put("error", result.error);
+                if (result.error != null) {
+                    // #534: structured machine code; the raw message stays in `error`.
+                    ret.put("error", result.error);
+                    ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+                }
                 call.resolve(ret);
             } catch (Exception e) {
                 Log.e(TAG, "cancelOccurrence failed", e);
-                call.reject(e.getMessage() != null ? e.getMessage() : "cancel_occurrence_failed");
+                call.reject(
+                        e.getMessage() != null ? e.getMessage() : "cancel_occurrence_failed",
+                        "cancel_occurrence_failed");
             }
         });
     }
@@ -190,7 +202,7 @@ public class AutoDeductionPlugin extends Plugin {
         String doseId = call.getString("doseId");
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()) {
-            call.reject("invalid_args");
+            call.reject("invalid_args", "invalid_args");
             return;
         }
         app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
@@ -200,7 +212,11 @@ public class AutoDeductionPlugin extends Plugin {
                         scheduler.invalidateRecurrenceAuthorization(medicationId, doseId);
                 JSObject ret = new JSObject();
                 ret.put("ok", result.ok);
-                if (result.error != null) ret.put("error", result.error);
+                if (result.error != null) {
+                    // #534: structured machine code; the raw message stays in `error`.
+                    ret.put("error", result.error);
+                    ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+                }
                 if (result.ok || result.schedulesCancelled) {
                     ret.put("generation", result.generation);
                 }
@@ -208,7 +224,9 @@ public class AutoDeductionPlugin extends Plugin {
                 call.resolve(ret);
             } catch (Exception e) {
                 Log.e(TAG, "invalidateRecurrenceAuthorization failed", e);
-                call.reject(e.getMessage() != null ? e.getMessage() : "invalidate_recurrence_failed");
+                call.reject(
+                        e.getMessage() != null ? e.getMessage() : "invalidate_recurrence_failed",
+                        "invalidate_recurrence_failed");
             }
         });
     }
@@ -232,13 +250,19 @@ public class AutoDeductionPlugin extends Plugin {
                 JSObject ret = new JSObject();
                 ret.put("ok", result.ok);
                 ret.put("events", arr);
-                if (result.error != null) ret.put("error", result.error);
+                if (result.error != null) {
+                    // #534: structured machine code; the raw message stays in `error`.
+                    ret.put("error", result.error);
+                    ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+                }
                 call.resolve(ret);
             } catch (Exception e) {
                 Log.e(TAG, "listFiredEvents failed", e);
-                call.reject(e.getMessage() != null
-                        ? e.getMessage()
-                        : "list_fired_events_failed");
+                call.reject(
+                        e.getMessage() != null
+                                ? e.getMessage()
+                                : "list_fired_events_failed",
+                        "list_fired_events_failed");
             }
         });
     }
@@ -261,9 +285,11 @@ public class AutoDeductionPlugin extends Plugin {
                 call.resolve(ret);
             } catch (Exception e) {
                 Log.e(TAG, "markReconciled failed", e);
-                call.reject(e.getMessage() != null
-                        ? e.getMessage()
-                        : "mark_reconciled_failed");
+                call.reject(
+                        e.getMessage() != null
+                                ? e.getMessage()
+                                : "mark_reconciled_failed",
+                        "mark_reconciled_failed");
             }
         });
     }
@@ -378,7 +404,11 @@ public class AutoDeductionPlugin extends Plugin {
                     stocks.put(stock);
                 }
                 ret.put("stocks", stocks);
-                if (result.error != null) ret.put("error", result.error);
+                if (result.error != null) {
+                    // #534: structured machine code; the raw message stays in `error`.
+                    ret.put("error", result.error);
+                    ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+                }
                 call.resolve(ret);
             } catch (Exception e) {
                 Log.e(TAG, "initializeStock failed", e);
@@ -388,6 +418,7 @@ public class AutoDeductionPlugin extends Plugin {
                 ret.put("error", e.getMessage() != null
                         ? e.getMessage()
                         : "stock_init_failed");
+                ret.put("code", "stock_init_failed");
                 call.resolve(ret);
             }
         });
@@ -436,6 +467,7 @@ public class AutoDeductionPlugin extends Plugin {
                             ret.put("alreadyApplied", false);
                             ret.put("stocks", new JSArray());
                             ret.put("error", "invalid_occurrence_resolution");
+                            ret.put("code", "invalid_occurrence_resolution");
                             call.resolve(ret);
                             return;
                         }
@@ -461,7 +493,11 @@ public class AutoDeductionPlugin extends Plugin {
                     stocks.put(stock);
                 }
                 ret.put("stocks", stocks);
-                if (result.error != null) ret.put("error", result.error);
+                if (result.error != null) {
+                    // #534: structured machine code; the raw message stays in `error`.
+                    ret.put("error", result.error);
+                    ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+                }
                 call.resolve(ret);
             } catch (Exception e) {
                 Log.e(TAG, "applyForegroundStockDeltas failed", e);
@@ -471,6 +507,7 @@ public class AutoDeductionPlugin extends Plugin {
                 ret.put("error", e.getMessage() != null
                         ? e.getMessage()
                         : "foreground_stock_failed");
+                ret.put("code", "foreground_stock_failed");
                 call.resolve(ret);
             }
         });
@@ -502,20 +539,38 @@ public class AutoDeductionPlugin extends Plugin {
         // #493: the stock apply path performs the synchronous atomic
         // balance+marker commit — dispatch off the plugin thread.
         app.drugtracker.alarmruntime.ExactAlarmRuntime.executeAsync(() -> {
-            AutoDeductionStockStore store = new AutoDeductionStockStore(getContext());
-            AutoDeductionStockStore.AutoApplyResult result =
-                    recovery
-                            ? store.applyAutoDeductionForRecovery(
-                                    medicationId, doseId, calendarDate, amount)
-                            : store.applyAutoDeduction(
-                                    medicationId, doseId, calendarDate, amount);
-            JSObject ret = new JSObject();
-            ret.put("ok", result.ok);
-            ret.put("applied", result.applied);
-            ret.put("actualDeducted", result.actualDeducted);
-            ret.put("currentPills", result.currentPills);
-            if (result.error != null) ret.put("error", result.error);
-            call.resolve(ret);
+            try {
+                AutoDeductionStockStore store = new AutoDeductionStockStore(getContext());
+                AutoDeductionStockStore.AutoApplyResult result =
+                        recovery
+                                ? store.applyAutoDeductionForRecovery(
+                                        medicationId, doseId, calendarDate, amount)
+                                : store.applyAutoDeduction(
+                                        medicationId, doseId, calendarDate, amount);
+                JSObject ret = new JSObject();
+                ret.put("ok", result.ok);
+                ret.put("applied", result.applied);
+                ret.put("actualDeducted", result.actualDeducted);
+                ret.put("currentPills", result.currentPills);
+                if (result.error != null) {
+                    // #534: structured machine code; the raw message stays in `error`.
+                    ret.put("error", result.error);
+                    ret.put("code", NativeErrorCodes.structuredCode(result.error, "platform_failure"));
+                }
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "resolveAutoDeductionStock failed", e);
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("applied", false);
+                ret.put("actualDeducted", 0);
+                ret.put("currentPills", 0);
+                ret.put("error", e.getMessage() != null
+                        ? e.getMessage()
+                        : "auto_stock_apply_failed");
+                ret.put("code", "auto_stock_apply_failed");
+                call.resolve(ret);
+            }
         });
     }
     @PluginMethod
@@ -526,7 +581,7 @@ public class AutoDeductionPlugin extends Plugin {
         if (medicationId == null || medicationId.isEmpty()
                 || doseId == null || doseId.isEmpty()
                 || calendarDate == null || calendarDate.isEmpty()) {
-            call.reject("missing_params");
+            call.reject("missing_params", "missing_params");
             return;
         }
         // #493: the snapshot path runs pending-fire promotion first, which
@@ -541,6 +596,8 @@ public class AutoDeductionPlugin extends Plugin {
                 ret.put("ok", snap.ok);
                 if (!snap.ok) {
                     ret.put("error", snap.error != null ? snap.error : "snapshot_failed");
+                    // #534: structured machine code; the raw message stays in `error`.
+                    ret.put("code", NativeErrorCodes.structuredCode(snap.error, "snapshot_failed"));
                     call.resolve(ret);
                     return;
                 }
@@ -550,7 +607,9 @@ public class AutoDeductionPlugin extends Plugin {
                 }
                 call.resolve(ret);
             } catch (Exception e) {
-                call.reject(e.getMessage() != null ? e.getMessage() : "snapshot_failed");
+                call.reject(
+                        e.getMessage() != null ? e.getMessage() : "snapshot_failed",
+                        "snapshot_failed");
             }
         });
     }

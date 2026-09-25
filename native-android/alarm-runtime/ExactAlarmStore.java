@@ -160,8 +160,8 @@ final class ExactAlarmStore {
 
     /**
      * Synchronous commit (#493): the removal outcome is part of the recovery
-     * state machine — AutoDeductionFireService's compensation recovery
-     * refuses (fail-closed) to resurrect an occurrence while its durable
+     * state machine — the owning feature's compensation recovery refuses
+     * (fail-closed) to resurrect an occurrence while its durable
      * cancellation tombstone cannot be confirmed durably cleared; superseded-
      * tombstone cleanup callers consume the outcome only for diagnostics.
      * A leftover tombstone is reconciled by ordering, but the compensation

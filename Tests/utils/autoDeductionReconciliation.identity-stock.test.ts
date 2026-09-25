@@ -134,7 +134,9 @@ describe('stock gate — fresh durable state', () => {
       commitDurableAutoStockState({ medications: r.medications, logs: r.logs });
     });
     expect(durable.medications[0].currentPills).toBe(8);
-    expect(isExactAutoOccurrenceApplied(durable.medications[0], 'd', '2026-09-13')).toBe(true);
+    expect(
+      isExactAutoOccurrenceApplied(durable.logs, durable.medications[0], 'd', '2026-09-13')
+    ).toBe(true);
 
     // There is no second automatic deduction from app-open or calendar-day
     // settlement (Issue #268 / PR #271). A second gate entry simply observes
@@ -253,9 +255,9 @@ describe('multi-dose', () => {
       [fired({ medicationId: 'med-1', doseId: 'b', calendarDate: '2026-09-14', amount: 2 })]
     );
     expect(r.medications[0].currentPills).toBe(18);
-    expect(isExactAutoOccurrenceApplied(r.medications[0], 'b', '2026-09-14')).toBe(true);
-    expect(isExactAutoOccurrenceApplied(r.medications[0], 'a', '2026-09-14')).toBe(false);
-    expect(isExactAutoOccurrenceApplied(r.medications[0], 'c', '2026-09-14')).toBe(false);
+    expect(isExactAutoOccurrenceApplied(r.logs, r.medications[0], 'b', '2026-09-14')).toBe(true);
+    expect(isExactAutoOccurrenceApplied(r.logs, r.medications[0], 'a', '2026-09-14')).toBe(false);
+    expect(isExactAutoOccurrenceApplied(r.logs, r.medications[0], 'c', '2026-09-14')).toBe(false);
   });
 
   it('siblingDateIsIndependent', () => {
@@ -264,8 +266,8 @@ describe('multi-dose', () => {
       currentPills: 10,
       doseConsumptionHistory: { d: ['2026-09-13'] },
     });
-    expect(isExactAutoOccurrenceApplied(med, 'd', '2026-09-13')).toBe(true);
-    expect(isExactAutoOccurrenceApplied(med, 'd', '2026-09-14')).toBe(false);
+    expect(isExactAutoOccurrenceApplied([], med, 'd', '2026-09-13')).toBe(true);
+    expect(isExactAutoOccurrenceApplied([], med, 'd', '2026-09-14')).toBe(false);
   });
 });
 

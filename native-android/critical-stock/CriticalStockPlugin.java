@@ -24,7 +24,7 @@ public final class CriticalStockPlugin extends Plugin {
         if (triggerAt == null
                 || notificationTitle == null
                 || notificationBody == null) {
-            call.reject("missing_schedule_fields");
+            call.reject("missing_schedule_fields", "missing_schedule_fields");
             return;
         }
 
@@ -49,7 +49,11 @@ public final class CriticalStockPlugin extends Plugin {
                 }
                 call.resolve(ret);
             } catch (Exception e) {
-                call.reject("critical_stock_schedule_failed");
+                // #534: stable machine code as the second reject argument;
+                // the exception message stays the human-readable diagnostic.
+                call.reject(
+                        "critical_stock_schedule_failed",
+                        "critical_stock_schedule_failed");
             }
         });
     }
@@ -73,7 +77,10 @@ public final class CriticalStockPlugin extends Plugin {
                 }
                 call.resolve(ret);
             } catch (Exception e) {
-                call.reject("critical_stock_cancel_failed");
+                // #534: stable machine code as the second reject argument.
+                call.reject(
+                        "critical_stock_cancel_failed",
+                        "critical_stock_cancel_failed");
             }
         });
     }

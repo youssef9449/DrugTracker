@@ -1,9 +1,9 @@
 package app.drugtracker.autodeduction;
 
-import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
-import static app.drugtracker.autodeduction.Phase2TestSupport.futureCalendarDate;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.clearAllDurableState;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.futureCalendarDate;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schedulePrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schKey;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -51,7 +51,7 @@ public class MalformedScheduleMetadataTest {
 
         assertTrue(
                 "valid key must be parseable and quarantinable",
-                Phase2TestSupport.newScheduler().listScheduledOccurrences().isEmpty());
+                AutoDeductionTestSupport.newScheduler().listScheduledOccurrences().isEmpty());
 
         assertFalse(
                 "malformed metadata must not remain as stale durable schedule",
@@ -72,7 +72,7 @@ public class MalformedScheduleMetadataTest {
         malformed.put("scheduledAtEpochMs", 1_000L);
         schedulePrefs().edit().putString(schKey(key), malformed.toString()).commit();
 
-        assertTrue(Phase2TestSupport.newScheduler()
+        assertTrue(AutoDeductionTestSupport.newScheduler()
                 .listScheduledOccurrences().isEmpty());
         assertFalse(schedulePrefs().contains(schKey(key)));
     }
@@ -84,7 +84,7 @@ public class MalformedScheduleMetadataTest {
                 .commit();
 
         try {
-            Phase2TestSupport.newScheduler().listScheduledOccurrences();
+            AutoDeductionTestSupport.newScheduler().listScheduledOccurrences();
             fail("expected malformed schedule listing failure");
         } catch (IllegalStateException expected) {
             assertEquals(

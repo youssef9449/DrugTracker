@@ -172,26 +172,26 @@ describe('Management modal stays open after actions', () => {
     });
 
     await openManage();
-    const pills0 = readPersistedMedications()[0].currentPills;
+    const pills0 = requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills;
 
     fireEvent.click(actionButton('d1', 'take'));
     await waitFor(() => {
       expect(isDoseConsumedOnDate(readPersistedMedications()[0], 'd1', getTodayDateString())).toBe(true);
-      expect(readPersistedMedications()[0].currentPills).toBe(pills0 - 1);
+      expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills).toBe(pills0 - 1);
     });
     expectManageStillOpen();
 
     fireEvent.click(actionButton('d1', 'restore'));
     await waitFor(() => {
       expect(isDoseConsumedOnDate(readPersistedMedications()[0], 'd1', getTodayDateString())).toBe(false);
-      expect(readPersistedMedications()[0].currentPills).toBe(pills0);
+      expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills).toBe(pills0);
     });
     expectManageStillOpen();
 
     fireEvent.click(actionButton('d1', 'take'));
     await waitFor(() => {
       expect(isDoseConsumedOnDate(readPersistedMedications()[0], 'd1', getTodayDateString())).toBe(true);
-      expect(readPersistedMedications()[0].currentPills).toBe(pills0 - 1);
+      expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills).toBe(pills0 - 1);
     });
     expectManageStillOpen();
   });
@@ -267,12 +267,12 @@ describe('Management modal stays open after actions', () => {
     });
 
     await openManage();
-    const pills0 = readPersistedMedications()[0].currentPills;
+    const pills0 = requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills;
 
     fireEvent.click(actionButton('d1', 'take'));
     await waitFor(() => {
       expect(isDoseConsumedOnDate(readPersistedMedications()[0], 'd1', getTodayDateString())).toBe(true);
-      expect(readPersistedMedications()[0].currentPills).toBe(pills0 - 1);
+      expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills).toBe(pills0 - 1);
     });
     expectManageStillOpen();
     expect(actionButton('d1', 'restore')).toBeTruthy();
@@ -280,7 +280,7 @@ describe('Management modal stays open after actions', () => {
     fireEvent.click(actionButton('d1', 'restore'));
     await waitFor(() => {
       expect(isDoseConsumedOnDate(readPersistedMedications()[0], 'd1', getTodayDateString())).toBe(false);
-      expect(readPersistedMedications()[0].currentPills).toBe(pills0);
+      expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills).toBe(pills0);
     });
     expectManageStillOpen();
     expect(actionButton('d1', 'take')).toBeTruthy();
@@ -288,7 +288,7 @@ describe('Management modal stays open after actions', () => {
     fireEvent.click(actionButton('d1', 'take'));
     await waitFor(() => {
       expect(isDoseConsumedOnDate(readPersistedMedications()[0], 'd1', getTodayDateString())).toBe(true);
-      expect(readPersistedMedications()[0].currentPills).toBe(pills0 - 1);
+      expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills).toBe(pills0 - 1);
     });
     expectManageStillOpen();
     expect(actionButton('d1', 'restore')).toBeTruthy();
@@ -296,7 +296,7 @@ describe('Management modal stays open after actions', () => {
     fireEvent.click(actionButton('d1', 'restore'));
     await waitFor(() => {
       expect(isDoseConsumedOnDate(readPersistedMedications()[0], 'd1', getTodayDateString())).toBe(false);
-      expect(readPersistedMedications()[0].currentPills).toBe(pills0);
+      expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills).toBe(pills0);
     });
     expectManageStillOpen();
     expect(actionButton('d1', 'take')).toBeTruthy();

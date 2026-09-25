@@ -280,8 +280,8 @@ export function isDoseTimeElapsedToday(
  * Auto-elapsed completion uses the effective Auto-Deduct state when provided
  * (`autoDeductActive`); when the option is omitted,
  * `autoDeductEnabled !== false` uses the current default.
- * Effective state must come from {@link isMedicationAutoDeductActive}
- * (medication.autoDeductEnabled only — Global is not a kill switch).
+ * The default remains the medication-level preference; callers that know the
+ * global master state should pass the effective value explicitly.
  */
 export function isDoseCompletedToday(
   med: Medication,

@@ -108,6 +108,7 @@ export function useStockAlerts({
     for (const medId of Object.keys(claims)) {
       if (!medicationIds.has(medId)) {
         const expectedClaim = claims[medId];
+        if (!expectedClaim) continue;
         void updateCriticalNotificationClaim(medId, (current) =>
           claimsEqual(current, expectedClaim) ? null : current
         ).then((result) => {

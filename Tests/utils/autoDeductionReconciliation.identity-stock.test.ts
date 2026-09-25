@@ -141,7 +141,12 @@ describe('stock gate — fresh durable state', () => {
     });
     expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
     expect(
-      isExactAutoOccurrenceApplied(durable.logs, durable.medications[0], 'd', '2026-09-13')
+      isExactAutoOccurrenceApplied(
+      durable.logs,
+      requireDefined(durable.medications[0], 'durable.medications[0]'),
+      'd',
+      '2026-09-13'
+    )
     ).toBe(true);
 
     // There is no second automatic deduction from app-open or calendar-day

@@ -67,7 +67,9 @@ export function useAppBackNavigation(
       const activeOverlays = [...overlaysRef.current.values()];
       if (activeOverlays.length > 0) {
         activeOverlays.sort((a, b) => a.priority - b.priority || a.order - b.order);
-        activeOverlays[activeOverlays.length - 1].close();
+        const lastOverlay = activeOverlays[activeOverlays.length - 1];
+        if (!lastOverlay) return false;
+        lastOverlay.close();
         return true;
       }
 

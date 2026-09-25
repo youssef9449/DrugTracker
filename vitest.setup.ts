@@ -47,3 +47,19 @@ if (typeof window !== 'undefined') {
   // test output stays clean.
   window.alert = vi.fn(() => {});
 }
+
+
+declare global {
+  // Runtime assertion helper used by strict TypeScript tests when an indexed
+  // value is required to exist by the test fixture/invariant.
+  var requireDefined: <T>(value: T | undefined, label?: string) => T;
+}
+
+function requireDefined<T>(value: T | undefined, label = 'value'): T {
+  if (value === undefined) {
+    throw new Error('Expected ' + label + ' to be defined');
+  }
+  return value;
+}
+
+globalThis.requireDefined = requireDefined;

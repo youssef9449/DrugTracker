@@ -148,7 +148,9 @@ export function getAutoDeductionDefinitionForDate(
         time: dose.time,
         amount: dose.amount,
         calendarDate,
-        treatmentEndDate: definition.treatmentEndDate || undefined,
+        ...(definition.treatmentEndDate
+          ? { treatmentEndDate: definition.treatmentEndDate }
+          : {}),
       }))
     : [];
 }

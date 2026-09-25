@@ -39,8 +39,8 @@ export interface UseDoseReminderSchedulerOptions {
   hydrated: boolean;
   isFirstRun: boolean;
   exactAlarmPermission: ExactAlarmPermission | null;
-  resumeTick?: number;
-  lifecycleTick?: number;
+  resumeTick?: number | undefined;
+  lifecycleTick?: number | undefined;
 }
 
 export function useDoseReminderScheduler({

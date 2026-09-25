@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { flushUntil } from '../helpers/asyncTestUtils';
@@ -154,16 +155,17 @@ describe('useDoseReminderScheduler — per-dose instruction', () => {
     );
 
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    expect(mocks.schedule.mock.calls[0][6]?.doseDescription).toBe('بعد الإفطار');
+    expect(requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[6]?.doseDescription).toBe('بعد الإفطار');
 
     mocks.schedule.mockClear();
     mocks.cancel.mockClear();
 
+    const currentDose = requireDefined(med.doseSchedule?.[0], 'med.doseSchedule[0]');
     const updated = {
       ...med,
       doseSchedule: [
         {
-          ...med.doseSchedule![0],
+          ...currentDose,
           description: 'قبل النوم',
         },
       ],
@@ -174,7 +176,7 @@ describe('useDoseReminderScheduler — per-dose instruction', () => {
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
 
     const last = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
-    expect(last[6]?.doseDescription).toBe('قبل النوم');
+    expect(requireDefined(requireDefined(last, 'last')[6], 'last[6]')?.doseDescription).toBe('قبل النوم');
   });
 
   it('does not add an instruction option when the per-dose description is empty', async () => {
@@ -193,7 +195,7 @@ describe('useDoseReminderScheduler — per-dose instruction', () => {
     renderHook(() => useDoseReminderScheduler(defaultOpts({ medications: [med] })));
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
 
-    expect(mocks.schedule.mock.calls[0][6]?.doseDescription).toBeUndefined();
+    expect(requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[6]?.doseDescription).toBeUndefined();
   });
 });
 describe('useDoseReminderScheduler — manual Take capability', () => {

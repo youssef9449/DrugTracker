@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { makeMedication as baseMed, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
@@ -31,12 +32,12 @@ describe('reconcileFiredEvents — malformed identity is terminal ACK (#262 Find
       amount: 2,
     });
     const r = reconcileFiredEvents([med], [], [e]);
-    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('skipped_invalid');
     expect(r.toAcknowledge).toEqual([
       { medicationId: '', doseId: 'd1', calendarDate: '2026-09-14' },
     ]);
     expect(r.mutated).toBe(false);
-    expect(r.medications[0].currentPills).toBe(10);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(10);
     expect(r.newExactLogs).toEqual([]);
     expect(r.logs).toEqual([]);
   });
@@ -53,12 +54,12 @@ describe('reconcileFiredEvents — malformed identity is terminal ACK (#262 Find
       amount: 2,
     });
     const r = reconcileFiredEvents([med], [], [e]);
-    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('skipped_invalid');
     expect(r.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: 'd1', calendarDate: '' },
     ]);
     expect(r.mutated).toBe(false);
-    expect(r.medications[0].currentPills).toBe(10);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(10);
     expect(r.newExactLogs).toEqual([]);
   });
 
@@ -74,12 +75,12 @@ describe('reconcileFiredEvents — malformed identity is terminal ACK (#262 Find
       amount: 2,
     });
     const r = reconcileFiredEvents([med], [], [e]);
-    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('skipped_invalid');
     expect(r.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: 'd1', calendarDate: 'bad-date' },
     ]);
     expect(r.mutated).toBe(false);
-    expect(r.medications[0].currentPills).toBe(10);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(10);
     expect(r.newExactLogs).toEqual([]);
     expect(r.logs).toEqual([]);
   });
@@ -97,16 +98,16 @@ describe('reconcileFiredEvents — malformed identity is terminal ACK (#262 Find
     });
     const r1 = reconcileFiredEvents([med], [], [e]);
     expect(r1.toAcknowledge).toHaveLength(1);
-    expect(r1.medications[0].currentPills).toBe(10);
+    expect(requireDefined(r1.medications[0], 'r1.medications[0]').currentPills).toBe(10);
 
     // Simulate native still listing the same malformed payload before ACK lands
     const r2 = reconcileFiredEvents(r1.medications, r1.logs, [e]);
-    expect(r2.details[0].outcome).toBe('skipped_invalid');
+    expect(requireDefined(r2.details[0], 'r2.details[0]').outcome).toBe('skipped_invalid');
     expect(r2.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: 'd1', calendarDate: 'bad-date' },
     ]);
     expect(r2.mutated).toBe(false);
-    expect(r2.medications[0].currentPills).toBe(10);
+    expect(requireDefined(r2.medications[0], 'r2.medications[0]').currentPills).toBe(10);
     expect(r2.newExactLogs).toEqual([]);
     expect(r2.logs).toEqual([]);
   });
@@ -127,7 +128,7 @@ describe('reconcileFiredEvents — malformed identity is terminal ACK (#262 Find
     expect(r1.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: 'd1', calendarDate: 'bad-date' },
     ]);
-    expect(r1.medications[0].currentPills).toBe(10);
+    expect(requireDefined(r1.medications[0], 'r1.medications[0]').currentPills).toBe(10);
 
     const valid = fired({
       medicationId: 'med-1',
@@ -136,11 +137,11 @@ describe('reconcileFiredEvents — malformed identity is terminal ACK (#262 Find
       amount: 2,
     });
     const r2 = reconcileFiredEvents(r1.medications, r1.logs, [valid]);
-    expect(r2.details[0].outcome).toBe('applied');
+    expect(requireDefined(r2.details[0], 'r2.details[0]').outcome).toBe('applied');
     expect(r2.mutated).toBe(true);
-    expect(r2.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r2.medications[0], 'r2.medications[0]').currentPills).toBe(8);
     expect(r2.newExactLogs).toHaveLength(1);
-    expect(r2.newExactLogs[0].amount).toBe(-2);
+    expect(requireDefined(r2.newExactLogs[0], 'r2.newExactLogs[0]').amount).toBe(-2);
     expect(r2.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: 'd1', calendarDate: '2026-09-14' },
     ]);
@@ -204,7 +205,7 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
 
     expect(first.details[0]?.outcome).toBe('skipped_invalid');
     expect(first.mutated).toBe(false);
-    expect(first.medications[0].currentPills).toBe(10);
+    expect(requireDefined(first.medications[0], 'first.medications[0]').currentPills).toBe(10);
     expect(first.newExactLogs).toEqual([]);
     expect(first.logs).toEqual([]);
     expect(first.toAcknowledge).toEqual([
@@ -234,7 +235,7 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
       saveEnvelope: () => null,
     });
     expect(second.mutated).toBe(false);
-    expect(second.medications[0].currentPills).toBe(10);
+    expect(requireDefined(second.medications[0], 'second.medications[0]').currentPills).toBe(10);
     expect(second.newExactLogs).toEqual([]);
     expect(second.toAcknowledge).toEqual([]);
     expect(second.markedCount).toBe(0);
@@ -277,7 +278,7 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
 
     expect(r.details[0]?.outcome).toBe('skipped_invalid');
     expect(r.mutated).toBe(false);
-    expect(r.medications[0].currentPills).toBe(10);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(10);
     expect(r.newExactLogs).toEqual([]);
     expect(r.toAcknowledge).toEqual([]);
     expect(r.markedCount).toBe(0);
@@ -339,8 +340,8 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
 
     expect(first.details[0]?.outcome).toBe('skipped_invalid');
     expect(first.mutated).toBe(false);
-    expect(first.medications[0].currentPills).toBe(10);
-    expect(first.medications[0].lastConsumedDate).toBe('2026-09-12');
+    expect(requireDefined(first.medications[0], 'first.medications[0]').currentPills).toBe(10);
+    expect(requireDefined(first.medications[0], 'first.medications[0]').lastConsumedDate).toBe('2026-09-12');
     expect(first.newExactLogs).toEqual([]);
     expect(first.logs).toEqual([]);
     expect(first.toAcknowledge).toEqual([
@@ -372,7 +373,7 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
       saveEnvelope: () => null,
     });
     expect(second.mutated).toBe(false);
-    expect(second.medications[0].currentPills).toBe(10);
+    expect(requireDefined(second.medications[0], 'second.medications[0]').currentPills).toBe(10);
     expect(second.newExactLogs).toEqual([]);
     expect(second.toAcknowledge).toEqual([]);
     expect(second.markedCount).toBe(0);
@@ -426,8 +427,8 @@ describe('runAutoDeductionReconciliation — malformed identity terminal native 
 
     expect(first.details[0]?.outcome).toBe('skipped_invalid');
     expect(first.mutated).toBe(false);
-    expect(first.medications[0].currentPills).toBe(10);
-    expect(first.medications[0].lastConsumedDate).toBe('2026-09-12');
+    expect(requireDefined(first.medications[0], 'first.medications[0]').currentPills).toBe(10);
+    expect(requireDefined(first.medications[0], 'first.medications[0]').lastConsumedDate).toBe('2026-09-12');
     expect(first.newExactLogs).toEqual([]);
     expect(first.logs).toEqual([]);
     expect(first.toAcknowledge).toEqual([

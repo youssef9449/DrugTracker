@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { withAutoStockMutationGate } from '../../src/utils/autoDeductionStockGate';
 import { readJsonOutcome } from '../../src/utils/storage';
@@ -23,7 +24,7 @@ describe('withAutoStockMutationGate cross-document locking', () => {
 
     expect(result).toBe('committed');
     expect(request).toHaveBeenCalledTimes(1);
-    expect(request.mock.calls[0][0]).toBe('drugtracker:durable-stock-mutation');
+    expect(requireDefined(request.mock.calls[0], 'request.mock.calls[0]')[0]).toBe('drugtracker:durable-stock-mutation');
   });
 
   it('fails closed in a secure browser context when cross-tab locking is unavailable', async () => {

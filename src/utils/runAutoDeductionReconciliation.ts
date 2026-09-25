@@ -61,23 +61,23 @@ export interface ExactAutoEnvelope {
 export interface RunReconciliationInput {
   globalAutoDeductEnabled: boolean;
   /** Prefer omit — gate loads durable state. Kept for tests that inject. */
-  medications?: Medication[];
-  logs?: ConsumptionLog[];
-  listFired?: () => Promise<ListFiredEventsResult>;
+  medications?: Medication[] | undefined;
+  logs?: ConsumptionLog[] | undefined;
+  listFired?: (() => Promise<ListFiredEventsResult>) | undefined;
   markReconciled?: (
     medicationId: string,
     doseId: string,
     calendarDate: string
   ) => Promise<MarkReconciledResult>;
-  persistMeds?: (meds: Medication[]) => string | null;
-  persistLogs?: (logs: ConsumptionLog[]) => string | null;
-  loadEnvelope?: () => ExactAutoEnvelope | null;
-  saveEnvelope?: (env: ExactAutoEnvelope | null) => string | null;
+  persistMeds?: (meds: Medication[]) => string | null | undefined;
+  persistLogs?: (logs: ConsumptionLog[]) => string | null | undefined;
+  loadEnvelope?: () => ExactAutoEnvelope | null | undefined;
+  saveEnvelope?: (env: ExactAutoEnvelope | null) => string | null | undefined;
   /** When true, skip outer gate (caller already holds it). */
-  alreadyInGate?: boolean;
+  alreadyInGate?: boolean | undefined;
   /** Fresh durable state from the already-held gate, including the global master switch. */
-  durableState?: AutoStockDurableState;
-  now?: Date;
+  durableState?: AutoStockDurableState | undefined;
+  now?: Date | undefined;
 }
 export interface RunReconciliationOutput extends ReconcileFiredResult {
   markedCount: number;
@@ -85,13 +85,13 @@ export interface RunReconciliationOutput extends ReconcileFiredResult {
   /** True when at least one native mark failed after JS commit (retryable). */
   partialNativeAck: boolean;
   /** True when the exact stock mutation could not be durably finalized; callers must fail closed. */
-  durabilityBlocked?: boolean;
+  durabilityBlocked?: boolean | undefined;
   /** True when native FIRED list failed — distinct from empty events; no mutation/ack. */
-  nativeListFailed?: boolean;
-  nativeListError?: string;
+  nativeListFailed?: boolean | undefined;
+  nativeListError?: string | undefined;
   /** True when Native Auto stock could not be initialized, repaired, or read. */
-  nativeStockSyncFailed?: boolean;
-  nativeStockSyncError?: string;
+  nativeStockSyncFailed?: boolean | undefined;
+  nativeStockSyncError?: string | undefined;
 }
 export function defaultLoadEnvelope(): ExactAutoEnvelope | null {
   return loadExactAutoStockEnvelope() as ExactAutoEnvelope | null;
@@ -209,7 +209,7 @@ async function runOnce(
         logs: existingExact.logs,
         globalAutoDeductEnabled: existingExact.globalAutoDeductEnabled,
         toAcknowledge: existingExact.toAcknowledge,
-        clear: () => saveEnvelope(null),
+        clear: () => saveEnvelope(null) ?? null,
       });
     }
     if (pending.length > 0) {
@@ -426,10 +426,17 @@ async function runOnce(
   // original `fresh` snapshot is now stale. Re-read it after envelope recovery
   // and before creating/committing any new Exact-Auto mutation envelope.
   const durableGlobalAutoDeductEnabled = loadDurableGlobalAutoDeductEnabled();
-  const result = reconcileFiredEvents(baseMeds, baseLogs, repairedEvents, {
-    globalAutoDeductEnabled: durableGlobalAutoDeductEnabled,
-    now: input.now,
-  });
+  const result = reconcileFiredEvents(
+    baseMeds,
+    baseLogs,
+    repairedEvents,
+    input.now === undefined
+      ? { globalAutoDeductEnabled: durableGlobalAutoDeductEnabled }
+      : {
+          globalAutoDeductEnabled: durableGlobalAutoDeductEnabled,
+          now: input.now,
+        }
+  );
   if (!result.mutated && result.toAcknowledge.length === 0) {
     return {
       ...result,

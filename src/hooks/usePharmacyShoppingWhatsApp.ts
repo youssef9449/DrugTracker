@@ -21,7 +21,7 @@ export interface UsePharmacyShoppingWhatsAppOptions {
   settings: PharmacySettings;
   onUpdateSettings: (settings: PharmacySettings) => void;
   showToast: (message: string) => void;
-  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
+  onRegisterBackHandler?: ((id: string, close: () => void, priority?: number) => () => void) | undefined;
 }
 
 export function usePharmacyShoppingWhatsApp({

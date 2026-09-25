@@ -52,7 +52,52 @@ jobs:
       - name: Test
         run: npm test
       - name: Build and verify PWA asset graph
+        if: ${{ !cancelled() }}
         run: npm run build && node scripts/test-pwa-build.mjs
+
+  android-integration:
+    name: Clean generated Android integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Use Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+          cache: npm
+
+      # Environment setup only; validation is performed by Gradle and the
+      # dependency-free repository scripts below.
+      - name: Install committed dependency graph
+        run: npm ci
+
+      - name: Build web assets for clean Capacitor generation
+        run: npm run build
+
+      - name: Generate a clean Capacitor Android project
+        run: npx cap add android
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - name: Prepare repository-owned Android integration
+        run: node scripts/prepare-android.mjs
+
+      - name: Verify Android preparation invariants
+        run: node scripts/test-prepare-android-receivers.mjs
+
+      - name: Use Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Compile the prepared Android application
+        working-directory: android
+        run: ./gradlew :app:assembleDebug --no-daemon
 
   native:
     name: Native JVM tests and static analysis

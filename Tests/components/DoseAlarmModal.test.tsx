@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
@@ -66,7 +67,7 @@ describe('DoseAlarmModal', () => {
     // Click the first dismiss-like button (there may be multiple).
     const buttons = screen.getAllByRole('button');
     // The modal has take/snooze/dismiss buttons — click the last one (dismiss).
-    fireEvent.click(buttons[buttons.length - 1]);
+    fireEvent.click(requireDefined(buttons[buttons.length - 1], 'buttons[last]'));
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
@@ -125,8 +126,8 @@ describe('DoseAlarmModal', () => {
     );
     fireEvent.click(screen.getByTestId('alarm-take-dose'));
     expect(onTakeDose).toHaveBeenCalledTimes(1);
-    expect(onTakeDose.mock.calls[0][0].id).toBe('med-alarm');
-    expect(onTakeDose.mock.calls[0][1]).toBe('slot-b');
+    expect(requireDefined(onTakeDose.mock.calls[0], 'onTakeDose.mock.calls[0]')[0].id).toBe('med-alarm');
+    expect(requireDefined(onTakeDose.mock.calls[0], 'onTakeDose.mock.calls[0]')[1]).toBe('slot-b');
   });
 
 
@@ -191,8 +192,8 @@ describe('DoseAlarmModal', () => {
         />
       );
       fireEvent.click(screen.getByTestId('alarm-take-dose'));
-      expect(onTakeDose.mock.calls[0][1]).toBe('d1');
-      expect(onTakeDose.mock.calls[0][1]).not.toBe('d2');
+      expect(requireDefined(onTakeDose.mock.calls[0], 'onTakeDose.mock.calls[0]')[1]).toBe('d1');
+      expect(requireDefined(onTakeDose.mock.calls[0], 'onTakeDose.mock.calls[0]')[1]).not.toBe('d2');
     });
   });
 });

@@ -3,8 +3,11 @@ export function formatTimeArabic(timeStr?: string): string {
   const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(timeStr);
   if (!match) return timeStr;
 
-  const hour = parseInt(match[1], 10);
-  const minute = parseInt(match[2], 10);
+  const hourPart = match[1];
+  const minutePart = match[2];
+  if (hourPart === undefined || minutePart === undefined) return timeStr;
+  const hour = parseInt(hourPart, 10);
+  const minute = parseInt(minutePart, 10);
   const hour12 = hour % 12 === 0 ? 12 : hour % 12;
   return `${hour12}:${String(minute).padStart(2, '0')} ${hour >= 12 ? 'م' : 'ص'}`;
 }
@@ -14,8 +17,19 @@ export function formatArabicDate(
   includeWeekday: boolean = true
 ): string {
   try {
-    const [year, month, day] = dateStr.split('-').map(Number);
-    if ([year, month, day].some(Number.isNaN)) return dateStr;
+    const parts = dateStr.split('-').map(Number);
+    if (parts.length !== 3) return dateStr;
+    const year = parts[0];
+    const month = parts[1];
+    const day = parts[2];
+    if (
+      year === undefined ||
+      month === undefined ||
+      day === undefined ||
+      [year, month, day].some(Number.isNaN)
+    ) {
+      return dateStr;
+    }
 
     return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('ar-EG', {
       weekday: includeWeekday ? 'long' : undefined,
@@ -60,8 +74,19 @@ export function formatDepletionDate(
   if (daysLeft === 2) return 'بعد غد';
 
   try {
-    const [year, month, day] = dateStr.split('-').map(Number);
-    if ([year, month, day].some(Number.isNaN)) return dateStr;
+    const parts = dateStr.split('-').map(Number);
+    if (parts.length !== 3) return dateStr;
+    const year = parts[0];
+    const month = parts[1];
+    const day = parts[2];
+    if (
+      year === undefined ||
+      month === undefined ||
+      day === undefined ||
+      [year, month, day].some(Number.isNaN)
+    ) {
+      return dateStr;
+    }
 
     return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('ar-EG', {
       weekday: 'long',

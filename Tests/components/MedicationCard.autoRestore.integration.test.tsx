@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 /// <reference types="@testing-library/jest-dom/vitest" />
 /**
  * Auto-deduct Restore button on MedicationCard — real App wiring.
@@ -155,13 +156,13 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
     expect(screen.getByTestId(`restore-dose-${MED_ID}`)).toBeInTheDocument();
     expect(screen.queryAllByTitle(/تناول جرعة/)).toHaveLength(0);
 
-    const pillsBefore = readPersistedMedications()[0].currentPills;
+    const pillsBefore = requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills;
     await clickRestore();
 
     await waitFor(() => {
       const m = readPersistedMedications()[0];
-      expect(m.currentPills).toBe(pillsBefore + 2);
-      expect(isDoseConsumedOnDate(m, 's1', getTodayDateString())).toBe(false);
+      expect(requireDefined(m, 'm').currentPills).toBe(pillsBefore + 2);
+      expect(isDoseConsumedOnDate(requireDefined(m, 'm'), 's1', getTodayDateString())).toBe(false);
     });
   });
 
@@ -182,11 +183,11 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
     expect(screen.getByTestId(`restore-dose-${MED_ID}`)).toBeInTheDocument();
 
-    const pillsBefore = readPersistedMedications()[0].currentPills;
+    const pillsBefore = requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills;
     await clickRestore();
 
     await waitFor(() => {
-      expect(readPersistedMedications()[0].currentPills).toBe(pillsBefore + 2);
+      expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills).toBe(pillsBefore + 2);
     });
   });
 
@@ -202,7 +203,7 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
 
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
     expect(screen.queryByTestId(`restore-dose-${MED_ID}`)).toBeNull();
-    expect(readPersistedMedications()[0].currentPills).toBe(20);
+    expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills).toBe(20);
   });
 });
 
@@ -247,13 +248,13 @@ describe('MedicationCard Manual Take → Restore (auto OFF)', () => {
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
 
     const takeBtn = screen.getByTitle(/تناول جرعة/);
-    const pillsBefore = readPersistedMedications()[0].currentPills;
+    const pillsBefore = requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills;
     fireEvent.click(takeBtn);
 
     await waitFor(() => {
       const m = readPersistedMedications()[0];
-      expect(isDoseConsumedOnDate(m, 's1', getTodayDateString())).toBe(true);
-      expect(m.currentPills).toBe(pillsBefore - 2);
+      expect(isDoseConsumedOnDate(requireDefined(m, 'm'), 's1', getTodayDateString())).toBe(true);
+      expect(requireDefined(m, 'm').currentPills).toBe(pillsBefore - 2);
     });
 
     const restoreBtn = await screen.findByTestId(`restore-dose-${MED_ID}`);
@@ -262,9 +263,9 @@ describe('MedicationCard Manual Take → Restore (auto OFF)', () => {
 
     await waitFor(() => {
       const m = readPersistedMedications()[0];
-      expect(isDoseConsumedOnDate(m, 's1', getTodayDateString())).toBe(false);
-      expect(isDoseSkippedOnDate(m, 's1', getTodayDateString())).toBe(true);
-      expect(m.currentPills).toBe(pillsBefore);
+      expect(isDoseConsumedOnDate(requireDefined(m, 'm'), 's1', getTodayDateString())).toBe(false);
+      expect(isDoseSkippedOnDate(requireDefined(m, 'm'), 's1', getTodayDateString())).toBe(true);
+      expect(requireDefined(m, 'm').currentPills).toBe(pillsBefore);
       expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
     });
   });

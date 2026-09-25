@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { flushUntil } from '../helpers/asyncTestUtils';
@@ -326,7 +327,7 @@ describe('useDoseReminderScheduler — doseSignature (no unnecessary reschedule)
     );
 
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    expect(mocks.schedule.mock.calls[0][6]).toEqual({
+    expect(requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[6]).toEqual({
       treatmentEndDate: '2024-09-14',
     });
 
@@ -337,7 +338,11 @@ describe('useDoseReminderScheduler — doseSignature (no unnecessary reschedule)
     rerender({ medications: [shortened] });
 
     await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
-    expect(mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1][6]).toEqual({
+    const lastCall = requireDefined(
+      mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1],
+      'last schedule call'
+    );
+    expect(lastCall[6]).toEqual({
       treatmentEndDate: '2024-09-11',
     });
   });
@@ -363,8 +368,11 @@ describe('useDoseReminderScheduler — doseSignature (no unnecessary reschedule)
     rerender({ medications: [medUpdated] });
 
     await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
-    const lastCall = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
-    expect(lastCall[2]).toBe('09:00');
+    const lastCall = requireDefined(
+      mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1],
+      'lastCall'
+    );
+    expect(requireDefined(lastCall[2], 'lastCall[2]')).toBe('09:00');
   });
 
   it('DOES reschedule when medication name changes (affects title)', async () => {
@@ -380,8 +388,11 @@ describe('useDoseReminderScheduler — doseSignature (no unnecessary reschedule)
     rerender({ medications: [medUpdated] });
 
     await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
-    const lastCall = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
-    expect(lastCall[1]).toBe('Panadol Extra');
+    const lastCall = requireDefined(
+      mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1],
+      'lastCall'
+    );
+    expect(requireDefined(lastCall[1], 'lastCall[1]')).toBe('Panadol Extra');
   });
 
   it('does NOT reschedule when only dailyDose changes (schedule row unchanged)', async () => {

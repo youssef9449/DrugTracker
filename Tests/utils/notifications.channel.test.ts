@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -135,14 +136,22 @@ describe('channel IDs do not reference dose_reminder.wav', () => {
 
 function lastScheduledChannelId(): string {
   expect(mocks.schedule).toHaveBeenCalled();
-  const call = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
-  return call[0].notifications[0].channelId;
+  const call = requireDefined(
+    mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1],
+    'schedule call'
+  );
+  const request = requireDefined(call[0], 'schedule request');
+  return requireDefined(request.notifications[0], 'notification').channelId;
 }
 
 function lastScheduledNotification() {
   expect(mocks.schedule).toHaveBeenCalled();
-  const call = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
-  return call[0].notifications[0];
+  const call = requireDefined(
+    mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1],
+    'schedule call'
+  );
+  const request = requireDefined(call[0], 'schedule request');
+  return requireDefined(request.notifications[0], 'notification');
 }
 
 // ---------------------------------------------------------------------------
@@ -433,7 +442,7 @@ describe('Web/PWA future Dose Reminder delivery', () => {
     expect(shown).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1);
     expect(shown).toHaveLength(1);
-    expect(shown[0].title).toContain('Test');
+    expect(requireDefined(shown[0], 'shown[0]').title).toContain('Test');
   });
 
   it('uses the next calendar occurrence when the configured time has already passed', async () => {

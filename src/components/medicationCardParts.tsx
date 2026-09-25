@@ -49,10 +49,10 @@ export const AutoDeductPausedNote: FC = () => (
 );
 interface AutoDeductStatusBadgeProps {
   isAutoActive: boolean;
-  onToggle?: () => void;
-  size?: 'xs' | 'sm';
-  medicationId?: string;
-  className?: string;
+  onToggle?: (() => void) | undefined;
+  size?: 'xs' | 'sm' | undefined;
+  medicationId?: string | undefined;
+  className?: string | undefined;
 }
 /**
  * Status card / badge indicating the medication's Auto-Deduction state.
@@ -101,10 +101,10 @@ export const AutoDeductStatusBadge: FC<AutoDeductStatusBadgeProps> = ({
  */
 interface MedicationNotificationStatusBadgeProps {
   enabled: boolean;
-  onToggle?: () => void;
+  onToggle?: (() => void) | undefined;
   type: 'dose' | 'critical';
-  size?: 'xs' | 'sm';
-  medicationId?: string;
+  size?: 'xs' | 'sm' | undefined;
+  medicationId?: string | undefined;
 }
 /**
  * Per-medication notification control rendered as an icon-only pill button.
@@ -214,8 +214,8 @@ export interface MedicationCardHeaderProps {
   density: Density;
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
-  onOpenHistory?: (medication: Medication) => void;
-  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
+  onOpenHistory?: ((medication: Medication) => void) | undefined;
+  onRegisterBackHandler?: ((id: string, close: () => void, priority?: number) => () => void) | undefined;
 }
 
 /** Shared name + overflow menu row for compact/detailed cards. */
@@ -303,10 +303,10 @@ export interface MedicationCardDoseActionsProps {
   medication: Medication;
   isAutoActive: boolean;
   currentPills: number;
-  logs?: ConsumptionLog[];
+  logs?: ConsumptionLog[] | undefined;
   density: Density;
-  onConsumeDose?: (medicationId: string, doseId?: string) => void;
-  onRestoreDose?: (medicationId: string, doseId?: string) => void;
+  onConsumeDose?: ((medicationId: string, doseId?: string) => void) | undefined;
+  onRestoreDose?: ((medicationId: string, doseId?: string) => void) | undefined;
 }
 
 /**
@@ -411,8 +411,8 @@ export interface MedicationCardStockSummaryProps {
   depletionLabel: string;
   depletionTitle: string;
   density: 'compact' | 'detailed';
-  nonSolidPackageDesc?: string | null;
-  stripsDesc?: string | null;
+  nonSolidPackageDesc?: string | null | undefined;
+  stripsDesc?: string | null | undefined;
 }
 
 /** Shared remaining/dose/depletion summary for compact & detailed cards. */
@@ -523,7 +523,7 @@ export interface MedicationCardRefillButtonProps {
   medicationName: string;
   density: 'compact' | 'detailed';
   onOpenRefill: () => void;
-  className?: string;
+  className?: string | undefined;
 }
 
 /** Shared refill control for compact and detailed medication cards. */

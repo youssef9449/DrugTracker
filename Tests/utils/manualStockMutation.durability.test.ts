@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setExactAutoEnvelopeStorageTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
@@ -138,7 +139,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
       todayStr: TODAY,
     });
     expect(manualEnvelope).not.toBeNull();
-    const pillsAfterPartial = durable.medications[0].currentPills;
+    const pillsAfterPartial = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
 
     failLogs = false;
     marked = [];
@@ -164,7 +165,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
 
     expect(manualEnvelope).toBeNull();
     expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(true);
-    expect(durable.medications[0].currentPills).toBe(pillsAfterPartial);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterPartial);
     expect(recon.details[0]?.outcome).toBe('already_applied');
     expect(marked).toEqual([`med-1|d1|${TODAY}`]);
     expect(recon.markedCount).toBe(1);
@@ -179,7 +180,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
     });
     // Pair may be on durable but finalization failed → not success for caller.
     expect(first.outcome).toBe('persist_failed');
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(true);
     expect(manualEnvelope).not.toBeNull();
     const logCount = durable.logs.length;
@@ -196,7 +197,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
       },
     });
     expect(manualEnvelope).toBeNull();
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     expect(durable.logs.length).toBe(logCount);
     expect(durable.logs.map((l) => l.id)).toEqual(logIds);
     expect(marked).toEqual([]);
@@ -210,7 +211,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
       todayStr: TODAY,
     });
     expect(first.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     expect(manualEnvelope).toBeNull();
   });
   it('stale Manual envelope must not overwrite newer durable state', async () => {
@@ -222,7 +223,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
     });
     expect(take.outcome).toBe('applied');
     expect(generation).toBe(1);
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     const newerLogs = durable.logs.map((l) => ({ ...l }));
 
     manualEnvelope = {
@@ -246,8 +247,8 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
     });
 
     expect(manualEnvelope).toBeNull();
-    expect(durable.medications[0].currentPills).toBe(9);
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
     expect(durable.logs.length).toBe(newerLogs.length);
     expect(marked).toEqual([]);
   });
@@ -261,12 +262,12 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
     });
     expect(first.outcome).toBe('applied');
     expect(generation).toBe(1);
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(true);
     expect(manualEnvelope).not.toBeNull();
     expect(manualEnvelope?.baseGeneration).toBe(0);
     const logCount = durable.logs.length;
-    const pills = durable.medications[0].currentPills;
+    const pills = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
 
     failClear = false;
     marked = [];
@@ -279,13 +280,13 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
       },
     });
     expect(manualEnvelope).toBeNull();
-    expect(durable.medications[0].currentPills).toBe(pills);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pills);
     expect(durable.logs.length).toBe(logCount);
     expect(marked).toEqual([]);
   });
   it('persist_failed leaves stock unchanged and is not already_consumed', async () => {
     failLogs = true;
-    const before = durable.medications[0].currentPills;
+    const before = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
     const result = await runGatedManualConsume({
       medicationId: 'med-1',
       doseId: 'd1',
@@ -296,7 +297,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
     expect(result.outcome).not.toBe('already_consumed');
     expect(result.outcome).not.toBe('applied');
     // Durable meds may have partial write; returned snapshot stays pre-commit for caller.
-    expect(result.medications[0].currentPills).toBe(before);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBe(before);
     expect(result.log).toBeNull();
   });
   it('old envelope log id present but newer durable mutation wins (no meds overwrite)', async () => {
@@ -306,7 +307,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
       source: 'manual',
       todayStr: TODAY,
     });
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     const takeLogId = durable.logs.find((l) => l.type === 'dose_taken')?.id;
     expect(takeLogId).toBeTruthy();
 
@@ -329,7 +330,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
       saveEnvelope: () => null,
     });
     expect(manualEnvelope).toBeNull();
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
   });
   it('clear failure after finalization does not re-apply; retry clears only', async () => {
     failClear = true;
@@ -343,7 +344,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
     // (lastApplied is the completion proof). Caller sees 'applied'; the
     // envelope stays for retry (cleanup on next gate entry).
     expect(first.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     expect(manualEnvelope).not.toBeNull();
     const logCount = durable.logs.length;
 
@@ -358,7 +359,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
       },
     });
     expect(manualEnvelope).toBeNull();
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     expect(durable.logs.length).toBe(logCount);
     expect(marked).toEqual([]);
   });
@@ -400,7 +401,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
     expect(phase4Exact).not.toBeNull();
     expect(first.recoveredEnvelope).toBe(true);
     expect(first.markedCount).toBe(0);
-    const pillsAfterFirst = durable.medications[0].currentPills;
+    const pillsAfterFirst = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
     const logCountAfterFirst = durable.logs.length;
 
     // Restart: finalize succeeds now → snapshot matches → finalize + clear + ACK.
@@ -415,7 +416,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
     });
     expect(phase4Exact).toBeNull();
     // No double mutation: same pills + same log count.
-    expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterFirst);
     expect(durable.logs.length).toBe(logCountAfterFirst);
     expect(marked).toEqual([`med-1|d1|${TODAY}`]);
     expect(second.markedCount).toBe(1);
@@ -456,7 +457,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
     // sequence; the recovery returns the acks but the orchestrator ACKs
     // only after clear succeeds — verify no re-mutation.
     expect(phase4Exact).not.toBeNull();
-    const pillsAfterFirst = durable.medications[0].currentPills;
+    const pillsAfterFirst = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
     const logCountAfterFirst = durable.logs.length;
 
     // Restart: clear succeeds → envelope cleared. No re-mutation.
@@ -470,7 +471,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
       saveEnvelope: (e) => { if (e == null && failClear) return 'envelope_clear_failed'; phase4Exact = e; return null; },
     });
     expect(phase4Exact).toBeNull();
-    expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterFirst);
     expect(durable.logs.length).toBe(logCountAfterFirst);
     expect(second.markedCount).toBeGreaterThanOrEqual(1);
   });

@@ -88,5 +88,6 @@ export function usePersistentEffect({
       };
     }
     doWrite();
+    return undefined;
   }, [storageKey, value, json, failureMessage, showToast, debounceMs, enabled]);
 }

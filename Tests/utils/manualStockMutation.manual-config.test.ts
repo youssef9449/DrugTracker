@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 /**
  * Issue #267 regression tests — manual stock mutations have no
@@ -129,7 +130,7 @@ describe('#267 regression 1 — Manual Take after old elapsed-day settlement', (
     });
     expect(r.outcome).toBe('applied');
     expect(r.doseAmount).toBe(1);
-    expect(durable.medications[0].currentPills).toBe(29); // 30 - 1 (no catch-up)
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(29); // 30 - 1 (no catch-up)
   });
 });
 
@@ -148,7 +149,7 @@ describe('#267 regression 2 — Refill after several days', () => {
     expect(r.outcome).toBe('applied');
     expect(r.addedPills).toBe(15);
     // 20 + 15 = 35 (no past-day settlement baked in).
-    expect(durable.medications[0].currentPills).toBe(35);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(35);
     // A refill log is prepended (no exact_auto log).
     expect(durable.logs.some((l) => l.id === 'refill-1' && l.type === 'refill')).toBe(true);
     expect(durable.logs.some((l) => l.type === 'exact_auto')).toBe(false);
@@ -181,7 +182,7 @@ describe('#267 regression 3 — Refill Undo after Exact deductions', () => {
     expect(r.outcome).toBe('applied');
     // reversedAmount = min(20, 25) = 20 (no re-settlement of past days).
     expect(r.addedPills).toBe(-20);
-    expect(durable.medications[0].currentPills).toBe(5); // 25 - 20
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(5); // 25 - 20
     // A refill_undo log is prepended, linked to the original refill.
     const undoLog = durable.logs.find((l) => l.id === 'refill-undo-1');
     expect(undoLog?.type).toBe('refill_undo');
@@ -204,7 +205,7 @@ describe('#267 regression 3 — Refill Undo after Exact deductions', () => {
     });
     expect(r.outcome).toBe('applied');
     expect(r.addedPills).toBe(-5);
-    expect(durable.medications[0].currentPills).toBe(0);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(0);
   });
 });
 
@@ -233,10 +234,10 @@ describe('#267 regression 4 — Dose edit after several days', () => {
     expect(r.outcome).toBe('applied');
     expect(r.settleLog).toBeNull(); // no exact_auto log
     // currentPills unchanged.
-    expect(durable.medications[0].currentPills).toBe(30);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(30);
     // dailyDose + doseSchedule are updated.
-    expect(durable.medications[0].dailyDose).toBe(6);
-    expect(durable.medications[0].doseSchedule?.find((d) => d.id === 'd1')?.amount).toBe(3);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').dailyDose).toBe(6);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseSchedule?.find((d) => d.id === 'd1')?.amount).toBe(3);
     // No exact_auto log was created.
     expect(durable.logs.some((l) => l.type === 'exact_auto')).toBe(false);
   });
@@ -255,9 +256,9 @@ describe('#267 regression 5 — Auto ON/OFF after several days', () => {
     });
     expect(r.outcome).toBe('applied');
     expect(r.settleLog).toBeNull();
-    expect(durable.medications[0].autoDeductEnabled).toBe(false);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').autoDeductEnabled).toBe(false);
     // currentPills unchanged.
-    expect(durable.medications[0].currentPills).toBe(30);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(30);
     // No exact_auto log was created.
     expect(durable.logs.some((l) => l.type === 'exact_auto')).toBe(false);
   });
@@ -274,9 +275,9 @@ describe('#267 regression 5 — Auto ON/OFF after several days', () => {
     });
     expect(r.outcome).toBe('applied');
     expect(r.settleLog).toBeNull();
-    expect(durable.medications[0].autoDeductEnabled).toBe(true);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').autoDeductEnabled).toBe(true);
     // currentPills unchanged (no retroactive deduction for the frozen period).
-    expect(durable.medications[0].currentPills).toBe(30);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(30);
     // No exact_auto log was created.
     expect(durable.logs.some((l) => l.type === 'exact_auto')).toBe(false);
   });

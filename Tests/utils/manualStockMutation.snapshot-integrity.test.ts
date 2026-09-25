@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { describe, it, expect } from 'vitest';
 import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 import { makeScheduledMedication as med } from '../fixtures/testFixtures';
@@ -122,7 +123,7 @@ describe('Phase 4 — durableMatchesEnvelopeSnapshot pure contract', () => {
     // Missing log.
     const durableMissingLog = {
       medications: env.medications.map((m) => ({ ...m })),
-      logs: [env.logs[0]].map((l) => ({ ...l })),
+      logs: [requireDefined(env.logs[0], 'env.logs[0]')].map((l) => ({ ...l })),
     };
     expect(durableMatchesEnvelopeSnapshot(env, durableMissingLog)).toBe(false);
     // Same content, different medication order.
@@ -134,7 +135,10 @@ describe('Phase 4 — durableMatchesEnvelopeSnapshot pure contract', () => {
     // Same content, different log order.
     const durableReorderedLogs = {
       medications: env.medications.map((m) => ({ ...m })),
-      logs: [env.logs[1], env.logs[0]].map((l) => ({ ...l })),
+      logs: [
+        requireDefined(env.logs[1], 'env.logs[1]'),
+        requireDefined(env.logs[0], 'env.logs[0]'),
+      ].map((l) => ({ ...l })),
     };
     expect(durableMatchesEnvelopeSnapshot(env, durableReorderedLogs)).toBe(false);
   });

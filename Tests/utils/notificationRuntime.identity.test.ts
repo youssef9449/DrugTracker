@@ -1,4 +1,14 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+function firstScheduledNotification() {
+  const call = requireDefined(
+    mocks.schedule.mock.calls[0],
+    'first schedule call'
+  );
+  const request = requireDefined(call[0], 'first schedule request');
+  return requireDefined(request.notifications[0], 'first scheduled notification');
+}
 
 const mocks = vi.hoisted(() => ({
   platform: vi.fn(() => 'android'),
@@ -68,7 +78,7 @@ describe('notification logical identity boundary', () => {
     await postNativeNotification(baseOptions);
 
     expect(mocks.nativePost).toHaveBeenCalledTimes(1);
-    const payload = mocks.nativePost.mock.calls[0][0];
+    const payload = requireDefined(mocks.nativePost.mock.calls[0], 'mocks.nativePost.mock.calls[0]')[0];
 
     expect(payload.namespace).toBe('dose-reminder');
     expect(payload.identity).toBe('med-1::dose-morning');
@@ -83,8 +93,12 @@ describe('notification logical identity boundary', () => {
 
     expect(mocks.schedule).toHaveBeenCalledTimes(2);
 
-    const first = mocks.schedule.mock.calls[0][0].notifications[0];
-    const second = mocks.schedule.mock.calls[1][0].notifications[0];
+    const firstCall = requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]');
+    const secondCall = requireDefined(mocks.schedule.mock.calls[1], 'mocks.schedule.mock.calls[1]');
+    const firstRequest = requireDefined(firstCall[0], 'firstCall[0]');
+    const secondRequest = requireDefined(secondCall[0], 'secondCall[0]');
+    const first = requireDefined(firstRequest.notifications[0], 'firstRequest.notifications[0]');
+    const second = requireDefined(secondRequest.notifications[0], 'secondRequest.notifications[0]');
 
     expect(first.id).toBe(second.id);
     expect(first.extra.namespace).toBe('dose-reminder');
@@ -126,8 +140,15 @@ describe('notification logical identity boundary', () => {
     mocks.platform.mockReturnValue('ios');
 
     await scheduleNotification(baseOptions);
-    const scheduledId =
-      mocks.schedule.mock.calls[0][0].notifications[0].id;
+    const scheduleRequest = requireDefined(
+      requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0],
+      'schedule request'
+    );
+    const scheduledNotification = requireDefined(
+      scheduleRequest.notifications[0],
+      'scheduled notification'
+    );
+    const scheduledId = scheduledNotification.id;
 
     await cancelNotification(
       baseOptions.namespace,
@@ -143,8 +164,7 @@ describe('notification logical identity boundary', () => {
     mocks.platform.mockReturnValue('ios');
 
     await scheduleNotification(baseOptions);
-    const scheduledId =
-      mocks.schedule.mock.calls[0][0].notifications[0].id;
+    const scheduledId = firstScheduledNotification().id;
 
     mocks.getPending.mockResolvedValue({
       notifications: [

@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication, ConsumptionLog } from '../../src/types';
@@ -75,7 +76,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
         return null;
       },
     });
-    expect(first.medications[0].currentPills).toBe(7);
+    expect(requireDefined(first.medications[0], 'first.medications[0]').currentPills).toBe(7);
     expect(first.partialNativeAck).toBe(true);
     expect(marked.has('a')).toBe(true);
     // Envelope cleared under Option B after JS commit
@@ -106,7 +107,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       saveEnvelope: () => null,
     });
     expect(second.details.every((d) => d.outcome === 'already_applied')).toBe(true);
-    expect(second.medications[0].currentPills).toBe(7);
+    expect(requireDefined(second.medications[0], 'second.medications[0]').currentPills).toBe(7);
     expect(logsStore.filter((l) => l.id.startsWith('exact-auto:')).length).toBe(2);
     expect(marked.has('b')).toBe(true);
   });
@@ -144,7 +145,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       loadEnvelope: () => null,
       saveEnvelope: () => null,
     });
-    expect(medsStore[0].currentPills).toBe(8);
+    expect(requireDefined(medsStore[0], 'medsStore[0]').currentPills).toBe(8);
     const retry = await runAutoDeductionReconciliation({
       alreadyInGate: true,
       medications: medsStore,
@@ -163,8 +164,8 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       loadEnvelope: () => null,
       saveEnvelope: () => null,
     });
-    expect(retry.details[0].outcome).toBe('already_applied');
-    expect(retry.medications[0].currentPills).toBe(8);
+    expect(requireDefined(retry.details[0], 'retry.details[0]').outcome).toBe('already_applied');
+    expect(requireDefined(retry.medications[0], 'retry.medications[0]').currentPills).toBe(8);
     expect(logsStore.filter((l) => l.id === exactAutoLogId('med-1', 'd', '2026-09-14')).length).toBe(
       1
     );
@@ -208,7 +209,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       saveEnvelope: () => null,
     });
 
-    expect(first.medications[0].currentPills).toBe(8);
+    expect(requireDefined(first.medications[0], 'first.medications[0]').currentPills).toBe(8);
     expect(first.partialNativeAck).toBe(true);
     expect(first.markedCount).toBe(0);
     expect(logsStore.filter((l) => l.id === exactAutoLogId('med-1', 'd', '2026-09-14')).length).toBe(
@@ -239,8 +240,8 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       saveEnvelope: () => null,
     });
 
-    expect(second.details[0].outcome).toBe('already_applied');
-    expect(second.medications[0].currentPills).toBe(8);
+    expect(requireDefined(second.details[0], 'second.details[0]').outcome).toBe('already_applied');
+    expect(requireDefined(second.medications[0], 'second.medications[0]').currentPills).toBe(8);
     expect(second.partialNativeAck).toBe(false);
     expect(second.markedCount).toBe(1);
     expect(logsStore.filter((l) => l.id === exactAutoLogId('med-1', 'd', '2026-09-14')).length).toBe(
@@ -282,7 +283,7 @@ describe('BLOCKER 2 — partial native acknowledgement', () => {
       saveEnvelope: () => null,
     });
 
-    expect(result.medications[0].currentPills).toBe(8);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBe(8);
     expect(result.partialNativeAck).toBe(false);
     expect(result.markedCount).toBe(1);
     expect(logsStore.filter((l) => l.id === exactAutoLogId('med-1', 'd', '2026-09-14')).length).toBe(

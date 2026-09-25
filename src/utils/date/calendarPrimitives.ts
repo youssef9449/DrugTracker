@@ -78,8 +78,15 @@ export function localEpochMs(calendarDate: string, timeHhmm: string): number | n
  */
 export function parseCalendarDate(dateStr: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
-  const [year, month, day] = dateStr.split('-').map(Number);
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length !== 3) return null;
+  const year = parts[0];
+  const month = parts[1];
+  const day = parts[2];
   if (
+    year === undefined ||
+    month === undefined ||
+    day === undefined ||
     !Number.isInteger(year) ||
     !Number.isInteger(month) ||
     !Number.isInteger(day)

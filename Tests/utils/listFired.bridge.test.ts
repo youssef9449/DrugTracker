@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import {
   __setAutoStockGateTestHooks,
 } from './autoStockTestHooks';
@@ -42,7 +43,7 @@ describe('listFired explicit result (native read failure vs empty)', () => {
     });
     expect(result.nativeListFailed).toBe(true);
     expect(result.mutated).toBe(false);
-    expect(result.medications[0].currentPills).toBe(30);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBe(30);
     expect(result.toAcknowledge).toHaveLength(0);
   });
 
@@ -57,6 +58,6 @@ describe('listFired explicit result (native read failure vs empty)', () => {
     });
     expect(result.nativeListFailed).toBeFalsy();
     expect(result.mutated).toBe(false);
-    expect(result.medications[0].currentPills).toBe(30);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBe(30);
   });
 });

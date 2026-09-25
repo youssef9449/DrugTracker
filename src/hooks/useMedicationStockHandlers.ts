@@ -49,7 +49,7 @@ export function useMedicationStockHandlers(
     try {
       const result = await runGatedManualRestore({
         medicationId,
-        doseId,
+        ...(doseId !== undefined ? { doseId } : {}),
         makeLogId: () => generateId('restore'),
       });
       const displayName = result.medicationName ?? '';
@@ -138,7 +138,7 @@ export function useMedicationStockHandlers(
     void (async () => {
       const result = await runGatedManualConsume({
         medicationId,
-        doseId,
+        ...(doseId !== undefined ? { doseId } : {}),
         source: 'manual',
       });
       const displayName = result.medicationName ?? '';

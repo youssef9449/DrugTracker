@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { flushUntil } from '../helpers/asyncTestUtils';
@@ -177,8 +178,8 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
       { initialProps: { medications: [med] } }
     );
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
-    expect(mocks.schedule.mock.calls[0][0]).toBe('med-live');
-    expect(mocks.schedule.mock.calls[0].length).toBeGreaterThanOrEqual(6); // includes doseId
+    expect(requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0]).toBe('med-live');
+    expect(requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]').length).toBeGreaterThanOrEqual(6); // includes doseId
     const schedulesBefore = mocks.schedule.mock.calls.length;
 
     // User manually takes the dose at 12:00 (before the 20:00 reminder):
@@ -405,8 +406,8 @@ describe('useDoseReminderScheduler — consumption suppression (today\u2019s dos
       .slice(schedulesBeforeRerenders)
       .filter((c) => c[0] === 'med-race');
     expect(postRerenderSchedules).toHaveLength(1);
-    expect(postRerenderSchedules[0][1]).toBe('Renamed Med');
-    expect(postRerenderSchedules[0][6]).toEqual({ skipToday: true });
+    expect(requireDefined(postRerenderSchedules[0], 'postRerenderSchedules[0]')[1]).toBe('Renamed Med');
+    expect(requireDefined(postRerenderSchedules[0], 'postRerenderSchedules[0]')[6]).toEqual({ skipToday: true });
   });
 
   it('Test 11b — reminder-config change AFTER a consumption cannot resurrect today\u2019s reminder (skipToday baked into every reschedule)', async () => {

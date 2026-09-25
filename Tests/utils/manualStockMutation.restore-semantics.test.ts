@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setExactAutoEnvelopeStorageTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
@@ -141,7 +142,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     expect(manualEnvelope?.status).toBe('manual_js_ready');
     expect(manualEnvelope?.baseGeneration).toBe(0);
     expect((manualEnvelope as { toAcknowledge?: unknown }).toAcknowledge).toBeUndefined();
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
     expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(false);
     expect(generation).toBe(0);
     expect(marked).toEqual([]);
@@ -158,7 +159,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     });
     expect(manualEnvelope).toBeNull();
     expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(true);
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     expect(generation).toBe(1);
     expect(marked).toEqual([]);
     expect(reconOnly.markedCount).toBe(0);
@@ -172,7 +173,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
       todayStr: TODAY,
     });
     expect(take.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
 
     failLogs = true;
     marked = [];
@@ -185,7 +186,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     expect(restoreFail.outcome).toBe('persist_failed');
     expect(manualEnvelope).not.toBeNull();
     expect((manualEnvelope as { toAcknowledge?: unknown }).toAcknowledge).toBeUndefined();
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     expect(marked).toEqual([]);
 
     failLogs = false;
@@ -199,7 +200,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
       },
     });
     expect(manualEnvelope).toBeNull();
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     expect(durable.logs.some((l) => l.id === 'restore-crash-1')).toBe(true);
     expect(marked).toEqual([]);
   });
@@ -247,9 +248,9 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     expect(r1.outcome).toBe('applied');
     expect(r1.restoredAmount).toBe(1);
     // Only d1 restored: 8+1=9; d2 marker remains.
-    expect(durable.medications[0].currentPills).toBe(9);
-    expect(durable.medications[0].doseConsumptionHistory?.d2).toEqual([TODAY]);
-    expect(durable.medications[0].doseConsumptionHistory?.d1).toBeUndefined();
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d2).toEqual([TODAY]);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d1).toBeUndefined();
 
     // Second restore of d1 is no-op.
     const r2 = await runGatedManualRestore({
@@ -259,7 +260,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
       makeLogId: () => 'restore-d1-2',
     });
     expect(r2.outcome).toBe('already_restored');
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
 
     // Take d1 after restore: one final deduction → 8.
     const take = await runGatedManualConsume({
@@ -269,9 +270,9 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
       todayStr: TODAY,
     });
     expect(take.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
     // d2 still consumed independently.
-    expect(durable.medications[0].doseConsumptionHistory?.d2).toEqual([TODAY]);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d2).toEqual([TODAY]);
   });
   it('Restore uses actual clamped Auto amount not full slot amount', async () => {
     // Slot amount 2 but only 1 pill was available → Auto deducted 1 (log amount -1).
@@ -308,7 +309,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     });
     expect(r.outcome).toBe('applied');
     expect(r.restoredAmount).toBe(1);
-    expect(durable.medications[0].currentPills).toBe(1);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(1);
   });
   it('zero actual Auto deduction Restore adds zero', async () => {
     durable = {
@@ -340,8 +341,8 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     });
     expect(r.outcome).toBe('applied');
     expect(r.restoredAmount).toBe(0);
-    expect(durable.medications[0].currentPills).toBe(0);
-    expect(durable.medications[0].doseConsumptionHistory?.d1).toBeUndefined();
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(0);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d1).toBeUndefined();
   });
   it('Auto 3 → Restore = +3 (active deduction tracked)', async () => {
     durable = {
@@ -351,7 +352,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     const r = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-auto-3' });
     expect(r.outcome).toBe('applied');
     expect(r.restoredAmount).toBe(3);
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     // The auto-3 deduction log is now marked reversed.
     const autoLog = durable.logs.find((l) => l.id === exactAutoLogId('med-1', 'd1', TODAY));
     expect(autoLog?.reversedAt).toBeTruthy();
@@ -371,7 +372,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     const take = await runGatedManualConsume({ medicationId: 'med-1', doseId: 'd1', source: 'manual', todayStr: TODAY });
     expect(take.outcome).toBe('applied');
     expect(take.doseAmount).toBe(1);
-    expect(durable.medications[0].currentPills).toBe(0);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(0);
     // The dose_taken log has amount -1 (clamped).
     const takeLog = durable.logs.find((l) => l.type === 'dose_taken' && l.doseId === 'd1');
     expect(takeLog?.amount).toBe(-1);
@@ -380,7 +381,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     const r = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-take-1' });
     expect(r.outcome).toBe('applied');
     expect(r.restoredAmount).toBe(1);
-    expect(durable.medications[0].currentPills).toBe(1);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(1);
     // The Take log is now reversed; the old Auto log stays reversed.
     expect(durable.logs.find((l) => l.id === takeLog?.id)?.reversedAt).toBeTruthy();
   });
@@ -392,11 +393,11 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     const take = await runGatedManualConsume({ medicationId: 'med-1', doseId: 'd1', source: 'manual', todayStr: TODAY });
     expect(take.outcome).toBe('applied');
     expect(take.doseAmount).toBe(3);
-    expect(durable.medications[0].currentPills).toBe(4);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(4);
     const r = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-manual-3' });
     expect(r.outcome).toBe('applied');
     expect(r.restoredAmount).toBe(3);
-    expect(durable.medications[0].currentPills).toBe(7);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(7);
     // The dose_taken log is reversed by the Restore.
     const takeLog = durable.logs.find((l) => l.type === 'dose_taken' && l.doseId === 'd1');
     expect(takeLog?.reversedAt).toBeTruthy();
@@ -410,17 +411,17 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     const r1 = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-auto-3b' });
     expect(r1.outcome).toBe('applied');
     expect(r1.restoredAmount).toBe(3);
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     // Take again (3). currentPills 10 → 7.
     const take = await runGatedManualConsume({ medicationId: 'med-1', doseId: 'd1', source: 'manual', todayStr: TODAY });
     expect(take.outcome).toBe('applied');
     expect(take.doseAmount).toBe(3);
-    expect(durable.medications[0].currentPills).toBe(7);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(7);
     // Restore must reverse the Take (3), NOT the old Auto (3, already reversed).
     const r2 = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-take-3b' });
     expect(r2.outcome).toBe('applied');
     expect(r2.restoredAmount).toBe(3);
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
   });
   it('Restore twice for the same occurrence does not add stock twice', async () => {
     durable = {
@@ -430,12 +431,12 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     const r1 = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-1-dedup' });
     expect(r1.outcome).toBe('applied');
     expect(r1.restoredAmount).toBe(3);
-    expect(durable.medications[0].currentPills).toBe(10);
-    const pillsAfterFirst = durable.medications[0].currentPills;
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
+    const pillsAfterFirst = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
     // Second Restore: occurrence already restored (consume marker cleared).
     const r2 = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-2-dedup' });
     expect(r2.outcome).toBe('already_restored');
-    expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterFirst);
     // No second restore log.
     expect(durable.logs.filter((l) => l.id === 'restore-2-dedup')).toHaveLength(0);
   });
@@ -451,9 +452,9 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     const r = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-a' });
     expect(r.outcome).toBe('applied');
     expect(r.restoredAmount).toBe(1);
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     // d2 still consumed; auto-b NOT reversed.
-    expect(durable.medications[0].doseConsumptionHistory?.d2).toEqual([TODAY]);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d2).toEqual([TODAY]);
     expect(durable.logs.find((l) => l.id === 'auto-b')?.reversedAt).toBeUndefined();
     // auto-a IS reversed.
     expect(durable.logs.find((l) => l.id === 'auto-a')?.reversedAt).toBeTruthy();
@@ -471,7 +472,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     const r = await runGatedManualRestore({ medicationId: 'med-1', doseId: 'd1', todayStr: TODAY, makeLogId: () => 'restore-new' });
     expect(r.outcome).toBe('applied');
     expect(r.restoredAmount).toBe(4);
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     // new-deduct reversed; old-deduct stays reversed.
     expect(durable.logs.find((l) => l.id === 'new-deduct')?.reversedAt).toBeTruthy();
     expect(durable.logs.find((l) => l.id === 'old-deduct')?.reversedAt).toBe('old');
@@ -513,14 +514,14 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     expect(r.outcome).toBe('applied');
     expect(r.restoredAmount).toBe(1);
     // Stock restored (9 + 1 = 10).
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     // Consumption cleared for d1.
-    expect(durable.medications[0].doseConsumptionHistory?.d1).toBeUndefined();
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d1).toBeUndefined();
     // Durable skip left for the SAME occurrence so projection cannot re-add d1.
-    expect(durable.medications[0].doseSkippedHistory?.d1).toEqual([TODAY]);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseSkippedHistory?.d1).toEqual([TODAY]);
     // Sibling d2 untouched (not skipped, not consumed).
-    expect(durable.medications[0].doseSkippedHistory?.d2).toBeUndefined();
-    expect(durable.medications[0].doseConsumptionHistory?.d2).toBeUndefined();
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseSkippedHistory?.d2).toBeUndefined();
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d2).toBeUndefined();
 
     // No second Auto deduction on a later reconcile for the same FIRED event.
     const recon = await runAutoDeductionReconciliation({
@@ -545,7 +546,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     });
 
     expect(recon.details[0]?.outcome).toBe('already_applied');
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     // No second exact_auto log for d1.
     expect(
       durable.logs.filter((l) => l.id === exactAutoLogId('med-1', 'd1', TODAY))
@@ -583,9 +584,9 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     });
     expect(restore.outcome).toBe('applied');
     expect(restore.restoredAmount).toBe(1);
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     // Skip left so Auto cannot re-deduct before Take.
-    expect(durable.medications[0].doseSkippedHistory?.d1).toEqual([TODAY]);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseSkippedHistory?.d1).toEqual([TODAY]);
 
     const take = await runGatedManualConsume({
       medicationId: 'med-1',
@@ -597,10 +598,10 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     expect(take.outcome).toBe('applied');
     expect(take.doseAmount).toBe(1);
     // Final stock: 10 - 1 = 9 (exactly one net deduction for the occurrence).
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     // Skip cleared by Take; consume marker set once.
-    expect(durable.medications[0].doseSkippedHistory?.d1).toBeUndefined();
-    expect(durable.medications[0].doseConsumptionHistory?.d1).toEqual([TODAY]);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseSkippedHistory?.d1).toBeUndefined();
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d1).toEqual([TODAY]);
     // Exactly one dose_taken log for d1 (the manual Take) plus the restore log
     // plus the original exact_auto log — no second auto deduction.
     const takeLogs = durable.logs.filter(
@@ -621,8 +622,8 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
       todayStr: TODAY,
     });
     expect(take.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBe(9);
-    const pillsAfterTake = durable.medications[0].currentPills;
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
+    const pillsAfterTake = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
 
     // Restore d1 (time 08:00 has passed at 15:00) → skip left, consume cleared.
     const restore = await runGatedManualRestore({
@@ -633,9 +634,9 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     });
     expect(restore.outcome).toBe('applied');
     expect(restore.restoredAmount).toBe(1);
-    expect(durable.medications[0].currentPills).toBe(10);
-    expect(durable.medications[0].doseConsumptionHistory?.d1).toBeUndefined();
-    expect(durable.medications[0].doseSkippedHistory?.d1).toEqual([TODAY]);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d1).toBeUndefined();
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseSkippedHistory?.d1).toEqual([TODAY]);
 
     // Later native Exact Auto FIRED event for the same occurrence.
     const recon = await runAutoDeductionReconciliation({
@@ -661,8 +662,8 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
 
     expect(recon.details[0]?.outcome).toBe('already_applied');
     // Stock unchanged from post-restore state (no second deduction).
-    expect(durable.medications[0].currentPills).toBe(10);
-    expect(durable.medications[0].currentPills).not.toBe(pillsAfterTake);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).not.toBe(pillsAfterTake);
     // No exact_auto log created for d1.
     expect(
       durable.logs.filter(
@@ -679,7 +680,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
       todayStr: TODAY,
     });
     expect(take.outcome).toBe('applied');
-    const pillsAfterTake = durable.medications[0].currentPills;
+    const pillsAfterTake = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
 
     const restore = await runGatedManualRestore({
       medicationId: 'med-1',
@@ -688,10 +689,10 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
       makeLogId: () => 'restore-future-d3',
     });
     expect(restore.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBe(pillsAfterTake + 2);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterTake + 2);
     // Future restore: NO durable skip (d3 stays eligible for time-gated Auto).
-    expect(durable.medications[0].doseSkippedHistory?.d3).toBeUndefined();
-    expect(durable.medications[0].doseConsumptionHistory?.d3).toBeUndefined();
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseSkippedHistory?.d3).toBeUndefined();
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d3).toBeUndefined();
   });
   it('Multi-dose: Restore doseId=A leaves skip for A only; doseId=B untouched', async () => {
     // Take d1 and d2 manually, then Restore d1 only.
@@ -707,7 +708,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
       source: 'manual',
       todayStr: TODAY,
     });
-    const pillsBeforeRestore = durable.medications[0].currentPills;
+    const pillsBeforeRestore = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
 
     const r = await runGatedManualRestore({
       medicationId: 'med-1',
@@ -718,11 +719,11 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     expect(r.outcome).toBe('applied');
     expect(r.restoredAmount).toBe(1);
     // d1 restored (skip left, consume cleared); d2 still consumed.
-    expect(durable.medications[0].doseSkippedHistory?.d1).toEqual([TODAY]);
-    expect(durable.medications[0].doseConsumptionHistory?.d1).toBeUndefined();
-    expect(durable.medications[0].doseConsumptionHistory?.d2).toEqual([TODAY]);
-    expect(durable.medications[0].doseSkippedHistory?.d2).toBeUndefined();
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseSkippedHistory?.d1).toEqual([TODAY]);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d1).toBeUndefined();
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseConsumptionHistory?.d2).toEqual([TODAY]);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseSkippedHistory?.d2).toBeUndefined();
     // Only d1's amount credited back.
-    expect(durable.medications[0].currentPills).toBe(pillsBeforeRestore + 1);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsBeforeRestore + 1);
   });
 });

@@ -13,29 +13,29 @@ export interface NotificationRuntimePostOptions {
   channelId: string;
   channelName: string;
   channelImportance: 1 | 2 | 3 | 4 | 5;
-  channelVisibility?: number;
-  smallIcon?: string;
-  autoCancel?: boolean;
-  ongoing?: boolean;
+  channelVisibility?: number | undefined;
+  smallIcon?: string | undefined;
+  autoCancel?: boolean | undefined;
+  ongoing?: boolean | undefined;
   /** Feature payload retained for platform notification delivery; never used as identity. */
-  extra?: Record<string, unknown>;
+  extra?: Record<string, unknown> | undefined;
   action?: {
     id: string;
     title: string;
-    foreground?: boolean;
-  };
+    foreground?: boolean | undefined;
+  } | undefined;
   /** iOS-only scheduled delivery time. Android timing belongs to ExactAlarmRuntime. */
-  at?: Date;
+  at?: Date | undefined;
   /** Preserve feature fallback behavior when an iOS schedule operation fails. */
-  fallbackToWeb?: boolean;
+  fallbackToWeb?: boolean | undefined;
 }
 
 interface NotificationRuntimePlugin {
   post(
     options: Omit<NotificationRuntimePostOptions, 'at' | 'fallbackToWeb'> & {
-      actionId?: string;
-      actionTitle?: string;
-      actionForeground?: boolean;
+      actionId?: string | undefined;
+      actionTitle?: string | undefined;
+      actionForeground?: boolean | undefined;
     }
   ): Promise<{ ok: boolean; error?: string; code?: string }>;
   cancel(options: { namespace: string; identity: string }): Promise<{ ok: boolean; error?: string; code?: string }>;
@@ -45,7 +45,7 @@ interface NotificationRuntimePlugin {
     channelId: string;
     channelName: string;
     channelImportance: number;
-    channelVisibility?: number;
+    channelVisibility?: number | undefined;
   }): Promise<{ ok: boolean; error?: string; code?: string }>;
   retryPersistedNotificationDeliveries(): Promise<{ retried: number }>;
   addListener(
@@ -206,25 +206,27 @@ export async function scheduleNotification(
         console.warn('[notification-runtime] iOS platform ID allocation failed');
         return false;
       }
+      const notification = {
+        id: platformId,
+        title: options.title,
+        body: options.body,
+        schedule: {
+          at: options.at ?? new Date(Date.now() + 500),
+          allowWhileIdle: true,
+        },
+        channelId: options.channelId,
+        ongoing: options.ongoing ?? false,
+        autoCancel: options.autoCancel ?? true,
+        extra: {
+          namespace: options.namespace,
+          identity: options.identity,
+        },
+        ...(options.smallIcon !== undefined ? { smallIcon: options.smallIcon } : {}),
+        ...(options.action?.id !== undefined ? { actionTypeId: options.action.id } : {}),
+      };
+
       await LocalNotifications.schedule({
-        notifications: [{
-          id: platformId,
-          title: options.title,
-          body: options.body,
-          schedule: {
-            at: options.at ?? new Date(Date.now() + 500),
-            allowWhileIdle: true,
-          },
-          smallIcon: options.smallIcon,
-          channelId: options.channelId,
-          actionTypeId: options.action?.id,
-          ongoing: options.ongoing ?? false,
-          autoCancel: options.autoCancel ?? true,
-          extra: {
-            namespace: options.namespace,
-            identity: options.identity,
-          },
-        }],
+        notifications: [notification],
       });
       return true;
     } catch (err) {
@@ -335,7 +337,7 @@ export async function cancelNotification(
 }
 
 export type NotificationPendingResult =
-  | { ok: true; pending: { schedule?: { at?: unknown } } | null }
+  | { ok: true; pending: { schedule?: { at?: unknown } | undefined } | null }
   | NativeBoundaryFailure;
 
 export async function getPendingNotificationResult(
@@ -371,9 +373,10 @@ export async function getPendingNotificationResult(
     if (platformId === null) return { ok: true, pending: null };
     const entry = pending.notifications.find((notification) => notification.id === platformId);
     if (!entry) return { ok: true, pending: null };
+    const schedule = entry.schedule;
     return {
       ok: true,
-      pending: { schedule: entry.schedule as { at?: unknown } | undefined },
+      pending: schedule === undefined ? {} : { schedule },
     };
   } catch (error) {
     const boundaryError = toNativeBoundaryError(error, 'platform_failure');
@@ -434,7 +437,7 @@ export async function ensureNotificationChannel(options: {
   channelId: string;
   channelName: string;
   channelImportance: 1 | 2 | 3 | 4 | 5;
-  channelVisibility?: number;
+  channelVisibility?: number | undefined;
 }): Promise<boolean> {
   if (!isAndroidNotificationRuntime()) return true;
   try {

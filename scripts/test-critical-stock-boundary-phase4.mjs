@@ -139,10 +139,9 @@ assert(
 );
 
 assert(
-  prepare.includes("'CriticalStockAlarmAdapter.java'")
-    && prepare.includes("'CriticalStockAlarmReceiver.java'")
-    && prepare.includes("'CriticalStockPlugin.java'"),
-  'Android preparation must install the Critical feature boundary files'
+  prepare.includes("path.join(root, 'native-android', 'critical-stock')")
+    && prepare.includes('syncJavaSourceSet('),
+  'Android preparation must synchronize the complete Critical Stock source directory'
 );
 assert(
   !prepare.includes("'CriticalStockAlarmFeature.java'")
@@ -150,13 +149,12 @@ assert(
   'No Critical feature class may be installed into the shared alarm-runtime package'
 );
 
-const sharedInstallMatch = prepare.match(
-  /const alarmRuntimeFiles = \[(.*?)\];/s
-);
-assert(sharedInstallMatch, 'shared alarm-runtime install list must exist');
+const sharedAlarmRuntime = fs
+  .readdirSync(path.join(root, 'native-android', 'alarm-runtime'))
+  .filter((name) => name.endsWith('.java'));
 assert(
-  !sharedInstallMatch[1].includes('CriticalStock'),
-  'Critical Stock files must not be installed as shared alarm-runtime sources'
+  sharedAlarmRuntime.every((name) => !name.includes('CriticalStock')),
+  'Critical Stock files must not exist in the shared alarm-runtime source directory'
 );
 
 assert(

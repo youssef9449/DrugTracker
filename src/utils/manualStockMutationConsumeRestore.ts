@@ -19,10 +19,10 @@ export function shouldDismissAlarmAfterManualTake(
 
 export function runGatedManualConsume(opts: {
   medicationId: string;
-  doseId?: string;
+  doseId?: string | undefined;
   source: 'alarm' | 'manual';
-  todayStr?: string;
-  now?: Date;
+  todayStr?: string | undefined;
+  now?: Date | undefined;
   /**
    * Test inject for native occurrence snapshot.
    * Must not convert infrastructure failure into fake ABSENT.
@@ -197,7 +197,7 @@ export function runGatedManualRestore(opts: {
   doseId?: string;
   todayStr?: string;
   now?: Date;
-  makeLogId?: () => string;
+  makeLogId?: (() => string) | undefined;
 }): Promise<GatedManualRestoreResult> {
   return runManualStockTransaction({
       todayStr: opts.todayStr, now: opts.now,

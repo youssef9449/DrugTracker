@@ -11,6 +11,7 @@
  */
 
 import type { ConsumptionLog, Medication } from '../types';
+import type { ApplyForegroundStockDeltasResult } from './autoDeductionNativeTypes';
 import {
   commitDurableAutoStockState,
   type AutoStockDurableState,
@@ -328,17 +329,22 @@ export async function recoverAllPendingStockEnvelopes(
   applyNativeStockDeltas: (
     mutationSeq: number,
     deltas: Array<{ medicationId: string; delta: number }>,
-    occurrenceResolutions: Array<{
+    occurrenceResolutions?: Array<{
       medicationId: string;
       doseId: string;
       calendarDate: string;
       type: 'CONSUMED' | 'SKIPPED';
-    }>
-  ) => Promise<{
-    ok: boolean;
-    error?: string;
-    stocks?: Array<{ medicationId: string; currentPills: number }>;
-  }> = applyForegroundAutoStockDeltas
+    }> | undefined
+  ) => Promise<ApplyForegroundStockDeltasResult> = (
+    mutationSeq,
+    deltas,
+    occurrenceResolutions
+  ) =>
+    applyForegroundAutoStockDeltas(
+      mutationSeq,
+      deltas,
+      occurrenceResolutions ?? []
+    )
 ): Promise<UnifiedRecoveryResult> {
   let state = fresh;
   let recovered = false;
@@ -444,7 +450,7 @@ export async function recoverAllPendingStockEnvelopes(
       // Auto deduction that happened after the envelope was created.
       if (nativeResult.stocks && nativeResult.stocks.length > 0) {
         const nativeById = new Map(
-          nativeResult.stocks.map((stock) => [
+          nativeResult.stocks.map((stock: { medicationId: string; currentPills: number }) => [
             stock.medicationId,
             Number(stock.currentPills),
           ])

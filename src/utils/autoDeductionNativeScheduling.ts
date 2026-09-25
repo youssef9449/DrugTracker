@@ -179,7 +179,7 @@ async function recoverAutoDeductionOccurrenceInternal(
           scheduledAtEpochMs,
           amount,
           expectedRecurrenceGeneration,
-          treatmentEndDate,
+          ...(treatmentEndDate !== undefined ? { treatmentEndDate } : {}),
           timeHhmm,
         })
       : await AutoDeduction.recoverMissedOccurrence({

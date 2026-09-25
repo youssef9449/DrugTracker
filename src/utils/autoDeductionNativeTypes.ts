@@ -10,8 +10,8 @@ export interface AutoDeductionEvent {
   createdAtEpochMs: number;
   reconciledAtEpochMs: number | null;
   /** Native Auto stock execution result surfaced during JS repair/reconciliation. */
-  nativeStockApplied?: boolean;
-  actualDeducted?: number;
+  nativeStockApplied?: boolean | undefined;
+  actualDeducted?: number | undefined;
 }
 export interface NativeAutoStockMedication {
   medicationId: string;
@@ -26,15 +26,15 @@ export interface NativeAutoOccurrenceResolution {
 export interface InitializeNativeStockResult {
   ok: boolean;
   stocks: NativeAutoStockMedication[];
-  error?: string;
-  errorCode?: NativeErrorCode;
+  error?: string | undefined;
+  errorCode?: NativeErrorCode | undefined;
 }
 export interface ApplyForegroundStockDeltasResult {
   ok: boolean;
   alreadyApplied: boolean;
   stocks: NativeAutoStockMedication[];
-  error?: string;
-  errorCode?: NativeErrorCode;
+  error?: string | undefined;
+  errorCode?: NativeErrorCode | undefined;
 }
 export interface ApplyAutoDeductionStockResult {
   ok: boolean;
@@ -43,14 +43,14 @@ export interface ApplyAutoDeductionStockResult {
   applied: boolean;
   actualDeducted: number;
   currentPills: number;
-  error?: string;
-  errorCode?: NativeErrorCode;
+  error?: string | undefined;
+  errorCode?: NativeErrorCode | undefined;
 }
 export interface MarkReconciledResult {
   ok: boolean;
   changed: boolean;
-  error?: string;
-  errorCode?: NativeErrorCode;
+  error?: string | undefined;
+  errorCode?: NativeErrorCode | undefined;
 }
 export interface ExactAutoDeductionFiredEvent {
   medicationId: string;
@@ -65,16 +65,16 @@ export interface ScheduleOccurrenceParams {
   calendarDate: string;
   timeHhmm: string;
   amount: number;
-  scheduledAtEpochMs?: number;
-  treatmentEndDate?: string;
+  scheduledAtEpochMs?: number | undefined;
+  treatmentEndDate?: string | undefined;
   /** Auto-owned retry evidence surfaced by the native schedule listing. */
-  fireRetryCount?: number;
+  fireRetryCount?: number | undefined;
 }
 export interface ScheduleOccurrenceResult {
   ok: boolean;
-  error?: string;
-  errorCode?: NativeErrorCode;
-  occurrenceKey?: string;
+  error?: string | undefined;
+  errorCode?: NativeErrorCode | undefined;
+  occurrenceKey?: string | undefined;
 }
 export type RecoverAutoOccurrenceStatus =
   | 'CANCELLED'
@@ -85,17 +85,17 @@ export type RecoverAutoOccurrenceStatus =
 export interface RecoverAutoOccurrenceResult {
   ok: boolean;
   status: RecoverAutoOccurrenceStatus;
-  error?: string;
-  errorCode?: NativeErrorCode;
+  error?: string | undefined;
+  errorCode?: NativeErrorCode | undefined;
 }
 export interface ScheduledOccurrence {
   medicationId: string;
   doseId: string;
   calendarDate: string;
-  timeHhmm?: string;
-  amount?: number;
-  scheduledAtEpochMs?: number;
-  fireRetryCount?: number;
+  timeHhmm?: string | undefined;
+  amount?: number | undefined;
+  scheduledAtEpochMs?: number | undefined;
+  fireRetryCount?: number | undefined;
 }
 /**
  * Explicit result for native schedule listing.
@@ -107,15 +107,15 @@ export interface ScheduledOccurrence {
 export interface ListScheduledOccurrencesResult {
   ok: boolean;
   schedules: ScheduledOccurrence[];
-  error?: string;
-  errorCode?: NativeErrorCode;
+  error?: string | undefined;
+  errorCode?: NativeErrorCode | undefined;
 }
 export type CancelOccurrenceStatus = "SUCCESS" | "ALREADY_ABSENT" | "FAILED";
 export interface CancelOccurrenceResult {
   ok: boolean;
   status: CancelOccurrenceStatus;
-  error?: string;
-  errorCode?: NativeErrorCode;
+  error?: string | undefined;
+  errorCode?: NativeErrorCode | undefined;
 }
 /**
  * Explicit result for native future-schedule restoration.
@@ -125,7 +125,7 @@ export interface CancelOccurrenceResult {
 export interface RestoreFutureSchedulesResult {
   ok: boolean;
   restored: number;
-  failed?: number;
-  error?: string;
-  errorCode?: NativeErrorCode;
+  failed?: number | undefined;
+  error?: string | undefined;
+  errorCode?: NativeErrorCode | undefined;
 }

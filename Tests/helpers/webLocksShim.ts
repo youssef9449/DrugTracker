@@ -65,7 +65,8 @@ export function installWebLocksShim(): WebLocksShimHandle {
 export function removeWebLocks(): void {
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
-    get: undefined,
+    value: undefined,
+    writable: true,
   });
   delete (navigator as unknown as { locks?: unknown }).locks;
 }

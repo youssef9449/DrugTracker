@@ -98,7 +98,9 @@ export async function getOccurrenceSnapshot(
       res.amount != null && Number.isFinite(Number(res.amount))
         ? Number(res.amount)
         : undefined;
-    return { ok: true, status, amount };
+    return amount === undefined
+      ? { ok: true, status }
+      : { ok: true, status, amount };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'snapshot_failed';
     return { ok: false, error: msg, errorCode: toNativeBoundaryError(e, 'persistence_failed').code };

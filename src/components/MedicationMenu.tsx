@@ -19,13 +19,13 @@ export interface MedicationMenuProps {
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
   onToggleAutoDeduct: (id: string) => void;
-  onToggleMedicationReminder?: (id: string) => void;
-  onToggleMedicationCriticalStockAlerts?: (id: string) => void;
-  onOpenHistory?: (medication: Medication) => void;
-  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
-  size?: 'xs' | 'sm' | 'md';
-  showTypeIcon?: boolean;
-  showOverflow?: boolean;
+  onToggleMedicationReminder?: ((id: string) => void) | undefined;
+  onToggleMedicationCriticalStockAlerts?: ((id: string) => void) | undefined;
+  onOpenHistory?: ((medication: Medication) => void) | undefined;
+  onRegisterBackHandler?: ((id: string, close: () => void, priority?: number) => () => void) | undefined;
+  size?: 'xs' | 'sm' | 'md' | undefined;
+  showTypeIcon?: boolean | undefined;
+  showOverflow?: boolean | undefined;
 }
 
 export function MedicationTypeIcon({ unit, className = "h-3.5 w-3.5" }: { unit: string; className?: string }) {

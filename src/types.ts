@@ -16,14 +16,14 @@ export interface ConsumptionLog {
   timestamp: string;
   description: string;
   /** Set when this refill has already been reversed. Older logs may omit it. */
-  reversedAt?: string;
+  reversedAt?: string | undefined;
   /** Links a refill_undo log to the original refill log. */
-  relatedLogId?: string;
+  relatedLogId?: string | undefined;
   /**
    * Stable MedicationDose.id when this log is for a specific dose slot
    * Stable MedicationDose.id. Older dose_taken logs may omit it.
    */
-  doseId?: string;
+  doseId?: string | undefined;
 }
 export interface Medication {
   id: string;
@@ -41,43 +41,43 @@ export interface Medication {
   unit: string; // e.g., 'قرص', 'كبسولة', 'مل'
   warningThresholdDays: number; // Alert when days left <= this number (default 5)
   colorTag: string;
-  category?: string;
-  notes?: string;
+  category?: string | undefined;
+  notes?: string | undefined;
   createdAt: string;
-  autoDeductEnabled?: boolean; // Default true
+  autoDeductEnabled?: boolean | undefined; // Default true
   /**
    * هل الدواء لعلاج مزمن (استخدام دائم ومستمر).
    * إذا كان true، يعتمد شريط التقدم على مقياس شهري (30 يوماً).
    */
-  isChronic?: boolean;
+  isChronic?: boolean | undefined;
   /**
    * مدة استعمال الدواء بالأيام إذا كان محدداً (كورس علاجي).
    * يتأثر شريط التقدم بهذه المدة.
    */
-  durationDays?: number;
+  durationDays?: number | undefined;
   /** Local YYYY-MM-DD date on which a temporary treatment course starts. */
-  treatmentStartDate?: string;
-  packageSize?: number; // Size of standard package when bought (e.g. 30)
-  stripsPerBox?: number; // عدد الأشرطة في العلبة (مثال: 3 أشرطة)
-  pillsPerStrip?: number; // عدد الأقراص في الشريط الواحد (مثال: 10 أقراص)
-  targetOrderQuantity?: number; // Custom target order quantity specified for pharmacy order
-  reminderEnabled?: boolean; // هل تم تفعيل تذكير الجرعات لهذا الدواء
-  reminderTime?: string; // وقت التذكير القديم/المساعد (صيغة 24 ساعة)
+  treatmentStartDate?: string | undefined;
+  packageSize?: number | undefined; // Size of standard package when bought (e.g. 30)
+  stripsPerBox?: number | undefined; // عدد الأشرطة في العلبة (مثال: 3 أشرطة)
+  pillsPerStrip?: number | undefined; // عدد الأقراص في الشريط الواحد (مثال: 10 أقراص)
+  targetOrderQuantity?: number | undefined; // Custom target order quantity specified for pharmacy order
+  reminderEnabled?: boolean | undefined; // هل تم تفعيل تذكير الجرعات لهذا الدواء
+  reminderTime?: string | undefined; // وقت التذكير القديم/المساعد (صيغة 24 ساعة)
   /**
    * Per-medication critical-stock notification preference.
    * undefined keeps the existing behavior when the global master switch is enabled.
    */
-  criticalStockAlertsEnabled?: boolean;
+  criticalStockAlertsEnabled?: boolean | undefined;
   /**
    * Number of individual dose events per day.
    * When present, should equal doseSchedule.length.
    */
-  dosesPerDay?: number;
+  dosesPerDay?: number | undefined;
   /**
    * Explicit per-dose schedule rows — sole source of future dose occurrence
    * identity, amount, and time.
    */
-  doseSchedule?: MedicationDose[];
+  doseSchedule?: MedicationDose[] | undefined;
   /**
    * YYYY-MM-DD of the last day the user manually consumed a dose.
    * Single-dose: when this equals today, auto-deduction and
@@ -86,7 +86,7 @@ export interface Medication {
    * slots are consumed. Per-slot authority is
    * {@link doseConsumptionHistory}.
    */
-  lastConsumedDate?: string;
+  lastConsumedDate?: string | undefined;
   /**
    * Per-dose consumption history: doseId → YYYY-MM-DD dates (append-only).
    * Source of truth for whether a dose occurrence was consumed on a date.
@@ -94,7 +94,7 @@ export interface Medication {
    * pruneDoseConsumption.ts); runtime correctness only needs today's
    * markers, so older dates are pruned deterministically at mutation time.
    */
-  doseConsumptionHistory?: Record<string, string[]>;
+  doseConsumptionHistory?: Record<string, string[]> | undefined;
   /**
    * Per-dose skip/restore history: doseId → YYYY-MM-DD dates on which
    * that slot was restored after auto-deduct (or after manual consume).
@@ -102,7 +102,7 @@ export interface Medication {
    * available for a later manual Take (idempotent Auto-Deduct → Restore).
    * Retention (#507): same bounded window as doseConsumptionHistory.
    */
-  doseSkippedHistory?: Record<string, string[]>;
+  doseSkippedHistory?: Record<string, string[]> | undefined;
 }
 /** One individual dose event within a day (multi-dose model). */
 export interface MedicationDose {
@@ -112,7 +112,7 @@ export interface MedicationDose {
   /** Local time of the dose in 24-hour HH:mm. */
   time: string;
   /** Optional clarification / instruction for this dose (e.g. "بعد الإفطار", "قبل النوم"). */
-  description?: string;
+  description?: string | undefined;
 }
 // ─────────────────────────────────────────────────────────────────────
 // Critical-stock notification claim (the ONE business state model).
@@ -199,8 +199,8 @@ export interface PharmacySettings {
   selectedPharmacyId: string;
   whatsappContacts: UserContact[];
   whatsappAddresses: UserAddress[];
-  selectedWhatsappContactIds?: string[];
-  selectedWhatsappAddressIds?: string[];
+  selectedWhatsappContactIds?: string[] | undefined;
+  selectedWhatsappAddressIds?: string[] | undefined;
 }
 export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
   defaultDurationDays: 30,

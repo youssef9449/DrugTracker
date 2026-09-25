@@ -32,9 +32,9 @@ export interface ManualStockTransactionFailure {
 }
 
 export interface ManualStockTransactionOptions<TFailure, TResult> {
-  todayStr?: string;
-  now?: Date;
-  globalAutoDeductEnabled?: boolean;
+  todayStr?: string | undefined;
+  now?: Date | undefined;
+  globalAutoDeductEnabled?: boolean | undefined;
   onFailure: (failure: ManualStockTransactionFailure) => TFailure;
   operation: (context: ManualStockTransactionContext) => TResult | Promise<TResult>;
 }

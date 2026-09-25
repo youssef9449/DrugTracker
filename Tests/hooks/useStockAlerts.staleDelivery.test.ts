@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import type { Medication } from '@/types';
@@ -165,8 +166,8 @@ describe('#539 pre-delivery revalidation (state changed before delivery starts)'
     await flush();
 
     expect(sendMock).toHaveBeenCalledTimes(1);
-    expect(sendMock.mock.calls[0][1]).toBe('New Name');
-    expect(sendMock.mock.calls[0][3]).toBe(8);
+    expect(requireDefined(sendMock.mock.calls[0], 'sendMock.mock.calls[0]')[1]).toBe('New Name');
+    expect(requireDefined(sendMock.mock.calls[0], 'sendMock.mock.calls[0]')[3]).toBe(8);
   });
 });
 

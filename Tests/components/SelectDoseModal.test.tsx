@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
@@ -78,8 +79,8 @@ describe('sortDoseSelectItems', () => {
       { dose: { id: 'b', amount: 1, time: '09:00' }, eventDate: '2026-09-15' },
       { dose: { id: 'a', amount: 1, time: '22:00' }, eventDate: '2026-09-13' },
     ]);
-    expect(items[0].dose.id).toBe('a');
-    expect(items[1].dose.id).toBe('b');
+    expect(requireDefined(items[0], 'items[0]').dose.id).toBe('a');
+    expect(requireDefined(items[1], 'items[1]').dose.id).toBe('b');
   });
 });
 

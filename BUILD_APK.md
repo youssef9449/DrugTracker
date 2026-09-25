@@ -66,15 +66,21 @@ For a release-signed APK you can share with others, see the official Android doc
 
 Quick summary:
 
-1. **Generate a release keystore** (one-time, save it forever — losing it means you can never publish an update to the same app):
+1. **Generate a release keystore** (one-time, save it forever — losing it means you can never publish an update to the same app).
+   
+   Supply the signing secrets through the shell environment before running the command:
+   ```bash
+   export RELEASE_KEYSTORE_PASSWORD='<your-keystore-password>'
+   export RELEASE_KEY_PASSWORD='<your-key-password>'
+   ```
    ```bash
    keytool -genkeypair \
      -keystore nagnagh-release.keystore \
      -alias nagnagh \
      -keyalg RSA -keysize 2048 \
      -validity 36500 \
-     -storepass nagnagh2024release \
-     -keypass nagnagh2024release \
+        -storepass "$RELEASE_KEYSTORE_PASSWORD" \
+        -keypass "$RELEASE_KEY_PASSWORD" \
      -dname "CN=Нагнаг Drug Tracker, OU=Mobile, O=Youssef9449, L=Cairo, ST=Cairo, C=EG"
    ```
 
@@ -83,9 +89,9 @@ Quick summary:
    signingConfigs {
        release {
            storeFile file('<absolute-path-to>/nagnagh-release.keystore')
-           storePassword 'nagnagh2024release'
+            storePassword System.getenv('RELEASE_KEYSTORE_PASSWORD')
            keyAlias 'nagnagh'
-           keyPassword 'nagnagh2024release'
+            keyPassword System.getenv('RELEASE_KEY_PASSWORD')
        }
    }
    buildTypes {
@@ -227,9 +233,9 @@ android {
     signingConfigs {
         release {
             storeFile keystorePath
-            storePassword 'nagnagh2024release'
+            storePassword System.getenv('RELEASE_KEYSTORE_PASSWORD')
             keyAlias 'nagnagh'
-            keyPassword 'nagnagh2024release'
+            keyPassword System.getenv('RELEASE_KEY_PASSWORD')
             enableV1Signing true
             enableV2Signing true
             enableV3Signing false

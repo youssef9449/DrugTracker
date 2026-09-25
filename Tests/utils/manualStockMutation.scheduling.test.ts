@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication } from '../../src/types';
@@ -110,7 +111,7 @@ describe('Phase 4 — native recurrence invalidation is the config-change orderi
     });
     expect(r.outcome).toBe('applied');
     expect(invalidated).toEqual(['med-1|d1', 'med-1|d2', 'med-1|d3']);
-    expect(durable.medications[0].autoDeductEnabled).toBe(false);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').autoDeductEnabled).toBe(false);
   });
 
   it('schedule edit invalidates the old chain before the new configuration commits', async () => {
@@ -131,7 +132,7 @@ describe('Phase 4 — native recurrence invalidation is the config-change orderi
     });
     expect(r.outcome).toBe('applied');
     expect(invalidated).toEqual(['med-1|d1', 'med-1|d2', 'med-1|d3']);
-    expect(durable.medications[0].doseSchedule?.find((d) => d.id === 'd1')?.amount).toBe(3);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').doseSchedule?.find((d) => d.id === 'd1')?.amount).toBe(3);
   });
 
   it('native invalidation failure blocks the JS configuration mutation', async () => {
@@ -224,7 +225,7 @@ describe('Phase 4 — future Restore is already_restored without durable deducti
       todayStr: TODAY,
     });
     expect(r.outcome).toBe('already_restored');
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     expect(durable.logs).toHaveLength(0);
   });
 
@@ -241,7 +242,7 @@ describe('Phase 4 — future Restore is already_restored without durable deducti
     });
     expect(r2.outcome).toBe('already_restored');
     expect(durable.logs).toHaveLength(0);
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
   });
 
   it('future Manual Take then Restore reverses the Take', async () => {
@@ -252,14 +253,14 @@ describe('Phase 4 — future Restore is already_restored without durable deducti
       todayStr: TODAY,
     });
     expect(take.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     const restore = await runGatedManualRestore({
       medicationId: 'med-1',
       doseId: 'd1',
       todayStr: TODAY,
     });
     expect(restore.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
   });
 });
 
@@ -330,8 +331,8 @@ describe('Phase 4 — todayStr/now captured inside gate after wait', () => {
     expect(r1.outcome).toBe('applied');
     expect(r2.outcome).toBe('applied');
     // d1 consumed on first day; d2 on second day
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd2', '2026-09-17')).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd2', '2026-09-17')).toBe(true);
 
     vi.useRealTimers();
     __setAutoStockGateTestHooks(null);
@@ -409,7 +410,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     });
     expect(r.outcome).toBe('applied');
     expect(r.doseAmount).toBe(1);
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
   });
 
   it('exact durability block → Restore cannot write a projection skip marker', async () => {
@@ -434,7 +435,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     expect(r.outcome).toBe('persist_failed');
     expect(r.reason).toBe('exact_reconciliation_blocked');
     expect(durable.medications[0]).toEqual(before);
-    expect(isDoseSkippedOnDate(durable.medications[0], 'd1', TODAY)).toBe(false);
+    expect(isDoseSkippedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(false);
     expect(durable.logs).toHaveLength(0);
   });
 
@@ -456,7 +457,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     });
     expect(r.outcome).toBe('rejected');
     expect(r.reason).toBe('native_snapshot_failed');
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     expect(durable.logs).toHaveLength(0);
   });
 
@@ -491,7 +492,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     expect(r.reason).toBe('native_snapshot_failed');
     expect(r.doseAmount).toBe(0);
     expect(r.log).toBeNull();
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     // No manual consume log of any type was written.
     expect(durable.logs.filter((l) => l.type === 'dose_taken')).toHaveLength(0);
     expect(durable.logs).toHaveLength(0);
@@ -516,7 +517,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     });
     expect(r.outcome).toBe('applied');
     expect(r.doseAmount).toBe(1);
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
   });
 
   it('single-dose without doseId resolves to d1 and uses FIRED amount', async () => {
@@ -541,7 +542,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     });
     expect(r.outcome).toBe('applied');
     expect(r.doseAmount).toBe(3);
-    expect(durable.medications[0].currentPills).toBe(7);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(7);
   });
 
   it('invalid amountOverride (NaN) returns reason=invalid_exact_event and does not mutate stock', async () => {
@@ -563,7 +564,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     expect(r.outcome).toBe('rejected');
     expect(r.reason).toBe('invalid_exact_event');
     expect(r.doseAmount).toBe(0);
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     expect(durable.logs).toHaveLength(0);
   });
 
@@ -585,7 +586,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     });
     expect(r.outcome).toBe('rejected');
     expect(r.reason).toBe('invalid_exact_event');
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
   });
 
   it('invalid amountOverride (negative) returns reason=invalid_exact_event', async () => {
@@ -606,7 +607,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     });
     expect(r.outcome).toBe('rejected');
     expect(r.reason).toBe('invalid_exact_event');
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
   });
 });
 
@@ -686,7 +687,7 @@ describe('Phase 4 — treatment-boundary-safe recurrence compensation', () => {
       },
     });
 
-    const current = durable.medications[0];
+    const current = requireDefined(durable.medications[0], 'durable.medications[0]');
     const { id, createdAt, ...medData } = current;
     const result = await runGatedMedicationUpdate({
       editId: id,
@@ -713,21 +714,24 @@ describe('Phase 4 — treatment-boundary-safe recurrence compensation', () => {
         treatmentEndDate: '2026-09-28',
       },
     ]);
-    expect(createdAt).toBe(current.createdAt);
+    expect(createdAt).toBe(requireDefined(current, 'current').createdAt);
   });
 
   it('does not compensate an occurrence before the treatment start date', async () => {
-    const current = durable.medications[0];
+    const current = requireDefined(
+      durable.medications[0],
+      'durable.medications[0]'
+    );
     const {
       id,
       createdAt,
       ...medData
     } = current;
-    expect(id).toBe(current.id);
-    expect(createdAt).toBe(current.createdAt);
+    expect(id).toBe(requireDefined(current, 'current').id);
+    expect(createdAt).toBe(requireDefined(current, 'current').createdAt);
 
     const result = await runGatedMedicationUpdate({
-      editId: current.id,
+      editId: requireDefined(current, 'current').id,
       medData: {
         ...medData,
         durationDays: 6,

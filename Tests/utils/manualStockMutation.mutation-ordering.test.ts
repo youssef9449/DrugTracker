@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
@@ -142,7 +143,7 @@ describe('Phase 4 — mutationSeq monotonic invariant', () => {
       todayStr: TODAY,
     });
     expect(r.outcome).toBe('persist_failed');
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     __setAutoStockGateTestHooks(null);
     __setManualEnvelopeTestHooks(null);
     __resetStockMutationOrderingForTests();

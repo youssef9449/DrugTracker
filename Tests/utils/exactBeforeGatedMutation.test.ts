@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import {
   __setStockMutationOrderingTestHooks,
   __setManualEnvelopeTestHooks,
@@ -140,9 +141,9 @@ describe('exact FIRED amount precedes gated mutation', () => {
   it('reconcileFiredEvents uses event.amount=2 not schedule amount=1', () => {
     const med = baseMed({ currentPills: 10});
     const r = reconcileFiredEvents([med], [], [firedEvent(2)]);
-    expect(r.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
     expect(r.newExactLogs).toHaveLength(1);
-    expect(r.newExactLogs[0].amount).toBe(-2);
+    expect(requireDefined(r.newExactLogs[0], 'r.newExactLogs[0]').amount).toBe(-2);
   });
 
   it('exact persistence failure surfaces durabilityBlocked and leaves stock untouched', async () => {
@@ -170,7 +171,7 @@ describe('exact FIRED amount precedes gated mutation', () => {
     expect(recon.mutated).toBe(false);
     expect(recon.markedCount).toBe(0);
     expect(mark).not.toHaveBeenCalled();
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     expect(durable.logs).toHaveLength(0);
   });
 
@@ -184,7 +185,7 @@ describe('exact FIRED amount precedes gated mutation', () => {
       listFired: async () => ({ ok: true, events }),
       markReconciled: async () => ({ ok: true, changed: true }),
     });
-    expect(recon.medications[0].currentPills).toBe(8);
+    expect(requireDefined(recon.medications[0], 'recon.medications[0]').currentPills).toBe(8);
     const exactId = exactAutoLogId('med-1', 'd1', '2026-09-14');
     expect(recon.logs.some((l) => l.id === exactId)).toBe(true);
 
@@ -201,7 +202,7 @@ describe('exact FIRED amount precedes gated mutation', () => {
       markReconciled: async () => ({ ok: true, changed: false }),
     });
     expect(recon2.mutated).toBe(false);
-    expect(recon2.medications[0].currentPills).toBe(8);
+    expect(requireDefined(recon2.medications[0], 'recon2.medications[0]').currentPills).toBe(8);
     expect(recon2.newExactLogs).toEqual([]);
   });
 
@@ -231,8 +232,8 @@ describe('exact FIRED amount precedes gated mutation', () => {
     });
 
     expect(result.reason).toBe('exact_reconciliation_blocked');
-    expect(result.medications[0].currentPills).toBe(10);
-    expect(result.medications[0].autoDeductEnabled).toBe(true);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBe(10);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').autoDeductEnabled).toBe(true);
     expect(durable.logs).toHaveLength(0);
   });
 
@@ -258,12 +259,12 @@ describe('exact FIRED amount precedes gated mutation', () => {
     expect(result.outcome).toBe('applied');
     // exact-first: 10→8; same occurrence already applied so no second deduction → 8
     // mutation-first would be 10→9 then exact →7
-    expect(result.medications[0].currentPills).toBe(8);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBe(8);
     const exactLogs = result.logs.filter(
       (l) => l.id === exactAutoLogId('med-1', 'd1', '2026-09-14')
     );
     expect(exactLogs).toHaveLength(1);
-    expect(exactLogs[0].amount).toBe(-2);
+    expect(requireDefined(exactLogs[0], 'exactLogs[0]').amount).toBe(-2);
   });
 
   it('idempotent second reconciliation keeps stock at event.amount deduction', () => {
@@ -271,10 +272,10 @@ describe('exact FIRED amount precedes gated mutation', () => {
     const e = firedEvent(2);
     const r1 = reconcileFiredEvents([med], [], [e]);
     const r2 = reconcileFiredEvents(r1.medications, r1.logs, [e]);
-    expect(r1.medications[0].currentPills).toBe(8);
-    expect(r2.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r1.medications[0], 'r1.medications[0]').currentPills).toBe(8);
+    expect(requireDefined(r2.medications[0], 'r2.medications[0]').currentPills).toBe(8);
     expect(r2.newExactLogs).toHaveLength(0);
-    expect(r2.details[0].outcome).toBe('already_applied');
+    expect(requireDefined(r2.details[0], 'r2.details[0]').outcome).toBe('already_applied');
   });
 });
 
@@ -312,13 +313,13 @@ describe('runGatedGlobalAutoDeductToggle exact-before-mutation', () => {
     expect(result.outcome).toBe('applied');
     expect(result.enable).toBe(false);
     // exact-first → 8; mutation-first would yield 7
-    expect(result.medications[0].currentPills).toBe(8);
-    expect(result.medications[0].autoDeductEnabled).toBe(false);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBe(8);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').autoDeductEnabled).toBe(false);
     const exactLogs = result.logs.filter(
       (l) => l.id === exactAutoLogId('med-1', 'd1', '2026-09-14')
     );
     expect(exactLogs).toHaveLength(1);
-    expect(exactLogs[0].amount).toBe(-2);
+    expect(requireDefined(exactLogs[0], 'exactLogs[0]').amount).toBe(-2);
   });
 
   it('global ON: settlement uses durable state after exact; stock stays 8', async () => {
@@ -364,8 +365,8 @@ describe('runGatedGlobalAutoDeductToggle exact-before-mutation', () => {
     expect(callOrder[0]).toBe('exact');
     expect(result.outcome).toBe('applied');
     expect(result.enable).toBe(true);
-    expect(result.medications[0].currentPills).toBe(8);
-    expect(result.medications[0].autoDeductEnabled).toBe(true);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBe(8);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').autoDeductEnabled).toBe(true);
   });
 });
 
@@ -408,7 +409,7 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
       durabilityBlocked: false,
     }));
 
-    const formMed = durable.medications[0];
+    const formMed = requireDefined(durable.medications[0], 'durable.medications[0]');
     const { id: _id, createdAt: _c, ...medData } = {
       ...formMed,
       doseSchedule: [{ id: 'd1', amount: 1, time: '08:00' }],
@@ -426,11 +427,11 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
     });
     expect(result.outcome).toBe('applied');
     const med = result.medications[0];
-    expect(med.doseSchedule?.map((d) => d.id)).toEqual(['d1']);
-    expect(med.doseConsumptionHistory).toEqual({ d1: '2026-09-14' });
-    expect(med.doseConsumptionHistory).toEqual({ d1: ['2026-09-14'] });
-    expect(med.doseConsumptionHistory).not.toHaveProperty('d2');
-    expect(med.doseConsumptionHistory).not.toHaveProperty('d2');
+    expect(requireDefined(med, 'med').doseSchedule?.map((d) => d.id)).toEqual(['d1']);
+    expect(requireDefined(med, 'med').doseConsumptionHistory).toEqual({ d1: '2026-09-14' });
+    expect(requireDefined(med, 'med').doseConsumptionHistory).toEqual({ d1: ['2026-09-14'] });
+    expect(requireDefined(med, 'med').doseConsumptionHistory).not.toHaveProperty('d2');
+    expect(requireDefined(med, 'med').doseConsumptionHistory).not.toHaveProperty('d2');
   });
 
   it('dailyDose change: exact amount 2 first, final dailyDose=3, stock=8, no orphan', async () => {
@@ -447,7 +448,7 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
     mockExactFirst(durable, callOrder, 2);
 
     const { id: _id, createdAt: _c, ...medData } = {
-      ...durable.medications[0],
+      ...requireDefined(durable.medications[0], 'durable.medications[0]'),
       dailyDose: 3,
       doseSchedule: [{ id: 'd1', amount: 3, time: '08:00' }],
       doseConsumptionHistory: { d1: ['2026-09-13'], orphan: ['2026-01-01'] },
@@ -461,14 +462,14 @@ describe('runGatedMedicationUpdate pruning and exact-before-settle', () => {
     });
     expect(callOrder[0]).toBe('exact');
     expect(result.outcome).toBe('applied');
-    expect(result.medications[0].dailyDose).toBe(3);
-    expect(result.medications[0].currentPills).toBe(8);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').dailyDose).toBe(3);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBe(8);
     const exactLogs = result.logs.filter(
       (l) => l.id === exactAutoLogId('med-1', 'd1', '2026-09-14')
     );
     expect(exactLogs).toHaveLength(1);
-    expect(result.medications[0].doseConsumptionHistory).not.toHaveProperty('orphan');
-    expect(result.medications[0].doseConsumptionHistory).not.toHaveProperty(
+    expect(requireDefined(result.medications[0], 'result.medications[0]').doseConsumptionHistory).not.toHaveProperty('orphan');
+    expect(requireDefined(result.medications[0], 'result.medications[0]').doseConsumptionHistory).not.toHaveProperty(
       'orphan'
     );
   });
@@ -505,7 +506,7 @@ describe('gated paths call exact reconciliation before mutation', () => {
       globalAutoDeductEnabled: true,
     });
     expect(callOrder[0]).toBe('exact');
-    expect(result.medications[0].currentPills).toBe(8);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBe(8);
   });
 
   it('runGatedGlobalAutoDeductToggle: exact first yields stock 8', async () => {
@@ -523,7 +524,7 @@ describe('gated paths call exact reconciliation before mutation', () => {
       now: new Date('2026-09-14T09:00:00'),
     });
     expect(callOrder[0]).toBe('exact');
-    expect(result.medications[0].currentPills).toBe(8);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBe(8);
     expect(result.enable).toBe(false);
   });
 
@@ -538,7 +539,7 @@ describe('gated paths call exact reconciliation before mutation', () => {
     ];
     mockExactFirst(durable, callOrder, 2);
     const { id: _id, createdAt: _c, ...medData } = {
-      ...durable.medications[0],
+      ...requireDefined(durable.medications[0], 'durable.medications[0]'),
       dailyDose: 3,
       doseSchedule: [{ id: 'd1', amount: 3, time: '08:00' }],
     };
@@ -550,9 +551,9 @@ describe('gated paths call exact reconciliation before mutation', () => {
     });
     expect(callOrder[0]).toBe('exact');
     expect(result.outcome).toBe('applied');
-    expect(result.medications[0].dailyDose).toBe(3);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').dailyDose).toBe(3);
     // exact-first 10→8; wrong order would charge schedule then exact → 7
-    expect(result.medications[0].currentPills).toBe(8);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBe(8);
   });
 });
 
@@ -639,14 +640,14 @@ describe('FIRED durable after schedule edit/remove (#268 / PR #271)', () => {
     const med = scheduleEditedMed({ currentPills: 10 });
     const e: AutoDeductionEvent = firedForRemovedDose(2);
     const r = reconcileFiredEvents([med], [], [e]);
-    expect(r.details[0].outcome).toBe('applied');
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('applied');
     expect(r.mutated).toBe(true);
     // event.amount (2) authoritative, NOT the current schedule amount (1 for
     // d2) and NOT dailyDose.
-    expect(r.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
     expect(r.newExactLogs).toHaveLength(1);
-    expect(r.newExactLogs[0].amount).toBe(-2);
-    expect(r.newExactLogs[0].id).toBe(exactAutoLogId('med-1', 'd1', '2026-09-14'));
+    expect(requireDefined(r.newExactLogs[0], 'r.newExactLogs[0]').amount).toBe(-2);
+    expect(requireDefined(r.newExactLogs[0], 'r.newExactLogs[0]').id).toBe(exactAutoLogId('med-1', 'd1', '2026-09-14'));
     expect(r.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: 'd1', calendarDate: '2026-09-14' },
     ]);
@@ -656,13 +657,13 @@ describe('FIRED durable after schedule edit/remove (#268 / PR #271)', () => {
     const med = scheduleEditedMed({ currentPills: 10 });
     const e: AutoDeductionEvent = firedForRemovedDose(2);
     const r1 = reconcileFiredEvents([med], [], [e]);
-    expect(r1.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r1.medications[0], 'r1.medications[0]').currentPills).toBe(8);
     expect(r1.newExactLogs).toHaveLength(1);
 
     const r2 = reconcileFiredEvents(r1.medications, r1.logs, [e]);
-    expect(r2.details[0].outcome).toBe('already_applied');
+    expect(requireDefined(r2.details[0], 'r2.details[0]').outcome).toBe('already_applied');
     expect(r2.mutated).toBe(false);
-    expect(r2.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r2.medications[0], 'r2.medications[0]').currentPills).toBe(8);
     expect(r2.newExactLogs).toEqual([]);
     expect(
       r2.logs.filter((l) => l.id === exactAutoLogId('med-1', 'd1', '2026-09-14'))
@@ -685,11 +686,11 @@ describe('FIRED durable after schedule edit/remove (#268 / PR #271)', () => {
     const exactLogId = exactAutoLogId('med-1', 'd1', '2026-09-14');
     const exactLogs = result.logs.filter((l) => l.id === exactLogId);
     expect(exactLogs).toHaveLength(1);
-    expect(exactLogs[0].amount).toBe(-2);
+    expect(requireDefined(exactLogs[0], 'exactLogs[0]').amount).toBe(-2);
     // event.amount was applied (10 − 2 = 8 from the exact step). The gated
     // settlement then runs for the remaining schedule; the net depends on
     // that path — the durable exact log proves the FIRED occurrence was
     // reconciled authoritatively.
-    expect(result.medications[0].currentPills).toBeLessThanOrEqual(8);
+    expect(requireDefined(result.medications[0], 'result.medications[0]').currentPills).toBeLessThanOrEqual(8);
   });
 });

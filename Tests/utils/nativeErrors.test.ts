@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -163,7 +164,8 @@ describe('#534 structured native error-code migration', () => {
     );
     const tokens = new Set<string>();
     for (const match of nativeSource.matchAll(/"([A-Za-z_][A-Za-z0-9_]*)"/g)) {
-      tokens.add(match[1]);
+      const token = requireDefined(match[1], 'native error token');
+      tokens.add(token);
     }
     expect(tokens.size).toBeGreaterThan(0);
     const missing = [...tokens].filter((t) => !(t in NATIVE_CODE_CATEGORIES));

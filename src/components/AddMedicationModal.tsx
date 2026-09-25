@@ -14,8 +14,8 @@ interface AddMedicationModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => Promise<boolean>;
-  initialData?: Medication | null;
-  defaultAutoDeductEnabled?: boolean;
+  initialData?: Medication | null | undefined;
+  defaultAutoDeductEnabled?: boolean | undefined;
 }
 export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   isOpen,

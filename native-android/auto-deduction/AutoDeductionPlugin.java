@@ -157,6 +157,8 @@ public class AutoDeductionPlugin extends Plugin {
         Double amountObj = call.getDouble("amount");
         Long scheduledAtObj = call.getLong("scheduledAtEpochMs");
         Long generationObj = call.getLong("expectedRecurrenceGeneration");
+        String treatmentEndDate = call.getString("treatmentEndDate", "");
+        String timeHhmm = call.getString("timeHhmm", "");
         double amount = amountObj != null ? amountObj : Double.NaN;
         long scheduledAt = scheduledAtObj != null ? scheduledAtObj : -1L;
         long generation = generationObj != null ? generationObj : 0L;
@@ -166,7 +168,8 @@ public class AutoDeductionPlugin extends Plugin {
                 AutoDeductionScheduler.FireResult result = compensation
                         ? scheduler.recoverMissedOccurrenceForCompensation(
                                 medicationId, doseId, calendarDate,
-                                scheduledAt, amount, generation)
+                                scheduledAt, amount, generation,
+                                treatmentEndDate, timeHhmm)
                         : scheduler.recoverMissedOccurrence(
                                 medicationId, doseId, calendarDate,
                                 scheduledAt, amount, generation);

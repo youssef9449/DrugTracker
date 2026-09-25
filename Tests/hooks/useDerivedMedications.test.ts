@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { describe, it, expect } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useDerivedMedications } from '@/hooks/useDerivedMedications';
@@ -24,7 +25,7 @@ describe('useDerivedMedications — medication-level Auto projection', () => {
     const { result } = renderHook(() =>
       useDerivedMedications(meds, [], 'all', '')
     );
-    const days = result.current.medicationsWithStatus[0].statusInfo.daysLeft;
+    const days = requireDefined(result.current.medicationsWithStatus[0], 'result.current.medicationsWithStatus[0]').statusInfo.daysLeft;
     // Past lastSync with auto ON → projected depletion (not frozen 15 days)
     expect(days).toBeLessThan(15);
   });
@@ -34,7 +35,7 @@ describe('useDerivedMedications — medication-level Auto projection', () => {
     const { result } = renderHook(() =>
       useDerivedMedications(meds, [], 'all', '')
     );
-    expect(result.current.medicationsWithStatus[0].statusInfo.daysLeft).toBe(15);
-    expect(result.current.medicationsWithStatus[0].statusInfo.status).toBe('sufficient');
+    expect(requireDefined(result.current.medicationsWithStatus[0], 'result.current.medicationsWithStatus[0]').statusInfo.daysLeft).toBe(15);
+    expect(requireDefined(result.current.medicationsWithStatus[0], 'result.current.medicationsWithStatus[0]').statusInfo.status).toBe('sufficient');
   });
 });

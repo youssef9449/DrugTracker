@@ -56,13 +56,16 @@ export function getCriticalAlarmDate(
       const time = typeof d.time === 'string' ? d.time : '';
       const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(time);
       if (!match) return null;
+      const hourPart = match[1];
+      const minutePart = match[2];
+      if (hourPart === undefined || minutePart === undefined) return null;
       const amount = Number(d.amount) || 0;
       if (amount <= 0 || !d.id) return null;
       return {
         id: d.id,
         amount,
-        hour: parseInt(match[1], 10),
-        minute: parseInt(match[2], 10),
+        hour: parseInt(hourPart, 10),
+        minute: parseInt(minutePart, 10),
       };
     })
     .filter((s): s is NonNullable<typeof s> => s != null)

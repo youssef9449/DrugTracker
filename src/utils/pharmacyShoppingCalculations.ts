@@ -16,7 +16,8 @@ export function getShoppingAvailableUnits(med: Medication): OrderUnit[] {
 }
 
 export function getShoppingDefaultUnits(med: Medication): OrderUnit[] {
-  return [getShoppingAvailableUnits(med)[0]];
+  const defaultUnit = getShoppingAvailableUnits(med)[0];
+  return defaultUnit === undefined ? ['boxes'] : [defaultUnit];
 }
 
 export function getShoppingUnitSize(med: Medication, unit: OrderUnit): number {

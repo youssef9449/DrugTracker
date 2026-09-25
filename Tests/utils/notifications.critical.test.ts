@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Use vi.hoisted so the mock fns are accessible inside vi.mock factories
@@ -65,8 +66,12 @@ async function scheduleIOSNotificationAndGetPlatformId(
   at: number
 ): Promise<number> {
   await scheduleCriticalAlarm(medId, 'Test Med', at, 'قرص');
-  const call = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
-  return call[0].notifications[0].id;
+  const call = requireDefined(
+    mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1],
+    'schedule call'
+  );
+  const request = requireDefined(call[0], 'schedule request');
+  return requireDefined(request.notifications[0], 'notification').id;
 }
 
 describe('cancelCriticalAlarm (web path)', () => {
@@ -160,7 +165,7 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
     await scheduleCriticalAlarm('med-1', 'Test Med', future, 'قرص');
 
     expect(mocks.criticalSchedule).toHaveBeenCalledTimes(1);
-    const arg = mocks.criticalSchedule.mock.calls[0][0];
+    const arg = requireDefined(mocks.criticalSchedule.mock.calls[0], 'mocks.criticalSchedule.mock.calls[0]')[0];
     expect(arg.medicationId).toBe('med-1');
     expect(arg.medicationName).toBe('Test Med');
     expect(arg.triggerAtEpochMs).toBe(future);
@@ -176,7 +181,7 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
     const future = Date.now() + 3 * 24 * 60 * 60 * 1000;
     await scheduleCriticalAlarm('med-1', 'Test Med', future, 'قرص');
 
-    const request = mocks.criticalSchedule.mock.calls[0][0];
+    const request = requireDefined(mocks.criticalSchedule.mock.calls[0], 'mocks.criticalSchedule.mock.calls[0]')[0];
     expect(request.triggerAtEpochMs).toBe(future);
   });
 
@@ -235,7 +240,7 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
   it('cancelCriticalAlarm uses the native Critical identity on Android', async () => {
     await cancelCriticalAlarm('med-1');
     expect(mocks.criticalCancel).toHaveBeenCalledTimes(1);
-    expect(mocks.criticalCancel.mock.calls[0][0]).toEqual({ medicationId: 'med-1' });
+    expect(requireDefined(mocks.criticalCancel.mock.calls[0], 'mocks.criticalCancel.mock.calls[0]')[0]).toEqual({ medicationId: 'med-1' });
     expect(mocks.cancel).not.toHaveBeenCalled();
   });
 
@@ -245,11 +250,11 @@ describe('scheduleCriticalAlarm — native path (android)', () => {
     await scheduleCriticalAlarm('med-reschedule', 'Test', future, 'قرص');
 
     expect(mocks.criticalCancel).toHaveBeenCalledTimes(1);
-    expect(mocks.criticalCancel.mock.calls[0][0]).toEqual({
+    expect(requireDefined(mocks.criticalCancel.mock.calls[0], 'mocks.criticalCancel.mock.calls[0]')[0]).toEqual({
       medicationId: 'med-reschedule',
     });
     expect(mocks.criticalSchedule).toHaveBeenCalledTimes(1);
-    expect(mocks.criticalSchedule.mock.calls[0][0].medicationId).toBe(
+    expect(requireDefined(mocks.criticalSchedule.mock.calls[0], 'mocks.criticalSchedule.mock.calls[0]')[0].medicationId).toBe(
       'med-reschedule'
     );
   });

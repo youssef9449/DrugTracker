@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { describe, it, expect } from 'vitest';
 import type { ConsumptionLog } from '@/types';
 import {
@@ -43,7 +44,7 @@ describe('filterLogsForMedication — identity is medicationId only', () => {
     ];
     const filtered = filterLogsForMedication(logs, 'med-1');
     expect(filtered).toHaveLength(1);
-    expect(filtered[0].medicationName).toBe('Old Name');
+    expect(requireDefined(filtered[0], 'filtered[0]').medicationName).toBe('Old Name');
   });
 
   it('Case C: matching name but different medicationId is excluded', () => {

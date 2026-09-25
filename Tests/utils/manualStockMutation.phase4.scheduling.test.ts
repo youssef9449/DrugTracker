@@ -331,8 +331,8 @@ describe('Phase 4 — todayStr/now captured inside gate after wait', () => {
     expect(r1.outcome).toBe('applied');
     expect(r2.outcome).toBe('applied');
     // d1 consumed on first day; d2 on second day
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd2', '2026-09-17')).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd2', '2026-09-17')).toBe(true);
 
     vi.useRealTimers();
     __setAutoStockGateTestHooks(null);
@@ -435,7 +435,7 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
     expect(r.outcome).toBe('persist_failed');
     expect(r.reason).toBe('exact_reconciliation_blocked');
     expect(durable.medications[0]).toEqual(before);
-    expect(isDoseSkippedOnDate(durable.medications[0], 'd1', TODAY)).toBe(false);
+    expect(isDoseSkippedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(false);
     expect(durable.logs).toHaveLength(0);
   });
 
@@ -687,7 +687,7 @@ describe('Phase 4 — treatment-boundary-safe recurrence compensation', () => {
       },
     });
 
-    const current = durable.medications[0];
+    const current = requireDefined(durable.medications[0], 'durable.medications[0]');
     const { id, createdAt, ...medData } = current;
     const result = await runGatedMedicationUpdate({
       editId: id,

@@ -62,8 +62,10 @@ export function isValidTimeHhmm(value: unknown): value is string {
  */
 export function timeToMinutes(timeStr: string): number {
   const parts = timeStr.split(':').map((n) => parseInt(n, 10));
-  const [h, m] = parts;
-  if (parts.length < 2 || Number.isNaN(h) || Number.isNaN(m)) return -1;
+  if (parts.length < 2) return -1;
+  const h = parts[0];
+  const m = parts[1];
+  if (h === undefined || m === undefined || Number.isNaN(h) || Number.isNaN(m)) return -1;
   if (h < 0 || h > 23 || m < 0 || m > 59) return -1;
   return h * 60 + m;
 }

@@ -2,7 +2,9 @@ import type { ConsumptionLog, Medication } from '../types';
 import { runManualStockTransaction, commitWithManualEnvelope } from './manualStockTransaction';
 import type { GatedAutoDeductToggleResult, GatedGlobalAutoDeductToggleResult } from './manualStockMutationTypes';
 import {
+  invalidateMedicationDoseReminders,
   invalidateMedicationRecurrences,
+  restoreInvalidatedDoseReminders,
   restoreInvalidatedRecurrences,
 } from './manualStockMutationShared';
 

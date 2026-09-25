@@ -364,7 +364,7 @@ describe('useDoseReminderScheduler — doseSignature (no unnecessary reschedule)
     rerender({ medications: [medUpdated] });
 
     await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
-    const lastCall = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
+    const requireDefined(lastCall, 'lastCall') = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
     expect(requireDefined(lastCall[2], 'lastCall[2]')).toBe('09:00');
   });
 
@@ -381,7 +381,7 @@ describe('useDoseReminderScheduler — doseSignature (no unnecessary reschedule)
     rerender({ medications: [medUpdated] });
 
     await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
-    const lastCall = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
+    const requireDefined(lastCall, 'lastCall') = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
     expect(requireDefined(lastCall[1], 'lastCall[1]')).toBe('Panadol Extra');
   });
 

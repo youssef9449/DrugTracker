@@ -539,7 +539,7 @@ describe('gated paths call exact reconciliation before mutation', () => {
     ];
     mockExactFirst(durable, callOrder, 2);
     const { id: _id, createdAt: _c, ...medData } = {
-      ...durable.medications[0],
+      ...requireDefined(durable.medications[0], 'durable.medications[0]'),
       dailyDose: 3,
       doseSchedule: [{ id: 'd1', amount: 3, time: '08:00' }],
     };

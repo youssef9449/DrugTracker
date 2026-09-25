@@ -55,7 +55,7 @@ describe('ScheduleOccurrenceResult contract', () => {
   });
 });
 
-describe('ListScheduledOccurrencesResult contract (Issue #242)', () => {
+describe('ListScheduledOccurrencesResult contract', () => {
   it('success empty is ok with empty schedules', () => {
     const r: ListScheduledOccurrencesResult = { ok: true, schedules: [] };
     expect(r.ok).toBe(true);

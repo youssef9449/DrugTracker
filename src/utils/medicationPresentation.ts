@@ -17,8 +17,19 @@ export function formatArabicDate(
   includeWeekday: boolean = true
 ): string {
   try {
-    const [year, month, day] = dateStr.split('-').map(Number);
-    if ([year, month, day].some(Number.isNaN)) return dateStr;
+    const parts = dateStr.split('-').map(Number);
+    if (parts.length !== 3) return dateStr;
+    const year = parts[0];
+    const month = parts[1];
+    const day = parts[2];
+    if (
+      year === undefined ||
+      month === undefined ||
+      day === undefined ||
+      [year, month, day].some(Number.isNaN)
+    ) {
+      return dateStr;
+    }
 
     return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('ar-EG', {
       weekday: includeWeekday ? 'long' : undefined,
@@ -63,8 +74,19 @@ export function formatDepletionDate(
   if (daysLeft === 2) return 'بعد غد';
 
   try {
-    const [year, month, day] = dateStr.split('-').map(Number);
-    if ([year, month, day].some(Number.isNaN)) return dateStr;
+    const parts = dateStr.split('-').map(Number);
+    if (parts.length !== 3) return dateStr;
+    const year = parts[0];
+    const month = parts[1];
+    const day = parts[2];
+    if (
+      year === undefined ||
+      month === undefined ||
+      day === undefined ||
+      [year, month, day].some(Number.isNaN)
+    ) {
+      return dateStr;
+    }
 
     return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('ar-EG', {
       weekday: 'long',

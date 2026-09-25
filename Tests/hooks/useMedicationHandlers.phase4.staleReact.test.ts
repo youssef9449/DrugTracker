@@ -257,7 +257,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
         doseConsumptionHistory: {},
       }),
     ];
-    expect(isDoseConsumedOnDate(reactMeds[0], 'd1', TODAY)).toBe(false);
+    expect(isDoseConsumedOnDate(requireDefined(reactMeds[0], 'reactMeds[0]'), 'd1', TODAY)).toBe(false);
 
     const { result } = mountHandlers();
     let updated: Medication | null = null;
@@ -401,7 +401,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     await waitFor(() => {
       expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     });
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
     expect(setMedications).toHaveBeenCalled();
   });
 
@@ -446,8 +446,8 @@ describe('useMedicationHandlers — stale React must not block durable mutations
         doseConsumptionHistory: { d1: [TODAY] },
       }),
     ];
-    expect(isDoseConsumedOnDate(reactMeds[0], 'd1', TODAY)).toBe(true);
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(false);
+    expect(isDoseConsumedOnDate(requireDefined(reactMeds[0], 'reactMeds[0]'), 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(false);
 
     const { result } = mountHandlers();
     await act(async () => {
@@ -459,7 +459,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     await waitFor(() => {
       expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     });
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
   });
 
   it('Take is already_consumed when durable is consumed even if React is not', async () => {
@@ -567,7 +567,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     await waitFor(() => {
       expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
     });
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
   });
 
   it('Card Restore: React empty + durable multi-dose + omitted doseId → fresh durable medication opens modal', async () => {
@@ -691,7 +691,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     // The operation itself is already consumed, but the gate returned the
     // durable snapshot and the handler must still refresh React with it.
     expect(requireDefined(reactMeds[0], 'reactMeds[0]').currentPills).toBe(9);
-    expect(isDoseConsumedOnDate(reactMeds[0], 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(reactMeds[0], 'reactMeds[0]'), 'd1', TODAY)).toBe(true);
   });
   
   it('notification-style Take by medicationId works with empty React medications', async () => {
@@ -711,7 +711,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     await waitFor(() => {
       expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     });
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
   });
 
 });

@@ -10,7 +10,6 @@ import { ReminderBadge } from './ReminderBadge';
 import {
   StripsBadge,
   PackageSizeBadge,
-  AutoDeductPausedNote,
   MedicationCardHeader,
   MedicationCardStatusBadges,
   MedicationCardDoseActions,

@@ -63,7 +63,7 @@ export function getAutoDeductionSlotsForDate(
 type GuardedCancelResult = {
   ok: boolean;
   skipped?: boolean;
-  error?: string;
+  error?: string | undefined;
 };
 /**
  * Native exact-schedule writes must serialize with stock/config mutations.
@@ -134,7 +134,7 @@ async function cancelUndesiredExactOccurrence(
     const result = await cancelAutoDeduction(medId, doseId, calendarDate);
     return {
       ok: result.ok,
-      error: result.ok ? undefined : (result.error ?? 'cancel_failed'),
+      ...(result.ok ? {} : { error: result.error ?? 'cancel_failed' }),
     };
   });
 }

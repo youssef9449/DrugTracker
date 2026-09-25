@@ -16,6 +16,7 @@ export function runGatedAutoDeductToggle(opts: {
 }): Promise<GatedAutoDeductToggleResult> {
   return runManualStockTransaction({
       now: opts.now,
+      reconcileExactBeforeMutation: false,
       onFailure: (failure) => ({
         outcome: failure.kind === 'reconciliation' ? 'native_list_failed' as const : 'persist_failed' as const,
         medications: failure.state.medications,

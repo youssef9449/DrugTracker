@@ -79,6 +79,7 @@ interface MedicationCardProps {
   onRegisterBackHandler?: ((id: string, close: () => void, priority?: number) => () => void) | undefined;
   /** Global Auto kill switch; does not mutate medication.autoDeductEnabled. */
   globalAutoDeductEnabled?: boolean | undefined;
+}
 
 export const MedicationCard: FC<MedicationCardProps> = ({
   medication,

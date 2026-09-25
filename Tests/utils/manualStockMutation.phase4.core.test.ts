@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { ConsumptionLog } from '../../src/types';
@@ -79,7 +80,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
     });
     expect(r.outcome).toBe('applied');
     expect(r.doseAmount).toBe(1);
-    expect(durable.medications[0].currentPills).toBeLessThan(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBeLessThan(10);
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
   });
 
@@ -90,7 +91,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
       source: 'manual',
       todayStr: TODAY,
     });
-    const pillsAfterTake = durable.medications[0].currentPills;
+    const pillsAfterTake = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
 
     const recon = await runAutoDeductionReconciliation({
       alreadyInGate: true,
@@ -114,7 +115,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
 });
 
     expect(recon.details[0]?.outcome).toBe('already_applied');
-    expect(durable.medications[0].currentPills).toBe(pillsAfterTake);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterTake);
     expect(
       durable.logs.filter((l) => l.id === exactAutoLogId('med-1', 'd1', TODAY))
     ).toHaveLength(0);
@@ -143,7 +144,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
     });
 
     expect(recon.details[0]?.outcome).toBe('applied');
-    const pillsAfterAuto = durable.medications[0].currentPills;
+    const pillsAfterAuto = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
 
     const take = await runGatedManualConsume({
       medicationId: 'med-1',
@@ -152,7 +153,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
       todayStr: TODAY,
     });
     expect(take.outcome).toBe('already_consumed');
-    expect(durable.medications[0].currentPills).toBe(pillsAfterAuto);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterAuto);
   });
 
   it('serialized race: concurrent Take + reconcile yields one deduction', async () => {
@@ -193,7 +194,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
     expect(appliedTake + appliedRecon).toBe(1);
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
     // 10 - 1 = 9 (d1 amount); not 8.
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
   });
 
   it('multi-dose independence: Take d1 does not block Auto on d2', async () => {
@@ -203,7 +204,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
       source: 'manual',
       todayStr: TODAY,
     });
-    const afterD1 = durable.medications[0].currentPills;
+    const afterD1 = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
 
     const recon = await runAutoDeductionReconciliation({
       alreadyInGate: true,
@@ -227,7 +228,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
     });
 
     expect(recon.details[0]?.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBe(afterD1 - 1);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(afterD1 - 1);
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
     expect(isDoseConsumedOnDate(durable.medications[0], 'd2', TODAY)).toBe(true);
   });
@@ -239,7 +240,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
       source: 'manual',
       todayStr: TODAY,
     });
-    const afterTake = durable.medications[0].currentPills;
+    const afterTake = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
 
     const r1 = await runGatedManualRestore({
       medicationId: 'med-1',
@@ -248,10 +249,10 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
       makeLogId: () => 'restore-1',
     });
     expect(r1.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBe(afterTake + 1);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(afterTake + 1);
     expect(durable.logs.filter((l) => l.id === 'restore-1')).toHaveLength(1);
 
-    const pillsAfterFirst = durable.medications[0].currentPills;
+    const pillsAfterFirst = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
     const r2 = await runGatedManualRestore({
       medicationId: 'med-1',
       doseId: 'd1',
@@ -260,8 +261,8 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
     });
     // Behavioral contract: stock restored exactly once; second is already_restored.
     expect(r2.outcome).toBe('already_restored');
-    expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
-    expect(durable.medications[0].currentPills).toBe(afterTake + 1);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterFirst);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(afterTake + 1);
     expect(durable.logs.filter((l) => l.id === 'restore-1')).toHaveLength(1);
     expect(durable.logs.filter((l) => l.id === 'restore-2')).toHaveLength(0);
   });
@@ -297,7 +298,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
     });
 
     expect(recon.details[0]?.outcome).toBe('already_applied');
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
   });
 
   it('stale React snapshot cannot overwrite durable Take when gate serializes', async () => {
@@ -308,7 +309,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
       source: 'manual',
       todayStr: TODAY,
     });
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
 
     // A second concurrent-looking take on same occurrence is rejected.
     const again = await runGatedManualConsume({
@@ -318,7 +319,7 @@ describe('Phase 4 — Manual Take ↔ Exact Auto-Deduction', () => {
       todayStr: TODAY,
     });
     expect(again.outcome).toBe('already_consumed');
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
   });
 });
 
@@ -615,7 +616,7 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
       todayStr: TODAY,
     });
     expect(take.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
 
     // Stale React snapshot would show skip=true / consumed=false (outdated UI).
@@ -639,7 +640,7 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
     expect(restore.outcome).toBe('applied');
     expect(restore.restoredAmount).toBe(1);
     // Stock returned from durable Take amount.
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     expect(durable.logs.some((l) => l.id === 'restore-from-stale-ui')).toBe(true);
   });
 
@@ -678,7 +679,7 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
     });
     expect(restore.outcome).toBe('applied');
     expect(restore.restoredAmount).toBe(1);
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
   });
 
   it('second Restore uses fresh durable state inside gate (not a captured React snapshot)', async () => {
@@ -695,7 +696,7 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
       makeLogId: () => 'restore-1',
     });
     expect(first.outcome).toBe('applied');
-    const pillsAfterFirst = durable.medications[0].currentPills;
+    const pillsAfterFirst = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
 
     // Second call must see durable skip / reversed deduction → already_restored
     const second = await runGatedManualRestore({
@@ -705,7 +706,7 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
       makeLogId: () => 'restore-2',
     });
     expect(second.outcome).toBe('already_restored');
-    expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterFirst);
     expect(durable.logs.filter((l) => l.id === 'restore-2')).toHaveLength(0);
   });
 
@@ -751,7 +752,7 @@ describe('Phase 4 — stale React snapshot must not block durable Restore / Undo
         description: 'old',
       },
     ];
-    expect(staleReactLogs[0].id).toBe('refill-old');
+    expect(requireDefined(staleReactLogs[0], 'staleReactLogs[0]').id).toBe('refill-old');
 
     const undo = await runGatedUndoRefill({
       medicationId: 'med-1',
@@ -840,7 +841,7 @@ describe('Phase 4 — Exact Auto event.amount is authoritative for Manual Take',
     });
     expect(r.outcome).toBe('applied');
     expect(r.doseAmount).toBe(2);
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
     expect(r.log?.amount).toBe(-2);
   });
 
@@ -867,7 +868,7 @@ describe('Phase 4 — Exact Auto event.amount is authoritative for Manual Take',
     });
     expect(r.outcome).toBe('applied');
     expect(r.doseAmount).toBe(1);
-    expect(durable.medications[0].currentPills).toBe(0);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(0);
     expect(r.log?.amount).toBe(-1);
   });
 
@@ -894,8 +895,8 @@ describe('Phase 4 — Exact Auto event.amount is authoritative for Manual Take',
     });
     expect(take.outcome).toBe('applied');
     expect(take.doseAmount).toBe(2);
-    const pills = durable.medications[0].currentPills;
-    expect(durable.medications[0].currentPills).toBe(pills);
+    const pills = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pills);
   });
 
   it('absence of FIRED event → Manual Take uses current schedule amount', async () => {
@@ -917,7 +918,7 @@ describe('Phase 4 — Exact Auto event.amount is authoritative for Manual Take',
     });
     expect(r.outcome).toBe('applied');
     expect(r.doseAmount).toBe(1);
-    expect(durable.medications[0].currentPills).toBe(9);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
   });
 });
 

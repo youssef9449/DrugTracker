@@ -44,7 +44,7 @@ export interface Medication {
   category?: string | undefined;
   notes?: string | undefined;
   createdAt: string;
-  autoDeductEnabled?: boolean; // Default true
+  autoDeductEnabled?: boolean | undefined; // Default true
   /**
    * هل الدواء لعلاج مزمن (استخدام دائم ومستمر).
    * إذا كان true، يعتمد شريط التقدم على مقياس شهري (30 يوماً).
@@ -57,12 +57,12 @@ export interface Medication {
   durationDays?: number | undefined;
   /** Local YYYY-MM-DD date on which a temporary treatment course starts. */
   treatmentStartDate?: string | undefined;
-  packageSize?: number; // Size of standard package when bought (e.g. 30)
-  stripsPerBox?: number; // عدد الأشرطة في العلبة (مثال: 3 أشرطة)
-  pillsPerStrip?: number; // عدد الأقراص في الشريط الواحد (مثال: 10 أقراص)
-  targetOrderQuantity?: number; // Custom target order quantity specified for pharmacy order
-  reminderEnabled?: boolean; // هل تم تفعيل تذكير الجرعات لهذا الدواء
-  reminderTime?: string; // وقت التذكير القديم/المساعد (صيغة 24 ساعة)
+  packageSize?: number | undefined; // Size of standard package when bought (e.g. 30)
+  stripsPerBox?: number | undefined; // عدد الأشرطة في العلبة (مثال: 3 أشرطة)
+  pillsPerStrip?: number | undefined; // عدد الأقراص في الشريط الواحد (مثال: 10 أقراص)
+  targetOrderQuantity?: number | undefined; // Custom target order quantity specified for pharmacy order
+  reminderEnabled?: boolean | undefined; // هل تم تفعيل تذكير الجرعات لهذا الدواء
+  reminderTime?: string | undefined; // وقت التذكير القديم/المساعد (صيغة 24 ساعة)
   /**
    * Per-medication critical-stock notification preference.
    * undefined keeps the existing behavior when the global master switch is enabled.

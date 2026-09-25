@@ -18,9 +18,10 @@ interface CheckboxProps {
  * background when unchecked inside the Android WebView (the `accent-color`
  * CSS property only controls the checked fill, not the track background).
  * This component strips the native appearance (`appearance-none`) and
- * paints an explicit white background in BOTH states, overlaying a teal
- * checkmark (✔) when checked. The background therefore never changes
- * color — only the checkmark appears/disappears.
+ * paints an explicit white background in BOTH states. The checkmark itself
+ * is rendered as an explicit teal SVG from the React `checked` prop, with
+ * inline visibility/color so Android WebView cannot fall back to native
+ * checkbox rendering or lose the checkmark through utility-class state.
  *
  * Semantics are preserved: the underlying element is still a real
  * `<input type="checkbox">`, so `role="checkbox"`, `.checked`, and
@@ -40,18 +41,19 @@ export const Checkbox: FC<CheckboxProps> = ({
       onChange={onChange}
       aria-label={ariaLabel}
       disabled={disabled}
-      className="peer appearance-none w-[18px] h-[18px] rounded-[4px] border-2 border-slate-400 bg-white cursor-pointer peer-checked:bg-teal-700 peer-checked:border-teal-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40 transition-colors disabled:opacity-38 disabled:cursor-not-allowed"
+      className={`appearance-none w-[18px] h-[18px] rounded-[4px] border-2 bg-white cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40 transition-colors disabled:opacity-38 disabled:cursor-not-allowed ${checked ? 'border-teal-700' : 'border-slate-400'}`}
     />
-    {/* White checkmark — shown only when checked (M3 standard) */}
+    {/* Teal checkmark — shown only when React state is checked */}
     <svg
-      className="pointer-events-none absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 transition-opacity"
+      className="pointer-events-none absolute w-3 h-3"
+      style={{ opacity: checked ? 1 : 0, color: '#0f766e' }}
       viewBox="0 0 12 12"
       fill="none"
       aria-hidden="true"
     >
       <path
         d="M2.5 6L5 8.5L9.5 3.5"
-        stroke="currentColor"
+        stroke="#0f766e"
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"

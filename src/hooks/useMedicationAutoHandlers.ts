@@ -1,6 +1,9 @@
 import { persist } from '../utils/storage';
 import { STORAGE_ERRORS } from '../constants/uiStrings';
-import { STORAGE_AUTO_DEDUCT_PROMPTED_KEY } from '../constants/storageKeys';
+import {
+  STORAGE_AUTO_DEDUCT_PROMPTED_KEY,
+  STORAGE_GLOBAL_AUTO_DEDUCT_KEY,
+} from '../constants/storageKeys';
 import { playSuccessChime } from '../utils/sound';
 import { runAsyncCommand } from '../utils/async/runAsyncCommand';
 import {
@@ -109,6 +112,36 @@ export function useMedicationAutoHandlers(deps: MedicationHandlersDeps, state: M
     runAsyncCommand(
       'auto-deduct.first-run-confirm',
       async () => {
+      // A clean first launch has no medications and no Auto stock mutation to
+      // perform. Persisting this preference must not enter the stock mutation
+      // gate or native foreground-stock bridge: those are inventory paths and
+      // can be unavailable before the Android runtime is fully usable.
+      if (medicationsRef.current.length === 0) {
+        const preferenceError = persist(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, String(enable), { json: false });
+        if (preferenceError) {
+          setIsAutoDeductPromptOpen(true);
+          showToast(preferenceError);
+          return;
+        }
+        const markerError = persist(STORAGE_AUTO_DEDUCT_PROMPTED_KEY, 'true', { json: false });
+        if (markerError) {
+          setIsAutoDeductPromptOpen(true);
+          showToast(markerError);
+          return;
+        }
+        globalAutoDeductEnabledRef.current = enable;
+        setGlobalAutoDeductEnabled(enable);
+        setIsAutoDeductPromptOpen(false);
+        setIsFirstRun(false);
+        if (soundEnabled) playSuccessChime();
+        showToast(
+          enable
+            ? 'تم تفعيل الخصم التلقائي لمخزون الأدوية ⚡'
+            : 'تم إيقاف الخصم التلقائي ⏸️ (المخزون ثابت حتى تسجل الجرعة يدوياً)'
+        );
+        return;
+      }
+
       const result = await runGatedGlobalAutoDeductToggle({ enable });
       if (result.outcome !== 'applied') {
         setIsAutoDeductPromptOpen(true);

@@ -271,14 +271,36 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     expect(stockToggle).toHaveAttribute('aria-checked', 'false');
     expect(autoToggle).toHaveAttribute('aria-checked', 'false');
 
-    expect(stockToggle.parentElement).not.toHaveClass('bg-slate-50');
-    expect(autoToggle.parentElement).not.toHaveClass('bg-slate-50');
+    expect(reminderToggle.closest('.rounded-2xl')).toHaveClass(
+      'bg-slate-50',
+      'border',
+      'border-slate-200'
+    );
+    expect(stockToggle.closest('.rounded-2xl')).toHaveClass(
+      'bg-slate-50',
+      'border',
+      'border-slate-200'
+    );
+    expect(autoToggle.closest('.rounded-2xl')).toHaveClass(
+      'bg-slate-50',
+      'border',
+      'border-slate-200'
+    );
 
+    const colorLabel = screen.getByText('لون البطاقة');
     expect(
       reminderToggle.compareDocumentPosition(stockToggle) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     expect(
       stockToggle.compareDocumentPosition(autoToggle) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      autoToggle.compareDocumentPosition(colorLabel) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    const saveButton = screen.getByText('إضافة الدواء');
+    expect(
+      colorLabel.compareDocumentPosition(saveButton) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
 
     const thresholdInput = screen.getByPlaceholderText('مثال: 5') as HTMLInputElement;

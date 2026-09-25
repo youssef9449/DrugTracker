@@ -82,10 +82,16 @@ export function runWithBoundedRetry(options: BoundedRetryOptions): BoundedRetryH
           return;
         }
         options.onRetryScheduled?.(n, error);
+        const delayIndex = Math.min(n, backoffMs.length - 1);
+        const delayMs = backoffMs[delayIndex];
+        if (delayMs === undefined) {
+          options.onExhausted?.(error);
+          return;
+        }
         timerHandle = scheduleTimer(() => {
           timerHandle = null;
           attempt(nextAttempt);
-        }, backoffMs[Math.min(n, backoffMs.length - 1)]);
+        }, delayMs);
       });
   };
 

@@ -240,9 +240,6 @@ export const MedicationCardAlertsView: FC<MedicationCardViewProps> = (props) => 
           </button>
         )}
       </div>
-      {/* Auto-deduct paused note — shown on every view when the
-          auto-deduction is disabled, with the dose-taken status. */}
-      {!isAutoActive && <AutoDeductPausedNote />}
     </div>
   );
 };
@@ -387,8 +384,6 @@ export const MedicationCardSufficientView: FC<MedicationCardViewProps> = (props)
         containerClass="bg-emerald-50/70 border-emerald-200/80 mt-2"
         textClass="text-emerald-950"
       />
-      {/* Auto-deduct paused note */}
-      {!isAutoActive && <AutoDeductPausedNote />}
     </div>
   );
 };

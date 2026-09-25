@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { describe, it, expect } from 'vitest';
 import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 import { makeScheduledMedication as med } from '../fixtures/testFixtures';

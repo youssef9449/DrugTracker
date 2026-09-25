@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 /**
  * Phase 2 unit tests for auto-deduction identity helpers and scheduling slots.
  * Does not require Android runtime. PendingIntent URI identity is validated

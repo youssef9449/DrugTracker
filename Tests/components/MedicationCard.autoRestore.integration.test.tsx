@@ -208,6 +208,26 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
 });
 
 describe('MedicationCard Manual Take is independent of Auto state', () => {
+  it('Global Auto OFF also leaves Manual Take available without changing the per-med preference', async () => {
+    localStorage.setItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'false');
+    vi.setSystemTime(new Date(`${TEST_DATE}T10:00:00`));
+
+    const med = makeSingleAuto({
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 's1', amount: 2, time: '08:00' }],
+    });
+    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([med]));
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Auto Restore Single')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId(`take-dose-${MED_ID}`)).toBeInTheDocument();
+    expect(readPersistedMedications()[0]?.autoDeductEnabled).toBe(true);
+  });
+
   it('when Auto is ON, Manual Take is still shown before the dose is consumed', async () => {
     vi.setSystemTime(new Date(`${TEST_DATE}T07:00:00`));
     localStorage.setItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true');

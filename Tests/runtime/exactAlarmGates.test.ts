@@ -29,6 +29,27 @@ describe('Auto-Deduction × Exact Alarm gate (#500)', () => {
     });
   });
 
+  it('Global OFF cancels armed Auto regardless of exact-alarm capability state', () => {
+    for (const exactAlarmPermission of [
+      null,
+      'unknown',
+      'denied',
+      'granted',
+      'unsupported',
+    ] as const) {
+      expect(
+        resolveAutoDeductionSchedulingDecision({
+          ...ready,
+          exactAlarmPermission,
+          globalAutoDeductEnabled: false,
+        })
+      ).toEqual({
+        action: 'cancel_armed_and_wait',
+        reason: 'global_auto_deduct_disabled',
+      });
+    }
+  });
+
   it('unknown capability waits without destructive action', () => {
     expect(
       resolveAutoDeductionSchedulingDecision({ ...ready, exactAlarmPermission: null })

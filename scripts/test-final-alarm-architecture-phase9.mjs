@@ -498,7 +498,7 @@ for (const legacy of [
 ]) {
   assert(
     prepare.includes(legacy)
-      && prepare.includes('removeReceiverByName'),
+      && prepare.includes('removeReceiver('),
     'prepare-android must retain explicit legacy receiver removal for: ' + legacy
   );
 }

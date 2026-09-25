@@ -396,7 +396,10 @@ export const MedicationCardDoseActions: FC<MedicationCardDoseActionsProps> = ({
     );
   }
 
-  if (!isAutoActive && doseToggle.canTake && onConsumeDose) {
+  // Manual Take is always available for an unconsumed dose, even while
+  // Auto Deduction is enabled. If Auto already produced durable evidence,
+  // the Restore action above remains the reversible action instead.
+  if (doseToggle.canTake && onConsumeDose) {
     return (
       <button
         type="button"

@@ -23,7 +23,12 @@ export function relativeDoseDayLabel(
     const dayDiff = calendarDayDifference(todayStr, eventDateStr);
     if (dayDiff === 1) return 'غدًا';
     if (dayDiff != null) {
-      const [ey, em, ed] = eventDateStr.split('-').map(Number);
+      const parts = eventDateStr.split('-').map(Number);
+      if (parts.length !== 3) return eventDateStr;
+      const ey = parts[0];
+      const em = parts[1];
+      const ed = parts[2];
+      if (ey === undefined || em === undefined || ed === undefined) return eventDateStr;
       const eventUtc = new Date(Date.UTC(ey, em - 1, ed));
       const weekday = eventUtc.toLocaleDateString('ar-EG', {
         weekday: 'long',

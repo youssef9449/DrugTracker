@@ -245,12 +245,12 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     render(<AddMedicationModal {...baseProps({ onSave })} />);
 
     const stockToggle = screen.getByRole('switch', {
-      name: 'إشعارات المخزون متوقفة — انقر للتفعيل',
+      name: 'إشعارات المخزون مفعّلة — انقر للإيقاف',
     });
-    expect(stockToggle).toHaveAttribute('aria-checked', 'false');
+    expect(stockToggle).toHaveAttribute('aria-checked', 'true');
 
     fireEvent.click(stockToggle);
-    expect(stockToggle).toHaveAttribute('aria-checked', 'true');
+    expect(stockToggle).toHaveAttribute('aria-checked', 'false');
 
     const thresholdInput = screen.getByPlaceholderText('مثال: 5') as HTMLInputElement;
     fireEvent.change(thresholdInput, { target: { value: '9' } });
@@ -259,7 +259,7 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
 
     expect(onSave).toHaveBeenCalledTimes(1);
     const saved = requireDefined(onSave.mock.calls[0], 'onSave.mock.calls[0]')[0];
-    expect(saved.criticalStockAlertsEnabled).toBe(true);
+    expect(saved.criticalStockAlertsEnabled).toBe(false);
     expect(saved.warningThresholdDays).toBe(9);
   });
 

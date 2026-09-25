@@ -85,7 +85,7 @@ describe('AppSettingsModal — Global Auto kill switch', () => {
 
     fireEvent.click(autoSwitch);
     expect(autoSwitch).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByText(/إعداد كل دواء/)).toBeInTheDocument();
+    expect(screen.getByText(/إعداد الخصم التلقائي لكل دواء/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'حفظ الإعدادات' }));
     await waitFor(() => {

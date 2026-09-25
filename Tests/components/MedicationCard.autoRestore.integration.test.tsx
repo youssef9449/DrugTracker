@@ -207,8 +207,8 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
   });
 });
 
-describe('MedicationCard Auto ON → no Manual Take', () => {
-  it('when isAutoActive, Take button is never shown (even before slot time)', async () => {
+describe('MedicationCard Manual Take is independent of Auto state', () => {
+  it('when Auto is ON, Manual Take is still shown before the dose is consumed', async () => {
     vi.setSystemTime(new Date(`${TEST_DATE}T07:00:00`));
     localStorage.setItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true');
     localStorage.setItem(
@@ -222,7 +222,7 @@ describe('MedicationCard Auto ON → no Manual Take', () => {
       expect(screen.getByText('Auto Restore Single')).toBeInTheDocument();
     });
 
-    expect(screen.queryAllByTitle(/تناول جرعة/)).toHaveLength(0);
+    expect(screen.getByTestId(`take-dose-${MED_ID}`)).toBeInTheDocument();
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
     expect(screen.queryByTestId(`restore-dose-${MED_ID}`)).toBeNull();
   });

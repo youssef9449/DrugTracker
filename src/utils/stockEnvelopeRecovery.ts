@@ -328,7 +328,7 @@ export async function recoverAllPendingStockEnvelopes(
   applyNativeStockDeltas: (
     mutationSeq: number,
     deltas: Array<{ medicationId: string; delta: number }>,
-    occurrenceResolutions: Array<{
+    occurrenceResolutions?: Array<{
       medicationId: string;
       doseId: string;
       calendarDate: string;

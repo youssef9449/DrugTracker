@@ -22,8 +22,8 @@ export const AddMedicationStockSettings: FC<Props> = ({
 }) => (
   <section className="space-y-3 pt-2 border-t border-slate-100">
     <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl">
-      <div className="grid grid-cols-2 gap-3 items-center">
-        <div className="flex items-center justify-between gap-3 min-w-0">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
           <span className="text-xs font-bold text-slate-700 leading-snug">
             تفعيل إشعارات المخزون
           </span>

@@ -287,6 +287,32 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
       'border-slate-200'
     );
 
+    expect(reminderToggle.parentElement).toHaveClass(
+      'flex',
+      'items-center',
+      'justify-between',
+      'gap-3'
+    );
+    expect(stockToggle.parentElement).toHaveClass(
+      'flex',
+      'items-center',
+      'justify-between',
+      'gap-3'
+    );
+    expect(autoToggle.parentElement).toHaveClass(
+      'flex',
+      'items-center',
+      'justify-between',
+      'gap-3'
+    );
+    expect(stockToggle.closest('.rounded-2xl')).toContainElement(
+      screen.getByPlaceholderText('مثال: 5')
+    );
+    expect(
+      stockToggle.compareDocumentPosition(screen.getByPlaceholderText('مثال: 5'))
+      & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
     const colorLabel = screen.getByText('لون البطاقة');
     expect(
       reminderToggle.compareDocumentPosition(stockToggle) & Node.DOCUMENT_POSITION_FOLLOWING

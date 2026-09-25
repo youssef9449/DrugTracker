@@ -306,7 +306,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
               // evidence for this doseId. No pure-projection restore.
               const isSelectable = isRestore
                 ? isUiConsumedRestoreEligible(consumed, skipped, historicalAmount)
-                : !completed;
+                : !consumed;
               const isDone = !isSelectable;
               let ariaLabel: string;
               let statusLabel: string | null = null;

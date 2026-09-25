@@ -67,7 +67,7 @@ describe('DoseAlarmModal', () => {
     // Click the first dismiss-like button (there may be multiple).
     const buttons = screen.getAllByRole('button');
     // The modal has take/snooze/dismiss buttons — click the last one (dismiss).
-    fireEvent.click(buttons[buttons.length - 1]);
+    fireEvent.click(requireDefined(buttons[buttons.length - 1], 'buttons[last]'));
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 

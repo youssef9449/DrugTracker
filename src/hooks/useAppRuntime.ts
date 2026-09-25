@@ -77,7 +77,7 @@ export function useAppRuntime(deps: AppRuntimeDeps) {
   // consumed here so the application can surface it through the UI status
   // path instead of silently showing a healthy-looking zero-occurrence
   // medication.
-  const autoDeductionStatus = useAutoDeductionScheduler({
+  useAutoDeductionScheduler({
     medications, globalAutoDeductEnabled, hydrated, isFirstRun, exactAlarmPermission,
     resumeTick: doseAlarmResumeTick, midnightTick: autoDeductMidnightTick,
   });
@@ -119,9 +119,5 @@ export function useAppRuntime(deps: AppRuntimeDeps) {
     ...medicationHandlers,
     ...pharmacyHandlers,
     ...preferenceHandlers,
-    // #502: Auto-enabled medication IDs with no usable explicit doseSchedule.
-    // Canonical Auto definition is the sole source of truth (no hidden
-    // fallbacks from dailyDose/reminderTime, no synthesized dose IDs).
-    medicationIdsMissingDoseSchedule: autoDeductionStatus.medicationIdsMissingDoseSchedule,
   };
 }

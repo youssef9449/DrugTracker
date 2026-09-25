@@ -15,14 +15,12 @@ interface AddMedicationModalProps {
   onClose: () => void;
   onSave: (medData: Omit<Medication, 'id' | 'createdAt'>, editId?: string) => Promise<boolean>;
   initialData?: Medication | null | undefined;
-  defaultAutoDeductEnabled?: boolean | undefined;
 }
 export const AddMedicationModal: FC<AddMedicationModalProps> = ({
   isOpen,
   onClose,
   onSave,
   initialData,
-  defaultAutoDeductEnabled = true,
 }) => {
   const {
     name, setName, currentPills, currentPillsStr, setCurrentPills, setCurrentPillsStr,
@@ -37,7 +35,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     isChronic, setIsChronic, durationDaysStr, setDurationDaysStr,
     setTreatmentStartDateStr, handleUnitChange, handleStripsChange,
     handlePillsPerStripChange, applyStockHelper, handleSubmit,
-  } = useAddMedicationForm({ isOpen, onSave, initialData, defaultAutoDeductEnabled });
+  } = useAddMedicationForm({ isOpen, onSave, initialData });
 
   const onSubmit = async (event: FormEvent) => {
     if (await handleSubmit(event)) onClose();
@@ -77,14 +75,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
               <span>{error}</span>
             </div>
           )}
-          <AddMedicationStockSettings
-            criticalStockAlertsEnabled={criticalStockAlertsEnabled}
-            setCriticalStockAlertsEnabled={setCriticalStockAlertsEnabled}
-            warningThresholdDays={warningThresholdDays}
-            setWarningThresholdDays={setWarningThresholdDays}
-            autoDeductEnabled={autoDeductEnabled}
-            setAutoDeductEnabled={setAutoDeductEnabled}
-          />
           <AddMedicationBasicsSection
             name={name}
             setName={setName}
@@ -147,6 +137,14 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
             setReminderEnabled={setReminderEnabled}
             setError={setError}
             setTreatmentStartDateStr={setTreatmentStartDateStr}
+          />
+          <AddMedicationStockSettings
+            criticalStockAlertsEnabled={criticalStockAlertsEnabled}
+            setCriticalStockAlertsEnabled={setCriticalStockAlertsEnabled}
+            warningThresholdDays={warningThresholdDays}
+            setWarningThresholdDays={setWarningThresholdDays}
+            autoDeductEnabled={autoDeductEnabled}
+            setAutoDeductEnabled={setAutoDeductEnabled}
           />
           <button
             type="submit"

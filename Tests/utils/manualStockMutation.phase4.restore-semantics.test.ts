@@ -142,7 +142,7 @@ describe('Phase 4 — Restore semantics through the durable gate', () => {
     expect(manualEnvelope?.status).toBe('manual_js_ready');
     expect(manualEnvelope?.baseGeneration).toBe(0);
     expect((manualEnvelope as { toAcknowledge?: unknown }).toAcknowledge).toBeUndefined();
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
     expect(durable.logs.some((l) => l.type === 'dose_taken')).toBe(false);
     expect(generation).toBe(0);
     expect(marked).toEqual([]);

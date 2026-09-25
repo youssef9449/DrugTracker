@@ -248,7 +248,7 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
 
     expect(manualEnvelope).toBeNull();
     expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
     expect(durable.logs.length).toBe(newerLogs.length);
     expect(marked).toEqual([]);
   });

@@ -5,6 +5,7 @@
  * No npm/npx invocation is required by this script itself.
  */
 
+import { JSDOM } from 'jsdom';
 import { prepareAndroidManifest } from './prepare-android.mjs';
 
 const ANDROID_NS = 'http://schemas.android.com/apk/res/android';
@@ -25,12 +26,13 @@ function androidAttribute(element, localName) {
 }
 
 function parse(xml) {
-  const parser = new DOMParser();
-  const document = parser.parseFromString(xml, 'application/xml');
+  const dom = new JSDOM(xml, { contentType: 'application/xml' });
+  const document = dom.window.document;
   assert(
     document.documentElement?.localName === 'manifest',
     'prepared document must have a manifest root'
   );
+  dom.window.close();
   return document;
 }
 

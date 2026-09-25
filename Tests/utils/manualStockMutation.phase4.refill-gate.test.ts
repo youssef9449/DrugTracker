@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { __setStockMutationOrderingTestHooks, __resetStockMutationOrderingForTests, __setManualEnvelopeTestHooks, __setExactAutoEnvelopeStorageTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
@@ -128,14 +129,14 @@ describe('Phase 4 — Refill/UndoRefill through the durable gate', () => {
     const r = await runGatedRefill({ medicationId: 'med-1', addedPills: 10, todayStr: TODAY });
     expect(r.outcome).toBe('applied');
     expect(r.addedPills).toBe(10);
-    expect(durable.medications[0].currentPills).toBe(15);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(15);
     expect(durable.logs.some((l) => l.type === 'refill' && l.amount === 10)).toBe(true);
   });
   it('runGatedRefill: addedPills <= 0 is rejected (no mutation)', async () => {
     durable = { medications: [med({ currentPills: 5 })], logs: [] };
     const r = await runGatedRefill({ medicationId: 'med-1', addedPills: 0, todayStr: TODAY });
     expect(r.outcome).toBe('rejected');
-    expect(durable.medications[0].currentPills).toBe(5);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(5);
     expect(durable.logs).toHaveLength(0);
   });
   it('runGatedUndoRefill reverses the most recent un-reversed refill through the gate', async () => {
@@ -145,7 +146,7 @@ describe('Phase 4 — Refill/UndoRefill through the durable gate', () => {
     };
     const r = await runGatedUndoRefill({ medicationId: 'med-1', todayStr: TODAY, makeLogId: () => 'refill-undo-1' });
     expect(r.outcome).toBe('applied');
-    expect(durable.medications[0].currentPills).toBeLessThan(15);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBeLessThan(15);
     // The refill log is marked reversedAt.
     expect(durable.logs.find((l) => l.id === 'refill-1')?.reversedAt).toBeTruthy();
     // The refill_undo log links to the refill.
@@ -160,7 +161,7 @@ describe('Phase 4 — Refill/UndoRefill through the durable gate', () => {
     };
     const r = await runGatedUndoRefill({ medicationId: 'med-1', todayStr: TODAY });
     expect(r.outcome).toBe('rejected');
-    expect(durable.medications[0].currentPills).toBe(5);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(5);
   });
   it('refill serializes with Manual Take (no stale snapshot race)', async () => {
     // Both go through the same gate chain — the refill sees the Take's
@@ -174,7 +175,7 @@ describe('Phase 4 — Refill/UndoRefill through the durable gate', () => {
     expect(refill.outcome).toBe('applied');
     // Take deducted 1 (d1 amount); refill added 5. Order is serialized by
     // the gate chain so the final stock is 10 - 1 + 5 = 14.
-    expect(durable.medications[0].currentPills).toBe(14);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(14);
     expect(durable.logs.some((l) => l.type === 'dose_taken' && l.doseId === 'd1')).toBe(true);
     expect(durable.logs.some((l) => l.type === 'refill' && l.amount === 5)).toBe(true);
   });
@@ -197,7 +198,7 @@ describe('Phase 4 — Refill/UndoRefill through the durable gate', () => {
     // The refill_undo log links to the original refill.
     expect(r.log?.relatedLogId).toBe('refill-10');
     // Stock dropped by 5 (settleBase=5, -5 → 0).
-    expect(durable.medications[0].currentPills).toBe(0);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(0);
     // The original refill is marked reversed.
     expect(durable.logs.find((l) => l.id === 'refill-10')?.reversedAt).toBeTruthy();
   });
@@ -214,7 +215,7 @@ describe('Phase 4 — Refill/UndoRefill through the durable gate', () => {
     expect(r.addedPills).toBe(-10);
     expect(r.log?.amount).toBe(-10);
     // Stock dropped by 10 (settleBase=20, -10 → 10).
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     expect(durable.logs.find((l) => l.id === 'refill-full')?.reversedAt).toBeTruthy();
   });
   it('runGatedUndoRefill with zero reversible quantity records actual 0, not -refill.amount', async () => {
@@ -232,7 +233,7 @@ describe('Phase 4 — Refill/UndoRefill through the durable gate', () => {
     expect(r.log?.amount).toBe(0);
     expect(r.log?.type).toBe('refill_undo');
     // Stock unchanged (0 - 0 = 0).
-    expect(durable.medications[0].currentPills).toBe(0);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(0);
     // The refill is still marked reversed (the undo consumed the refill).
     expect(durable.logs.find((l) => l.id === 'refill-zero')?.reversedAt).toBeTruthy();
   });
@@ -246,13 +247,13 @@ describe('Phase 4 — Refill/UndoRefill through the durable gate', () => {
     const r1 = await runGatedUndoRefill({ medicationId: 'med-1', todayStr: TODAY, makeLogId: () => 'undo-1' });
     expect(r1.outcome).toBe('applied');
     expect(r1.addedPills).toBe(-10);
-    const pillsAfterFirst = durable.medications[0].currentPills;
+    const pillsAfterFirst = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
 
     // Second undo: the refill is now reversed → rejected.
     const r2 = await runGatedUndoRefill({ medicationId: 'med-1', todayStr: TODAY, makeLogId: () => 'undo-2' });
     expect(r2.outcome).toBe('rejected');
     // No additional stock change.
-    expect(durable.medications[0].currentPills).toBe(pillsAfterFirst);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsAfterFirst);
     // No second undo log.
     expect(durable.logs.filter((l) => l.id === 'undo-2')).toHaveLength(0);
   });

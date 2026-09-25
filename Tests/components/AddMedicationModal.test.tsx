@@ -244,9 +244,11 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     render(<AddMedicationModal {...baseProps()} />);
     fireEvent.click(screen.getByText('مدة محددة'));
 
+    const durationInput = screen.getByPlaceholderText('مثال: 5، 7، 10، 14 يوماً...') as HTMLInputElement;
+    fireEvent.change(durationInput, { target: { value: '7' } });
+
     expect(screen.queryByText('سيعتمد شريط التقدم')).not.toBeInTheDocument();
 
-    const durationInput = screen.getByPlaceholderText('مثال: 5، 7، 10، 14 يوماً...') as HTMLInputElement;
     expect(durationInput).toHaveAttribute('inputmode', 'numeric');
     expect(durationInput).toHaveAttribute('pattern', '[0-9]*');
     expect(durationInput.type).toBe('text');

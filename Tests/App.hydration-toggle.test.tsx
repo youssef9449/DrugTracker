@@ -1,4 +1,4 @@
-import { __setStockMutationOrderingTestHooks, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks, __setExactAutoEnvelopeTestHooks } from './utils/autoStockTestHooks';
+import { __setStockMutationOrderingTestHooks, __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks, __setExactAutoEnvelopeTestHooks, resetAutoStockTestHooks } from './utils/autoStockTestHooks';
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
@@ -191,6 +191,9 @@ describe('handleToggleAutoDeduct — pure updater, no duplicate side effects', (
 
   afterEach(() => {
     cleanup();
+    // Never leak storage-adapter hooks into sibling tests (a failing test
+    // must not leave the global localStorage adapter installed).
+    resetAutoStockTestHooks();
     vi.restoreAllMocks();
   });
 
@@ -302,19 +305,25 @@ function seedMed(overrides: Record<string, unknown> = {}): void {
     const { __setExactAutoEnvelopeTestHooks } = await import('./utils/autoStockTestHooks');
     const { __setStockMutationOrderingTestHooks } = await import('./utils/autoStockTestHooks');
 
+    // Capture the REAL storage BEFORE installing the gate hooks. The hook
+    // adapter replaces globalThis.localStorage, so reading the meds/logs keys
+    // through the global inside gate.load()/commit() would re-enter the
+    // adapter and recurse forever (Maximum call stack size exceeded).
+    const realStorage = window.localStorage;
+
     // Install gate hooks: load from real localStorage, commit to real
     // localStorage (so the app reads the updated state), but also count
     // commits where autoDeductEnabled changed for med-toggle.
     __setAutoStockGateTestHooks({
       load: () => ({
-        medications: JSON.parse(localStorage.getItem('android_med_tracker_items_v2') ?? '[]'),
-        logs: JSON.parse(localStorage.getItem('android_med_tracker_logs_v2') ?? '[]'),
+        medications: JSON.parse(realStorage.getItem('android_med_tracker_items_v2') ?? '[]'),
+        logs: JSON.parse(realStorage.getItem('android_med_tracker_logs_v2') ?? '[]'),
         globalAutoDeductEnabled: true,
       }),
       commit: (state) => {
         // Write to real localStorage (production behavior).
-        localStorage.setItem('android_med_tracker_items_v2', JSON.stringify(state.medications));
-        localStorage.setItem('android_med_tracker_logs_v2', JSON.stringify(state.logs));
+        realStorage.setItem('android_med_tracker_items_v2', JSON.stringify(state.medications));
+        realStorage.setItem('android_med_tracker_logs_v2', JSON.stringify(state.logs));
         // Count commits where med-toggle's autoDeductEnabled changed.
         const committedMed = state.medications.find((m) => m.id === 'med-toggle');
         if (committedMed && committedMed.autoDeductEnabled !== preToggleMed?.autoDeductEnabled) {

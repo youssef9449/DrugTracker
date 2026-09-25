@@ -74,6 +74,9 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     createdAt: '2024-01-01T00:00:00.000Z',
     reminderEnabled: true,
     reminderTime,
+    // Chronic meds are always treatment-active; temporary meds would need
+    // explicit treatmentStartDate/durationDays to schedule at all.
+    isChronic: true,
     // Explicit single-slot schedule so reminder slots are defined by doseSchedule.
     doseSchedule: [{ id: 'd1', amount: dailyDose, time: reminderTime }],
     dosesPerDay: 1,
@@ -143,10 +146,10 @@ describe('useDoseReminderScheduler — basic scheduling', () => {
 
     expect(mocks.schedule).toHaveBeenCalledTimes(2);
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-a', 'A', '08:00', 1, 'قرص', 'd1'
+      'med-a', 'A', '08:00', 1, 'قرص', 'd1', { allowManualTakeAction: false }
     );
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-b', 'B', '14:00', 1, 'قرص', 'd1'
+      'med-b', 'B', '14:00', 1, 'قرص', 'd1', { allowManualTakeAction: false }
     );
   });
 
@@ -159,7 +162,7 @@ describe('useDoseReminderScheduler — basic scheduling', () => {
 
     expect(mocks.cancel).toHaveBeenCalledWith('med-x', 'd1');
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-x', 'Test Med', '09:00', 1, 'قرص'
+      'med-x', 'Test Med', '09:00', 1, 'قرص', 'd1', { allowManualTakeAction: false }
     );
   });
 });
@@ -269,7 +272,7 @@ describe('useDoseReminderScheduler — exact-alarm gating', () => {
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
 
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-exact-on', 'Test Med', '09:00', 1, 'قرص'
+      'med-exact-on', 'Test Med', '09:00', 1, 'قرص', 'd1', { allowManualTakeAction: false }
     );
   });
 });
@@ -327,6 +330,7 @@ describe('useDoseReminderScheduler — doseSignature (no unnecessary reschedule)
 
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
     expect(mocks.schedule.mock.calls[0][6]).toEqual({
+      allowManualTakeAction: false,
       treatmentEndDate: '2024-09-14',
     });
 
@@ -338,6 +342,7 @@ describe('useDoseReminderScheduler — doseSignature (no unnecessary reschedule)
 
     await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
     expect(mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1][6]).toEqual({
+      allowManualTakeAction: false,
       treatmentEndDate: '2024-09-11',
     });
   });
@@ -454,13 +459,13 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
 
     expect(mocks.schedule).toHaveBeenCalledTimes(3);
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-multi', 'Drug A', '08:00', 2, 'قرص', { doseId: 'd1' }
+      'med-multi', 'Drug A', '08:00', 2, 'قرص', 'd1', { allowManualTakeAction: false }
     );
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-multi', 'Drug A', '14:00', 1, 'قرص', { doseId: 'd2' }
+      'med-multi', 'Drug A', '14:00', 1, 'قرص', 'd2', { allowManualTakeAction: false }
     );
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-multi', 'Drug A', '21:00', 1, 'قرص', { doseId: 'd3' }
+      'med-multi', 'Drug A', '21:00', 1, 'قرص', 'd3', { allowManualTakeAction: false }
     );
 
     // Distinct cancel targets (cancel-before-schedule) per dose
@@ -523,10 +528,10 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
       ],
     };
     rerender({ medications: [expanded] });
-    await flushUntil(() => mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'b'));
+    await flushUntil(() => mocks.schedule.mock.calls.some((c) => c[5] === 'b'));
 
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-add', 'AddMed', '14:00', 1, 'قرص', { doseId: 'b' }
+      'med-add', 'AddMed', '14:00', 1, 'قرص', 'b', { allowManualTakeAction: false }
     );
   });
 
@@ -563,10 +568,10 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
     // Sibling doses (a, c) are rescheduled after the removed dose (b) is
     // cancelled — wait for those schedule calls before asserting.
     await flushUntil(() =>
-      mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'a')
+      mocks.schedule.mock.calls.some((c) => c[5] === 'a')
     );
     await flushUntil(() =>
-      mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'c')
+      mocks.schedule.mock.calls.some((c) => c[5] === 'c')
     );
 
     // Removed dose cancelled exactly once (no duplicate cancelSlot path).
@@ -581,9 +586,9 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
     expect(cancelSnoozedB).toHaveLength(1);
 
     // Siblings still rescheduled; removed dose is not.
-    expect(mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'a')).toBe(true);
-    expect(mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'c')).toBe(true);
-    expect(mocks.schedule.mock.calls.some((c) => c[5]?.doseId === 'b')).toBe(false);
+    expect(mocks.schedule.mock.calls.some((c) => c[5] === 'a')).toBe(true);
+    expect(mocks.schedule.mock.calls.some((c) => c[5] === 'c')).toBe(true);
+    expect(mocks.schedule.mock.calls.some((c) => c[5] === 'b')).toBe(false);
   });
 
   it('reconciles when a dose time changes (same dose id)', async () => {
@@ -608,11 +613,11 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
     };
     rerender({ medications: [moved] });
     await flushUntil(() =>
-      mocks.schedule.mock.calls.some((c) => c[2] === '15:00' && c[5]?.doseId === 'x')
+      mocks.schedule.mock.calls.some((c) => c[2] === '15:00' && c[5] === 'x')
     );
 
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-time', 'TimeMed', '15:00', 1, 'قرص', { doseId: 'x' }
+      'med-time', 'TimeMed', '15:00', 1, 'قرص', 'x', { allowManualTakeAction: false }
     );
   });
 
@@ -636,11 +641,11 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
     };
     rerender({ medications: [changed] });
     await flushUntil(() =>
-      mocks.schedule.mock.calls.some((c) => c[3] === 2 && c[5]?.doseId === 'x')
+      mocks.schedule.mock.calls.some((c) => c[3] === 2 && c[5] === 'x')
     );
 
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-amt', 'AmtMed', '10:00', 2, 'قرص', { doseId: 'x' }
+      'med-amt', 'AmtMed', '10:00', 2, 'قرص', 'x', { allowManualTakeAction: false }
     );
   });
 
@@ -674,7 +679,7 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
     // string may still reschedule (same end state). Ensure we never schedule
     // more than two slots (no third phantom dose).
     await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
-    const doseIds = mocks.schedule.mock.calls.map((c) => c[5]?.doseId).sort();
+    const doseIds = mocks.schedule.mock.calls.map((c) => c[5]).sort();
     expect(doseIds).toEqual(['a', 'b']);
     expect(firstWave).toBe(2);
   });
@@ -728,10 +733,10 @@ describe('useDoseReminderScheduler — multi-dose (Phase 2)', () => {
     await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
 
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-on-multi', 'OnMed', '08:00', 1, 'قرص', { doseId: 'a' }
+      'med-on-multi', 'OnMed', '08:00', 1, 'قرص', 'a', { allowManualTakeAction: false }
     );
     expect(mocks.schedule).toHaveBeenCalledWith(
-      'med-on-multi', 'OnMed', '20:00', 1, 'قرص', { doseId: 'b' }
+      'med-on-multi', 'OnMed', '20:00', 1, 'قرص', 'b', { allowManualTakeAction: false }
     );
   });
 });

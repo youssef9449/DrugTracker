@@ -241,25 +241,21 @@ describe('background channel — no JS sound dependency', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 9. Existing notification scheduling/cancellation remains intact.
-// ---------------------------------------------------------------------------
-
-describe('scheduling/cancellation invariants — preserved', () => {
-
-});
-
-// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 
 describe('doseId identity — preserved through scheduling', () => {
-  it('scheduleDoseReminder with a doseId includes it in the notification extra', async () => {
+  it('scheduleDoseReminder with a doseId preserves the logical identity in the platform payload', async () => {
     const medId = 'med-dose-id';
     const doseId = 'dose-morning';
     await scheduleDoseReminder(medId, 'Test', '09:00', 1, 'قرص', doseId);
 
     const notif = lastScheduledNotification();
-    expect(notif.extra.medicationId).toBe(medId);
-    expect(notif.extra.doseId).toBe(doseId);
+    // #503: the platform extra carries ONLY the logical notification
+    // identity — feature payload fields (medicationId, doseId, reminderTime,
+    // …) live in the app layer and must never leak into the native payload.
+    expect(notif.extra.namespace).toBe('dose-reminder');
+    expect(notif.extra.identity).toBe('med-dose-id::dose-morning');
+    expect(Object.keys(notif.extra).sort()).toEqual(['identity', 'namespace']);
   });
 
 
@@ -423,14 +419,10 @@ describe('Web/PWA future Dose Reminder delivery', () => {
     await scheduleDoseReminder('web-future', 'Test', '20:00', 1, 'قرص', 'd1');
 
     expect(shown).toHaveLength(0);
-    const pending = await getPendingNotificationResult('dose-reminder', 'web-future::d1');
-    expect(pending).toEqual({
-      ok: true,
-      pending: { schedule: { at: new Date('2024-09-10T20:00:00').getTime() } },
-    });
-
-    await vi.advanceTimersByTimeAsync(7 * 60 * 60 * 1000 - 1);
+    // Advance to one millisecond BEFORE the 20:00 wall-clock target…
+    await vi.advanceTimersByTimeAsync(8 * 60 * 60 * 1000 - 1);
     expect(shown).toHaveLength(0);
+    // …then cross it exactly: delivery happens at the scheduled time.
     await vi.advanceTimersByTimeAsync(1);
     expect(shown).toHaveLength(1);
     expect(shown[0].title).toContain('Test');
@@ -475,18 +467,53 @@ describe('Web/PWA future Dose Reminder delivery', () => {
     expect(shown).toHaveLength(1);
   });
 
-  it('re-arms a persisted future reminder when pending state is queried after timer loss', async () => {
+  it('survives a page reload as a durable record; only reconciliation re-arms it', async () => {
     await scheduleDoseReminder('web-reload', 'Test', '20:00', 1, 'قرص', 'd1');
-    vi.clearAllTimers();
+    expect(shown).toHaveLength(0);
 
-    const pending = await getPendingNotificationResult('dose-reminder', 'web-reload::d1');
+    // Simulate a page reload: fresh scheduler module graph (no live page
+    // timers), durable record survives (#547).
+    vi.resetModules();
+    vi.clearAllTimers();
+    // clearAllTimers also resets the fake clock to its install time —
+    // restore the wall clock the reload is simulated at.
+    vi.setSystemTime(new Date('2024-09-10T12:00:00'));
+
+    const freshRuntime = await import('@/utils/notificationRuntime');
+    const pending = await freshRuntime.getPendingNotificationResult(
+      'dose-reminder',
+      'web-reload::d1'
+    );
+    // #495: reads are pure — the record is surfaced, never armed or mutated.
     expect(pending).toEqual({
       ok: true,
       pending: { schedule: { at: new Date('2024-09-10T20:00:00').getTime() } },
     });
 
-    await vi.advanceTimersByTimeAsync(8 * 60 * 60 * 1000);
+    // Time passes but NO delivery happens: the read did not re-arm the
+    // lost best-effort timer (#495/#525).
+    await vi.advanceTimersByTimeAsync(1 * 60 * 60 * 1000);
+    expect(shown).toHaveLength(0);
+
+    // Reconciliation explicitly re-arms the future schedule after the loss.
+    const freshWeb = await import('@/utils/notifications/webNotifications');
+    freshWeb.reconcileWebScheduledNotification('dose-reminder', 'web-reload::d1');
+    await vi.advanceTimersByTimeAsync(0); // settle the async arming chain
+
+    // Re-armed best-effort timer delivers exactly at the wall-clock time
+    // (13:00 + 7h = 20:00).
+    await vi.advanceTimersByTimeAsync(7 * 60 * 60 * 1000 - 1);
+    expect(shown).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
     expect(shown).toHaveLength(1);
+    expect(shown[0].title).toContain('Test');
+
+    // Delivery consumed the durable record (terminal state).
+    const after = await freshRuntime.getPendingNotificationResult(
+      'dose-reminder',
+      'web-reload::d1'
+    );
+    expect(after).toEqual({ ok: true, pending: null });
   });
 });
 

@@ -199,12 +199,15 @@ describe('PharmacyShoppingView — refill actions', () => {
     renderView({ medications: [med] });
 
     expect(screen.getByText('3 أشرطة')).toBeInTheDocument();
-    expect(screen.getByText('الإجمالي: علبة واحدة (30 قرصاً)')).toBeInTheDocument();
+    // Period-mode total renders describeOrderInBoxes(30 pills = one full
+    // box) → "علبة واحدة". The "(30 قرصاً)" pill-count suffix is added
+    // only in custom-quantity mode (PharmacyShoppingMedicationRow).
+    expect(screen.getByText('الإجمالي: علبة واحدة')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'علبة' }));
 
     expect(screen.getByText('علبة واحدة')).toBeInTheDocument();
-    expect(screen.getByText('الإجمالي: علبة واحدة (30 قرصاً)')).toBeInTheDocument();
+    expect(screen.getByText('الإجمالي: علبة واحدة')).toBeInTheDocument();
   });
 
   it('allows a custom quantity to combine box + strip quantities', () => {
@@ -217,7 +220,8 @@ describe('PharmacyShoppingView — refill actions', () => {
     });
     renderView({ medications: [med] });
 
-    fireEvent.click(screen.getByRole('button', { name: 'كمية محددة' }));
+    // The period/custom switch is a Material 3 segmented button → radio role.
+    fireEvent.click(screen.getByRole('radio', { name: 'كمية محددة' }));
     const stripQty = screen.getByRole('spinbutton', { name: /كمية Test Med شريط/ });
     expect(stripQty).toHaveValue(3);
 
@@ -225,10 +229,12 @@ describe('PharmacyShoppingView — refill actions', () => {
     const boxQty = screen.getByRole('spinbutton', { name: /كمية Test Med علبة/ });
     expect(boxQty).toHaveValue(1);
 
-    expect(screen.getByText('الإجمالي: علبة واحدة و 3 أشرطة (60 قرصاً)')).toBeInTheDocument();
+    // Breakdown follows the selected-units order (strips first, then the
+    // newly added box); the dual of علبة is the genitive علبتين.
+    expect(screen.getByText('الإجمالي: 3 أشرطة و علبة واحدة (60 قرصاً)')).toBeInTheDocument();
 
     fireEvent.change(boxQty, { target: { value: '2' } });
-    expect(screen.getByText('الإجمالي: علبتين و 3 أشرطة (90 قرصاً)')).toBeInTheDocument();
+    expect(screen.getByText('الإجمالي: 3 أشرطة و علبتين (90 قرصاً)')).toBeInTheDocument();
   });
 
   it('allows a custom sachet quantity to combine bags + box', () => {
@@ -242,7 +248,8 @@ describe('PharmacyShoppingView — refill actions', () => {
     });
     renderView({ medications: [med] });
 
-    fireEvent.click(screen.getByRole('button', { name: 'كمية محددة' }));
+    // The period/custom switch is a Material 3 segmented button → radio role.
+    fireEvent.click(screen.getByRole('radio', { name: 'كمية محددة' }));
     const bagQty = screen.getByRole('spinbutton', { name: /كمية فوار كيس/ });
     expect(bagQty).toHaveValue(30);
 
@@ -251,7 +258,9 @@ describe('PharmacyShoppingView — refill actions', () => {
     expect(boxQty).toHaveValue(1);
 
     fireEvent.change(bagQty, { target: { value: '2' } });
-    expect(screen.getByText('الإجمالي: علبة واحدة و كيسان (12 كيساً)')).toBeInTheDocument();
+    // Breakdown order follows selected units (bags first, then the added
+    // box); the dual of كيس is the genitive كيسين (arabicPlural.ts).
+    expect(screen.getByText('الإجمالي: كيسين و علبة واحدة (12 كيساً)')).toBeInTheDocument();
   });
 
   it('converts a 30-day period to 1 month when the unit changes', () => {
@@ -279,7 +288,16 @@ describe('PharmacyShoppingView — refill actions', () => {
 
   it('clicking WhatsApp send button opens the send modal with analyzed order quantities', () => {
     const medA = makeMed({ id: 'med-a', name: 'كونكور 5', currentPills: 2, dailyDose: 1, stripsPerBox: 3, pillsPerStrip: 10 });
-    renderView({ medications: [medA] });
+    renderView({
+      medications: [medA],
+      settings: {
+        ...defaultSettings,
+        // The direct-send CTA ("فتح محادثة واتساب الآن") renders only when
+        // the selected pharmacy has a phone (usePharmacyShoppingWhatsApp).
+        pharmacies: [{ id: 'ph-1', name: 'صيدلية النور', phone: '01000000000', customerCode: '' }],
+        selectedPharmacyId: 'ph-1',
+      },
+    });
 
     const sendBtn = screen.getByRole('button', { name: 'إرسال طلبية بالواتساب' });
     fireEvent.click(sendBtn);
@@ -329,11 +347,42 @@ describe('PharmacyShoppingView — refill actions', () => {
 
 
 describe('PharmacyShoppingView — medication-level stock projection', () => {
-  it('Medication ON with past lastSync appears as urgent under auto projection', () => {
+  // Tests here render real medication rows; without cleanup they leak
+  // into the next describe (this file does not enable RTL auto-cleanup).
+  afterEach(() => cleanup());
+
+  it('Medication ON with ample durable stock is not made urgent by auto projection', () => {
+    // Production derives shopping urgency from durable currentPills only
+    // (stockDepletion.ts: no depletion is invented from elapsed time or
+    // sync state; Medication.lastSync no longer exists). 30 pills ÷ 2 per
+    // day = 15 days left > threshold 5 → sufficient, so the ON med stays
+    // out of the urgent-only shopping list.
     const med = makeMed({
       id: 'urgent-candidate',
       name: 'Projected Med',
       currentPills: 30,
+      dailyDose: 2,
+      autoDeductEnabled: true,
+      warningThresholdDays: 5,
+    });
+    render(
+      <PharmacyShoppingView
+        medications={[med]}
+        settings={defaultSettings}
+        onUpdateSettings={() => {}}
+        showToast={() => {}}
+      />
+    );
+    expect(screen.queryByText('Projected Med')).not.toBeInTheDocument();
+  });
+
+  it('Medication ON with genuinely low durable stock still appears as urgent', () => {
+    // The durable-stock rule still surfaces ON meds that are truly low:
+    // 4 pills ÷ 2 per day = 2 days left ≤ threshold 5 → critical.
+    const med = makeMed({
+      id: 'urgent-candidate',
+      name: 'Projected Med',
+      currentPills: 4,
       dailyDose: 2,
       autoDeductEnabled: true,
       warningThresholdDays: 5,
@@ -402,7 +451,8 @@ describe('PharmacyShoppingView — period and custom quantity allow empty mid-ed
       packageSize: 30,
     });
     renderView({ medications: [med] });
-    fireEvent.click(screen.getByRole('button', { name: 'كمية محددة' }));
+    // The period/custom switch is a Material 3 segmented button → radio role.
+    fireEvent.click(screen.getByRole('radio', { name: 'كمية محددة' }));
     const qty = screen.getByRole('spinbutton', { name: /كمية Test Med شريط/ }) as HTMLInputElement;
     fireEvent.change(qty, { target: { value: '' } });
     expect(qty.value).toBe('');

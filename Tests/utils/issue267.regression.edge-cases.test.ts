@@ -113,7 +113,8 @@ describe('#267 regression 12 — Multiple dose isolation', () => {
     const m = med({ currentPills: 30});
     const r = consumeDose(m, 'manual', TODAY, new Date(`${TODAY}T15:00:00`), 'd1');
     expect(r.doseAmount).toBe(1); // d1 amount
-    expect(r.updatedMed?.doseConsumptionHistory?.d1).toBe(TODAY);
+    // doseConsumptionHistory maps doseId → list of consumption dates.
+    expect(r.updatedMed?.doseConsumptionHistory?.d1).toEqual([TODAY]);
     expect(r.updatedMed?.doseConsumptionHistory?.d2).toBeUndefined();
     expect(r.updatedMed?.doseConsumptionHistory?.d3).toBeUndefined();
     // d1 only deducted 1 (d2, d3 untouched).

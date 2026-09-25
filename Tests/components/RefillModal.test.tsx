@@ -57,7 +57,7 @@ describe('RefillModal', () => {
     expect(onConfirm).toHaveBeenCalledWith('med-liquid-1', 120);
   });
 
-  it('allows pills and boxes for solid tablet medications', () => {
+  it('offers boxes and strips only for solid tablet medications (no loose-pill chip)', () => {
     const med = makeMed({
       id: 'med-solid-1',
       name: 'بنادول',
@@ -74,10 +74,11 @@ describe('RefillModal', () => {
       />
     );
 
-    // For tablets, 'قرص', 'علبة', and 'شريط' buttons should be present
-    expect(screen.getByRole('button', { name: /^قرص$/i })).toBeInTheDocument();
+    // Current contract: solid medications are refilled by packaging only —
+    // 'علبة' and 'شريط' chips are present, the loose 'قرص' chip is gone.
     expect(screen.getByRole('button', { name: /^علبة$/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^شريط$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^قرص$/i })).toBeNull();
   });
 });
 

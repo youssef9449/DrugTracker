@@ -1,8 +1,3 @@
-import { vi } from 'vitest';
-/**
- * Shared async test helpers for Dose Reminder and related lifecycle tests.
- * Deterministic; no shared mutable clocks beyond what the caller provides.
- */
 import { act } from '@testing-library/react';
 
 /** Flush pending microtasks inside act. */
@@ -27,6 +22,29 @@ export function createDeferred<T>(): {
   return { promise, resolve, reject };
 }
 
-export async function flushUntil(predicate: () => boolean): Promise<void> {
-  await vi.waitFor(predicate, { timeout: 1000, interval: 0 });
+/**
+ * Poll until `predicate()` turns true, yielding to the microtask AND
+ * macrotask queues between attempts so chained async operations
+ * (operation queues, bounded-retry scheduling) can settle.
+ *
+ * Note: vitest's `vi.waitFor` resolves as soon as its callback does not
+ * THROW (it does not poll falsy return values), so it cannot express
+ * "wait until this spy was called" — hence this explicit loop.
+ */
+export async function flushUntil(
+  predicate: () => boolean,
+  timeoutMs: number = 1000
+): Promise<void> {
+  await act(async () => {
+    const startedAt = Date.now();
+    while (!predicate()) {
+      if (Date.now() - startedAt > timeoutMs) {
+        throw new Error(
+          `flushUntil: condition not met within ${timeoutMs}ms`
+        );
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      await Promise.resolve();
+    }
+  });
 }

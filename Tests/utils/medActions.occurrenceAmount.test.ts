@@ -37,7 +37,10 @@ describe('findActiveDeductionForOccurrence — sibling isolation + historical am
     ];
     const d1 = findActiveDeductionForOccurrence(logs, 'med', 'd1', today);
     const d2 = findActiveDeductionForOccurrence(logs, 'med', 'd2', today);
-    expect(d1?.id).toBe('log-d1-auto');
+    // exact_auto evidence is only recognized with the deterministic
+    // occurrence id (exact-auto:<med>:<dose>:<date>) — which is the id the
+    // log above carries.
+    expect(d1?.id).toBe(exactAutoLogId('med', 'd1', today));
     expect(Math.abs(Number(d1?.amount))).toBe(2);
     expect(d2?.id).toBe('log-d2-manual');
     expect(Math.abs(Number(d2?.amount))).toBe(1);

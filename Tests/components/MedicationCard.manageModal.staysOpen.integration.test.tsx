@@ -145,7 +145,24 @@ describe('Management modal stays open after actions', () => {
         }),
       ])
     );
-    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+    // Restore is evidence-gated: the manage modal offers the d1 Restore action
+    // only when an ACTIVE dose_taken deduction log exists for the occurrence.
+    localStorage.setItem(
+      STORAGE_LOGS_KEY,
+      JSON.stringify([
+        {
+          id: 'seed-take-d1',
+          medicationId: MED_ID,
+          medicationName: 'Manage Stay Open',
+          type: 'dose_taken',
+          amount: -1,
+          date: TEST_DATE,
+          timestamp: `${TEST_DATE}T12:00:00.000Z`,
+          description: 'تناول جرعة يدوياً (-1 قرص)',
+          doseId: 'd1',
+        },
+      ])
+    );
 
     render(<App />);
     await waitFor(() => {

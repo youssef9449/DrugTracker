@@ -141,7 +141,7 @@ describe('Phase 4 — Refill/UndoRefill through the durable gate', () => {
   it('runGatedUndoRefill reverses the most recent un-reversed refill through the gate', async () => {
     durable = {
       medications: [med({ currentPills: 15 })],
-      logs: [{ id: 'refill-1', medicationId: 'med-1', medicationName: 'TestMed', type: 'refill', amount: 10, date: TODAY, timestamp: '', description: '' }],
+      logs: [{ id: 'refill-1', medicationId: 'med-1', medicationName: 'TestMed', type: 'refill', amount: 10, date: TODAY, timestamp: `${TODAY}T10:00:00.000Z`, description: '' }],
     };
     const r = await runGatedUndoRefill({ medicationId: 'med-1', todayStr: TODAY, makeLogId: () => 'refill-undo-1' });
     expect(r.outcome).toBe('applied');
@@ -156,7 +156,7 @@ describe('Phase 4 — Refill/UndoRefill through the durable gate', () => {
   it('runGatedUndoRefill with no un-reversed refill is rejected (no mutation)', async () => {
     durable = {
       medications: [med({ currentPills: 5 })],
-      logs: [{ id: 'refill-done', medicationId: 'med-1', medicationName: 'TestMed', type: 'refill', amount: 10, date: TODAY, timestamp: '', description: '', reversedAt: 'already' }],
+      logs: [{ id: 'refill-done', medicationId: 'med-1', medicationName: 'TestMed', type: 'refill', amount: 10, date: TODAY, timestamp: `${TODAY}T10:00:00.000Z`, description: '', reversedAt: 'already' }],
     };
     const r = await runGatedUndoRefill({ medicationId: 'med-1', todayStr: TODAY });
     expect(r.outcome).toBe('rejected');

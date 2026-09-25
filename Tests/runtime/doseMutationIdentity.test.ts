@@ -67,24 +67,28 @@ describe('Restore carries the canonical identity end-to-end (#516)', () => {
     expect(resolveRestoreDoseId(single(), undefined)).toEqual({ ok: true, doseId: 'd1' });
   });
 
-  it('repeated Restore after a skip marker is already_restored using the RESOLVED id', () => {
+  it('repeated Restore with no active deduction fails closed using the RESOLVED id (#516)', () => {
     const med = single();
     const consumed = consumeDose(med, 'manual', TODAY, new Date(), undefined);
     expect(consumed.updatedMed).not.toBeNull();
     const log: ConsumptionLog = consumed.log as ConsumptionLog;
     const first = restoreDose(consumed.updatedMed as Medication, undefined, TODAY, new Date(), [log]);
     expect(first.ok).toBe(true);
-    // Second Restore: no active deduction remains; the occurrence was
-    // resolved under the canonical id → idempotent already_restored.
+    // The caller persists the first Restore's reversal on the deduction log
+    // (reversedAt). Second Restore: no active deduction remains and the
+    // occurrence was resolved under the canonical id → fail closed with no
+    // double restore.
     const second = restoreDose(
       first.ok ? first.updatedMed : med,
       undefined,
       TODAY,
       new Date(),
-      [log, ...(first.ok && first.reversedLogId ? [{ ...log, reversedAt: 'x' }] : [])]
+      [{ ...log, reversedAt: 'x' }]
     );
     expect(second.ok).toBe(false);
-    expect(second.ok ? '' : second.reason).toBe('already_restored');
+    expect(second.ok ? '' : second.reason).toBe('missing_deduction_evidence');
+    // No stock was added twice by the repeated Restore.
+    expect(first.ok && first.updatedMed.currentPills).toBe(10);
   });
 });
 

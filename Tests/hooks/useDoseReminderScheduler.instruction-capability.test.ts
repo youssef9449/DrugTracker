@@ -72,6 +72,9 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     createdAt: '2024-01-01T00:00:00.000Z',
     reminderEnabled: true,
     reminderTime,
+    // Chronic meds are always treatment-active; temporary meds would need
+    // explicit treatmentStartDate/durationDays to schedule at all.
+    isChronic: true,
     // Explicit single-slot schedule so reminder slots are defined by doseSchedule.
     doseSchedule: [{ id: 'd1', amount: dailyDose, time: reminderTime }],
     dosesPerDay: 1,
@@ -205,7 +208,7 @@ describe('useDoseReminderScheduler — manual Take capability', () => {
     })));
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
     expect(mocks.schedule.mock.calls.some(
-      (c) => c[5]?.allowManualTakeAction === false
+      (c) => c[6]?.allowManualTakeAction === false
     )).toBe(true);
   });
 
@@ -217,7 +220,7 @@ describe('useDoseReminderScheduler — manual Take capability', () => {
     })));
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
     expect(mocks.schedule.mock.calls.some(
-      (c) => c[5]?.allowManualTakeAction === true
+      (c) => c[6]?.allowManualTakeAction === true
     )).toBe(true);
   });
 
@@ -239,7 +242,7 @@ describe('useDoseReminderScheduler — manual Take capability', () => {
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
     expect(mocks.cancel).toHaveBeenCalledWith('med-flip', 'd1');
     expect(mocks.schedule.mock.calls.some(
-      (c) => c[5]?.allowManualTakeAction === true
+      (c) => c[6]?.allowManualTakeAction === true
     )).toBe(true);
   });
 });

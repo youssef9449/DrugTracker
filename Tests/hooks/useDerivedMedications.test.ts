@@ -18,15 +18,22 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
   };
 }
 
-describe('useDerivedMedications — medication-level Auto projection', () => {
-  it('Medication ON projects stock (daysLeft reflects auto depletion)', () => {
+describe('useDerivedMedications — medication-level status projection', () => {
+  it('Medication ON does not invent depletion from elapsed time (durable stock only)', () => {
+    // Current contract (stockDepletion.ts): daysLeft is derived from durable
+    // currentPills and the schedule rate ONLY — the UI never projects
+    // deductions for elapsed calendar days. The Auto engine performs real
+    // deductions and persists them into currentPills, so an Auto-ON med with
+    // untouched durable stock projects the same daysLeft as its stock allows.
     const meds = [makeMed({ autoDeductEnabled: true })];
     const { result } = renderHook(() =>
       useDerivedMedications(meds, [], 'all', '')
     );
-    const days = result.current.medicationsWithStatus[0].statusInfo.daysLeft;
-    // Past lastSync with auto ON → projected depletion (not frozen 15 days)
-    expect(days).toBeLessThan(15);
+    const info = result.current.medicationsWithStatus[0].statusInfo;
+    // 30 pills / 2 per day → 15 days from durable stock (not frozen, not
+    // artificially depleted).
+    expect(info.daysLeft).toBe(15);
+    expect(info.status).toBe('sufficient');
   });
 
   it('Medication OFF freezes stock at currentPills', () => {

@@ -143,7 +143,11 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
     expect(first.newExactLogs[0].amount).toBe(-2);
     expect(first.newExactLogs[0].id).toBe(exactAutoLogId('med-1', 'd1', '2026-09-14'));
     expect(first.newExactLogs[0].type).toBe('exact_auto');
-    expect(first.logs.filter((l) => l.type === 'exact_auto')).toHaveLength(0);
+    // Returned `logs` is the COMPLETE new durable logs array — it includes the
+    // newly applied exact_auto log (newExactLogs is the sub-set of logs the
+    // run created, not a separate carry-through collection).
+    expect(first.logs.filter((l) => l.type === 'exact_auto')).toHaveLength(1);
+    expect(first.logs[0].id).toBe(exactAutoLogId('med-1', 'd1', '2026-09-14'));
     expect(first.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: 'd1', calendarDate: '2026-09-14' },
     ]);

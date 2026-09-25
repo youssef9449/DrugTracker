@@ -62,7 +62,8 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
     beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(`${TODAY}T15:00:00`));
-    durable = { medications: [med()], logs: [], globalAutoDeductEnabled: false };
+    // Seed 10 pills: absolute assertions below expect 9 after a 1-pill Take.
+    durable = { medications: [med({ currentPills: 10 })], logs: [], globalAutoDeductEnabled: false };
     manualEnvelope = null;
     failLogs = false;
     failClear = false;
@@ -230,6 +231,9 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
       status: 'manual_js_ready',
       medications: [med({ currentPills: 10 })],
       logs: [],
+      globalAutoDeductEnabled: false,
+      stockDeltas: [],
+      occurrenceResolutions: [],
       createdAt: new Date().toISOString(),
       baseGeneration: 0,
       mutationSeq: 1,
@@ -316,6 +320,9 @@ describe('Phase 4 — Manual envelope recovery and persistence failure', () => {
       status: 'manual_js_ready',
       medications: [med({ currentPills: 10 })],
       logs: durable.logs.map((l) => ({ ...l })),
+      globalAutoDeductEnabled: false,
+      stockDeltas: [],
+      occurrenceResolutions: [],
       createdAt: new Date().toISOString(),
       baseGeneration: 0,
       mutationSeq: 1,

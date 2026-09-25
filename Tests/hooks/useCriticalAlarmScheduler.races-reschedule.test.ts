@@ -33,21 +33,22 @@ const mocks = vi.hoisted(() => ({
   schedule: vi.fn(),
   cancel: vi.fn(),
   verify: vi.fn(),
+  list: vi.fn(),
 }));
 
-vi.mock('../utils/notificationTestFacade', async () => {
-  const actual = await vi.importActual<typeof import('../utils/notificationTestFacade')>(
-    '../utils/notificationTestFacade'
-  );
-  return {
-    ...actual,
-    scheduleCriticalAlarm: mocks.schedule,
-    cancelCriticalAlarm: mocks.cancel,
-    verifyCriticalAlarmPending: mocks.verify,
-  };
-});
+// The hook imports the production source modules directly, so the mocks
+// must be installed on those module ids (mocking the test facade would
+// not intercept production calls).
+vi.mock('@/utils/criticalAlarmScheduling', () => ({
+  scheduleCriticalAlarm: mocks.schedule,
+  cancelCriticalAlarm: mocks.cancel,
+  verifyCriticalAlarmPending: mocks.verify,
+}));
+vi.mock('@/utils/criticalAlarmNative', () => ({
+  listScheduledCriticalMedicationIdsNative: mocks.list,
+}));
 
-import { scheduleCriticalAlarm, cancelCriticalAlarm } from '../utils/notificationTestFacade';
+import { scheduleCriticalAlarm, cancelCriticalAlarm } from '@/utils/criticalAlarmScheduling';
 import { readCriticalClaims as readClaims } from '../helpers/criticalStockClaims';
 
 const scheduleMock = vi.mocked(scheduleCriticalAlarm);
@@ -66,6 +67,9 @@ function makeMed(overrides: Partial<Medication> = {}): Medication {
     colorTag: 'teal',
     createdAt: '2024-01-01T00:00:00.000Z',
     autoDeductEnabled: true,
+    // The unified critical-stock policy requires the per-medication flag
+    // to be explicitly ON before any scheduling decision.
+    criticalStockAlertsEnabled: true,
     // Explicit schedule required for getCriticalAlarmDate projection.
     doseSchedule: [{ id: 'd1', amount: dailyDose, time: '20:00' }],
     ...overrides,
@@ -120,6 +124,9 @@ beforeEach(() => {
   // native alarm on web). Native tests override this per case.
   verifyMock.mockReset();
   verifyMock.mockResolvedValue({ ok: true, pending: false });
+  // Native durable schedule listing: nothing armed in a fresh test run.
+  mocks.list.mockReset();
+  mocks.list.mockResolvedValue({ ok: true, ids: [] });
 });
 
 afterEach(() => {
@@ -260,14 +267,16 @@ describe('useCriticalAlarmScheduler — exact-time input reschedule', () => {
     scheduleMock.mockClear();
     cancelMock.mockClear();
 
-    // Swap amounts so the crossing slot can move (still daily 15).
+    // Swap amounts so the crossing slot moves earlier in the day (still
+    // daily 15): the evening-heavy schedule first crosses at 22:00, the
+    // morning-heavy one already at 18:00.
     const medB = makeMed({
       currentPills: 40,
       dailyDose: 15,
       warningThresholdDays: 1,
       doseSchedule: [
-        { id: 'd1', amount: 5, time: '18:00' },
-        { id: 'd2', amount: 10, time: '22:00' },
+        { id: 'd1', amount: 14, time: '18:00' },
+        { id: 'd2', amount: 1, time: '22:00' },
       ],
     });
     const tB = getCriticalAlarmDate(medB, getTodayDateString());

@@ -157,6 +157,11 @@ describe('Phase 4 — native recurrence invalidation is the config-change orderi
       schedulesCancelled: true,
     });
 
+    // Compensation re-schedules occurrences inside the medication's active
+    // treatment window — give the med an explicit always-active window
+    // (isChronic) so the compensation path actually has occurrences to restore.
+    durable = { medications: [med({ isChronic: true })], logs: [] };
+
     const before = durable.medications[0];
     const result = await runGatedAutoDeductToggle({
       medicationId: 'med-1',
@@ -170,14 +175,15 @@ describe('Phase 4 — native recurrence invalidation is the config-change orderi
   });
 });
 
-describe('Phase 4 — future Restore is already_restored without durable deduction', () => {
+describe('Phase 4 — future Restore without durable deduction is a fail-closed no-op', () => {
   let durable: AutoStockDurableState;
 
   beforeEach(() => {
     // 07:00 — before d1 at 08:00
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(`${TODAY}T07:00:00`));
-    durable = { medications: [med()], logs: [] };
+    // Seed 10 pills: absolute assertions below expect 9 after a 1-pill Take.
+    durable = { medications: [med({ currentPills: 10 })], logs: [] };
     __setAutoStockGateTestHooks({
       load: () => ({
         medications: durable.medications.map((m) => ({ ...m })),
@@ -217,18 +223,21 @@ describe('Phase 4 — future Restore is already_restored without durable deducti
     __resetStockMutationOrderingForTests();
   });
 
-  it('future unconsumed + no deduction → first Restore is already_restored', async () => {
+  it('future unconsumed + no deduction → first Restore is rejected missing_deduction_evidence (zero mutation)', async () => {
     const r = await runGatedManualRestore({
       medicationId: 'med-1',
       doseId: 'd1',
       todayStr: TODAY,
     });
-    expect(r.outcome).toBe('already_restored');
+    // Production restore is evidence-driven: a future, unconsumed occurrence
+    // with no durable deduction log has nothing to reverse — fail closed.
+    expect(r.outcome).toBe('rejected');
+    expect(r.reason).toBe('missing_deduction_evidence');
     expect(durable.medications[0].currentPills).toBe(10);
     expect(durable.logs).toHaveLength(0);
   });
 
-  it('second future Restore stays already_restored with zero mutation', async () => {
+  it('second future Restore stays rejected with zero mutation', async () => {
     await runGatedManualRestore({
       medicationId: 'med-1',
       doseId: 'd1',
@@ -239,7 +248,8 @@ describe('Phase 4 — future Restore is already_restored without durable deducti
       doseId: 'd1',
       todayStr: TODAY,
     });
-    expect(r2.outcome).toBe('already_restored');
+    expect(r2.outcome).toBe('rejected');
+    expect(r2.reason).toBe('missing_deduction_evidence');
     expect(durable.logs).toHaveLength(0);
     expect(durable.medications[0].currentPills).toBe(10);
   });
@@ -380,6 +390,10 @@ describe('Phase 4 — native occurrence snapshot amount authority', () => {
   });
 
   afterEach(() => {
+    // Restore module spies (e.g. the exact-durability-block test's
+    // reconcileExactBeforeManualMutation spy) so later tests exercise the
+    // real pre-mutation reconciliation pipeline.
+    vi.restoreAllMocks();
     vi.useRealTimers();
     __setAutoStockGateTestHooks(null);
     __setManualEnvelopeTestHooks(null);
@@ -704,13 +718,16 @@ describe('Phase 4 — treatment-boundary-safe recurrence compensation', () => {
       expect.any(Number),
       1,
       1,
-      '2026-09-28',
+      // Compensation rolls back to the OLD durable configuration's
+      // treatment end (start 2026-09-23 + durationDays 5 → 2026-09-27);
+      // the edited durationDays=6 only applies after a successful commit.
+      '2026-09-27',
       '20:00'
     );
     expect(scheduleCalls).toEqual([
       {
         calendarDate: '2026-09-24',
-        treatmentEndDate: '2026-09-28',
+        treatmentEndDate: '2026-09-27',
       },
     ]);
     expect(createdAt).toBe(current.createdAt);

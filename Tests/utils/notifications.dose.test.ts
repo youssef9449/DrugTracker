@@ -63,7 +63,8 @@ function lastDoseSchedulePayload(): {
   repeats: boolean | undefined;
   every: string | undefined;
   allowWhileIdle: boolean | undefined;
-  doseRecurring: boolean | undefined;
+  namespace: string | undefined;
+  identity: string | undefined;
 } {
   expect(mocks.schedule).toHaveBeenCalled();
   const call = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
@@ -72,12 +73,16 @@ function lastDoseSchedulePayload(): {
     at: n.schedule.at as Date,
     // Phase 2: dose reminders are ONE-SHOT (no Capacitor repeats/every —
     // those use setRepeating with a wrong interval for daily wall-clock
-    // times). Recurrence is handled by DoseReminderAlarmReceiver.
-    // rescheduleDoseReminderNextDay + the extra.doseRecurring marker.
+    // times). Recurrence is owned by the native re-arm path
+    // (DoseReminderAlarmReceiver / next-day re-arm), not by this payload.
     repeats: n.schedule.repeats as boolean | undefined,
     every: n.schedule.every as string | undefined,
     allowWhileIdle: n.schedule.allowWhileIdle as boolean | undefined,
-    doseRecurring: (n.extra as { doseRecurring?: boolean } | undefined)?.doseRecurring,
+    // Notification Runtime forwards only the LOGICAL identity as extra:
+    // feature payload fields (medicationId/doseId/reminderTime/…) stay in
+    // the runtime options and never reach the platform payload.
+    namespace: (n.extra as { namespace?: string } | undefined)?.namespace,
+    identity: (n.extra as { identity?: string } | undefined)?.identity,
   };
 }
 
@@ -150,10 +155,12 @@ describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => 
     expect(payload.at.getHours()).toBe(20);
     expect(payload.at.getMinutes()).toBe(0);
     // Phase 2 contract: one-shot schedule (no Capacitor repeats/every).
-    // Recurrence is via extra.doseRecurring + native re-arm.
+    // Recurrence is owned by the native re-arm path; the payload carries
+    // the logical namespace + identity used for replace/cancel.
     expect(payload.repeats).toBeUndefined();
     expect(payload.every).toBeUndefined();
-    expect(payload.doseRecurring).toBe(true);
+    expect(payload.namespace).toBe('dose-reminder');
+    expect(payload.identity).toBe('med-1::d1');
     expect(payload.allowWhileIdle).toBe(true);
   });
 
@@ -168,10 +175,12 @@ describe('scheduleDoseReminder — skipToday (consumed-day suppression)', () => 
     expect(payload.at.getHours()).toBe(20);
     expect(payload.at.getMinutes()).toBe(0);
     // Phase 2 contract: one-shot schedule (no Capacitor repeats/every).
-    // Recurrence is via extra.doseRecurring + native re-arm.
+    // Recurrence is owned by the native re-arm path; the payload carries
+    // the logical namespace + identity used for replace/cancel.
     expect(payload.repeats).toBeUndefined();
     expect(payload.every).toBeUndefined();
-    expect(payload.doseRecurring).toBe(true);
+    expect(payload.namespace).toBe('dose-reminder');
+    expect(payload.identity).toBe('med-1::d1');
   });
 
   it('skipToday after the reminder time already passed: exactly ONE day increment (tomorrow, never the day after)', async () => {
@@ -330,12 +339,13 @@ describe('Dose Reminder notification action and presentation', () => {
 });
 
 describe('Phase 4 — doseId in notification extra', () => {
-  it('scheduleDoseReminder embeds doseId in extra for multi-dose slots', async () => {
+  it('scheduleDoseReminder encodes the medication + dose pair in extra.namespace/identity', async () => {
     await scheduleDoseReminder('med-x', 'Drug', '14:00', 1, 'قرص', 'd2');
     expect(mocks.schedule).toHaveBeenCalled();
     const notif = mocks.schedule.mock.calls[0][0].notifications[0];
-    expect(notif.extra.medicationId).toBe('med-x');
-    expect(notif.extra.doseId).toBe('d2');
+    // Notification Runtime is the iOS boundary: the feature payload
+    // (medicationId/doseId) is normalized into the logical identity
+    // 'medId::doseId' carried alongside the namespace.
     expect(notif.extra.namespace).toBe('dose-reminder');
     expect(notif.extra.identity).toBe('med-x::d2');
   });
@@ -352,7 +362,7 @@ describe('scheduleDoseReminder — 12h display body, 24h schedule identity', () 
     ['22:00', '10:00 م'],
     ['23:59', '11:59 م'],
   ] as const)(
-    'body shows %s as %s while extra.reminderTime and fire hour stay 24h',
+    'body shows %s as %s while extra identity and fire hour stay 24h',
     async (hhmm, display) => {
       // Pick a system time so every sample is still "ahead" today (before midnight).
       vi.setSystemTime(new Date(2024, 8, 10, 0, 0, 0));
@@ -363,9 +373,12 @@ describe('scheduleDoseReminder — 12h display body, 24h schedule identity', () 
         .notifications[0];
 
       expect(notif.body).toContain(`الساعة ${display}`);
-      // Scheduling identity unchanged: extra + wall-clock fire use raw HH:mm.
-      expect(notif.extra.reminderTime).toBe(hhmm);
-      expect(notif.extra.reminderTime).not.toMatch(/[صم]/);
+      // Scheduling identity unchanged: extra carries the raw logical
+      // namespace + identity (no 12h decoration) and the wall-clock fire
+      // time stays raw 24h HH:mm.
+      expect(notif.extra.namespace).toBe('dose-reminder');
+      expect(notif.extra.identity).toBe('med-12h::d1');
+      expect(notif.extra.identity).not.toMatch(/[صم]/);
       const [h, m] = hhmm.split(':').map((n) => parseInt(n, 10));
       expect(notif.schedule.at.getHours()).toBe(h);
       expect(notif.schedule.at.getMinutes()).toBe(m);

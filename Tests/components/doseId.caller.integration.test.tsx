@@ -268,10 +268,11 @@ describe('doseId propagation — production callers (integration)', () => {
 
     const med = readPersistedMedications()[0]!;
     expect(med.doseConsumptionHistory).toBeUndefined();
-    expect(med.doseConsumptionHistory).toBeUndefined();
-    // No consume mutation; snapshot unchanged. d1 auto-due still projects.
+    // No consume mutation before the user picks a dose. currentPills is the
+    // single durable balance — production no longer keeps a second read-time
+    // projected/effective value, so an auto-due d1 does NOT change stock here
+    // (no native FIRED event ran in this mocked-bridge scenario).
     expect(med.currentPills).toBe(30);
-    expect(med.currentPills).toBe(29);
     expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(0);
   });
 

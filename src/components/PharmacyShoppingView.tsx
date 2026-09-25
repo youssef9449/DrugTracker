@@ -30,7 +30,13 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
     handleMedicationPeriodChange, handleToggleQuantityMode, handleToggleOrderUnit, handleCustomQuantityChange,
     toggleWhatsappContact, toggleWhatsappAddress, handleSendToWhatsApp, selectAllDisplayedMeds,
     deselectAllDisplayedMeds, restoreAllMedicationsToShopping,
-  } = usePharmacyShoppingModel({ medications, settings, onUpdateSettings, showToast, onRegisterBackHandler });
+  } = usePharmacyShoppingModel({
+    medications,
+    settings,
+    onUpdateSettings,
+    showToast,
+    ...(onRegisterBackHandler !== undefined ? { onRegisterBackHandler } : {}),
+  });
 
   const handleShowAllForPlanning = () => {
     restoreAllMedicationsToShopping();

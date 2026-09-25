@@ -22,7 +22,6 @@ export interface UseAddMedicationFormOptions {
     editId?: string
   ) => Promise<boolean>;
   initialData?: Medication | null | undefined;
-  defaultAutoDeductEnabled?: boolean | undefined;
 }
 
 /**
@@ -33,11 +32,10 @@ export function useAddMedicationForm({
   isOpen,
   onSave,
   initialData,
-  defaultAutoDeductEnabled = true,
 }: UseAddMedicationFormOptions) {
   const [form, dispatch] = useReducer(
     addMedicationFormReducer,
-    defaultAutoDeductEnabled,
+    undefined,
     createDefaultFormModel
   );
 
@@ -46,7 +44,7 @@ export function useAddMedicationForm({
     if (initialData) {
       dispatch({ type: 'INIT_EDIT', medication: initialData });
     } else {
-      dispatch({ type: 'RESET_ADD', defaultAutoDeductEnabled });
+      dispatch({ type: 'RESET_ADD', defaultAutoDeductEnabled: false });
     }
     // Intentionally only [isOpen]: parent identity changes must not reset mid-edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -20,7 +20,7 @@ export const AddMedicationStockSettings: FC<Props> = ({
   autoDeductEnabled,
   setAutoDeductEnabled,
 }) => (
-  <section className="space-y-3">
+  <section className="space-y-3 pt-2 border-t border-slate-100">
     <div className="grid grid-cols-2 gap-3 items-stretch">
       <div className="min-w-0 p-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between gap-3">
         <span className="text-xs font-bold text-slate-700 leading-snug">

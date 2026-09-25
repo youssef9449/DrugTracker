@@ -23,12 +23,12 @@ function baseMed(overrides: Partial<Medication> = {}): Medication {
 }
 
 describe('addMedicationFormReducer', () => {
-  it('creates default add-mode model', () => {
-    const m = createDefaultFormModel(true);
+  it('creates default add-mode model with optional medication settings disabled', () => {
+    const m = createDefaultFormModel();
     expect(m.details.name).toBe('');
     expect(m.stock.currentPills).toBe(30);
-    expect(m.treatment.autoDeductEnabled).toBe(true);
-    expect(m.dosage.criticalStockAlertsEnabled).toBe(true);
+    expect(m.treatment.autoDeductEnabled).toBe(false);
+    expect(m.dosage.criticalStockAlertsEnabled).toBe(false);
     expect(m.dosage.dosesPerDay).toBe(1);
   });
 

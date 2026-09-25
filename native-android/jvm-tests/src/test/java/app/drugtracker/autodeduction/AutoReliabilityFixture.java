@@ -26,7 +26,7 @@ import java.util.Calendar;
 import java.util.Locale;
 import java.util.TimeZone;
 
-abstract class Group2AutoReliabilityFixture {
+abstract class AutoReliabilityFixture {
 
     @Before
     public void setUp() {

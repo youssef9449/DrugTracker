@@ -92,6 +92,7 @@ function parsePharmacySettings(
   }
   if (
     candidate.defaultDurationDays !== undefined &&
+    candidate.defaultDurationDays !== 30 &&
     candidate.defaultDurationDays !== 60
   ) {
     return { ok: false, reason: 'pharmacy_default_duration_invalid' };

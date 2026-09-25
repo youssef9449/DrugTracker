@@ -1,6 +1,15 @@
 import { requireDefined } from '../helpers/requireDefined';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+function firstScheduledNotification() {
+  const call = requireDefined(
+    mocks.schedule.mock.calls[0],
+    'first schedule call'
+  );
+  const request = requireDefined(call[0], 'first schedule request');
+  return requireDefined(request.notifications[0], 'first scheduled notification');
+}
+
 const mocks = vi.hoisted(() => ({
   platform: vi.fn(() => 'android'),
   nativePost: vi.fn(),

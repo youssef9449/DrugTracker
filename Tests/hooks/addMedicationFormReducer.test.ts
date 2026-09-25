@@ -28,17 +28,39 @@ describe('addMedicationFormReducer', () => {
     expect(m.details.name).toBe('');
     expect(m.stock.currentPills).toBe(30);
     expect(m.treatment.autoDeductEnabled).toBe(true);
+    expect(m.dosage.criticalStockAlertsEnabled).toBe(true);
     expect(m.dosage.dosesPerDay).toBe(1);
   });
 
   it('initializes edit mode from medication', () => {
     const m = createEditFormModel(
-      baseMed({ name: 'Aspirin', currentPills: 12, isChronic: false, durationDays: 7 })
+      baseMed({
+        name: 'Aspirin',
+        currentPills: 12,
+        isChronic: false,
+        durationDays: 7,
+        criticalStockAlertsEnabled: false,
+      })
     );
     expect(m.details.name).toBe('Aspirin');
     expect(m.stock.currentPills).toBe(12);
     expect(m.treatment.isChronic).toBe(false);
     expect(m.treatment.durationDaysStr).toBe('7');
+    expect(m.dosage.criticalStockAlertsEnabled).toBe(false);
+  });
+
+  it('defaults missing stock alert preference to enabled in edit mode', () => {
+    const m = createEditFormModel(baseMed());
+    expect(m.dosage.criticalStockAlertsEnabled).toBe(true);
+  });
+
+  it('toggles stock alert preference', () => {
+    const start = createDefaultFormModel();
+    const next = addMedicationFormReducer(start, {
+      type: 'SET_CRITICAL_STOCK_ALERTS_ENABLED',
+      value: false,
+    });
+    expect(next.dosage.criticalStockAlertsEnabled).toBe(false);
   });
 
   it('UNIT_CHANGED applies liquid defaults in add mode', () => {

@@ -219,6 +219,9 @@ export function prepareAndroidManifest(xml) {
     if (doc.getElementsByTagName('parsererror').length > 0) {
       fail('AndroidManifest.xml is malformed');
     }
+    if (doc.documentElement.getAttribute('xmlns:android') !== ANDROID_NS) {
+      fail('AndroidManifest.xml is missing the canonical android namespace');
+    }
 
     const applicationNodes = directChildren(doc.documentElement, 'application');
     if (applicationNodes.length !== 1) {

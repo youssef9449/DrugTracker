@@ -1,466 +1,459 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { JSDOM } from 'jsdom';
 
 /**
- * Post-`cap sync` Android preparation for Drug Tracker.
+ * Post-cap-sync Android preparation for Drug Tracker.
  *
- * 1. Ensure SCHEDULE_EXACT_ALARM in AndroidManifest.xml
- * 2. Remove legacy dose_reminder.wav (v3 uses system default sound)
- * 3. Install repository-owned shared notification runtime sources:
- *    - NotificationRuntime.java
- *    - NotificationRuntimeActionReceiver.java
- *    - NotificationRuntimePlugin.java
- *    - AppForegroundState.java
+ * The repository-owned native Android source directories are the single
+ * source of truth. Every Java production source in each owned feature
+ * directory is copied into the generated Android project, and stale Java
+ * files previously generated/copied into those owned destinations are removed.
  *
- * Whole-file copies only. No string/regex patching of dependency source.
- * Fails hard if required destinations are missing.
+ * Manifest changes use a real XML DOM parser/serializer. Only elements owned
+ * by this preparation step are replaced or removed; unrelated Capacitor
+ * generated content remains in the document.
  *
  * Requires @capacitor/local-notifications exactly 6.1.3 (pinned in package.json).
  */
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const androidDir = path.join(root, 'android');
-if (!fs.existsSync(androidDir)) {
-  console.error('Android project not found. Run "npx cap add android" once.');
-  process.exit(1);
-}
-
-// ── 1. Exact-alarm permission ──────────────────────────────────────────
 const manifestPath = path.join(androidDir, 'app', 'src', 'main', 'AndroidManifest.xml');
-if (!fs.existsSync(manifestPath)) {
-  console.error('[prepare-android] FATAL: AndroidManifest.xml missing at', manifestPath);
-  process.exit(1);
-}
-let manifest = fs.readFileSync(manifestPath, 'utf8');
-const exactPermission = '<uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />';
-manifest = manifest.replace(/\s*<uses-permission android:name="android\.permission\.USE_EXACT_ALARM"\s*\/>/g, '');
-if (!manifest.includes(exactPermission)) {
-  manifest = manifest.replace(/(<manifest\b[^>]*>)/, `$1\n    ${exactPermission}`);
-}
-fs.writeFileSync(manifestPath, manifest);
+const ANDROID_NS = 'http://schemas.android.com/apk/res/android';
 
-// ── 2. Remove legacy custom notification sound ────────────────────────
-const rawDir = path.join(root, 'android', 'app', 'src', 'main', 'res', 'raw');
-const soundPath = path.join(rawDir, 'dose_reminder.wav');
-if (fs.existsSync(soundPath)) {
-  fs.unlinkSync(soundPath);
-  console.info('Removed legacy dose_reminder.wav (notification runtime uses channel defaults).');
+function fail(message, ...details) {
+  console.error('[prepare-android] FATAL:', message, ...details);
+  throw new Error(message);
 }
 
-// ── 3. Remove obsolete generated Phase-5 notification-delivery sources ──
-const legacyNotificationJavaDir = path.join(
-  androidDir,
-  'app',
-  'src',
-  'main',
-  'java',
-  'com',
-  'capacitorjs',
-  'plugins',
-  'localnotifications'
-);
-for (const file of [
-  'TimedNotificationPublisher.java',
-  'DoseReminderRecurrenceStore.java',
-  'AppForegroundState.java',
-]) {
-  const legacyPath = path.join(legacyNotificationJavaDir, file);
-  if (fs.existsSync(legacyPath)) {
-    fs.unlinkSync(legacyPath);
+function syncJavaSourceSet(sourceDir, destinationDir, label) {
+  if (!fs.existsSync(sourceDir)) {
+    fail('missing source directory for ' + label + ': ' + sourceDir);
+  }
+
+  const entries = fs
+    .readdirSync(sourceDir, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.java')) {
+      fail(
+        label +
+          ' source directory contains an unsupported entry: ' +
+          path.join(sourceDir, entry.name)
+      );
+    }
+  }
+
+  const sourceFiles = entries.map((entry) => entry.name);
+  if (sourceFiles.length === 0) {
+    fail('no Java production sources found for ' + label + ': ' + sourceDir);
+  }
+
+  fs.mkdirSync(destinationDir, { recursive: true });
+
+  const sourceFileSet = new Set(sourceFiles);
+  for (const entry of fs.readdirSync(destinationDir, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith('.java') && !sourceFileSet.has(entry.name)) {
+      const stalePath = path.join(destinationDir, entry.name);
+      fs.unlinkSync(stalePath);
+      console.info(
+        '[prepare-android] Removed stale ' +
+          label +
+          ' source ' +
+          path.relative(root, stalePath)
+      );
+    }
+  }
+
+  for (const file of sourceFiles) {
+    const src = path.join(sourceDir, file);
+    const dest = path.join(destinationDir, file);
+    fs.copyFileSync(src, dest);
     console.info(
-      '[prepare-android] Removed obsolete generated source ' +
-        path.relative(root, legacyPath)
+      '[prepare-android] Installed ' +
+        path.relative(root, src) +
+        ' → ' +
+        path.relative(root, dest)
     );
   }
+
+  return sourceFiles;
 }
 
-// ── 3b. Install repository-owned shared notification runtime ───────────
-
-const notificationRuntimeSrcDir = path.join(root, 'native-android', 'notification-runtime');
-const notificationRuntimeDestDir = path.join(
-  androidDir,
-  'app',
-  'src',
-  'main',
-  'java',
-  'app',
-  'drugtracker',
-  'notificationruntime'
-);
-if (!fs.existsSync(notificationRuntimeDestDir)) {
-  fs.mkdirSync(notificationRuntimeDestDir, { recursive: true });
+function androidAttribute(element, localName) {
+  return element.getAttributeNS(ANDROID_NS, localName);
 }
-const notificationRuntimeFiles = [
-  'AppForegroundState.java',
-  'NotificationRuntime.java',
-  'NotificationRuntimeActionReceiver.java',
-  'NotificationRuntimePlugin.java',
-];
-for (const file of notificationRuntimeFiles) {
-  const src = path.join(notificationRuntimeSrcDir, file);
-  const dest = path.join(notificationRuntimeDestDir, file);
-  if (!fs.existsSync(src)) {
-    console.error('[prepare-android] FATAL: missing notification-runtime source:', src);
-    process.exit(1);
-  }
-  fs.copyFileSync(src, dest);
-  console.info(
-    '[prepare-android] Installed ' +
-      path.relative(root, src) +
-      ' → ' +
-      path.relative(root, dest)
+
+function setAndroidAttribute(element, localName, value) {
+  element.setAttributeNS(ANDROID_NS, 'android:' + localName, value);
+}
+
+function directChildren(parent, localName) {
+  return Array.from(parent.children).filter((child) => child.localName === localName);
+}
+
+function namedDescendants(parent, localName, androidName) {
+  return Array.from(parent.getElementsByTagName(localName)).filter(
+    (element) => androidAttribute(element, 'name') === androidName
   );
 }
 
-// ── 4. Install shared exact-alarm runtime + Auto Deduction sources ────────────
-const alarmRuntimeSrcDir = path.join(root, 'native-android', 'alarm-runtime');
-const alarmRuntimeDestDir = path.join(
-  androidDir,
-  'app',
-  'src',
-  'main',
-  'java',
-  'app',
-  'drugtracker',
-  'alarmruntime'
-);
-const alarmRuntimeFiles = [
-  'NativeErrorCodes.java',
-  'ExactAlarmContract.java',
-  'ExactAlarmPendingIntents.java',
-  'ExactAlarmOperationLock.java',
-  'ExactAlarmStore.java',
-  'ExactAlarmRuntime.java',
-  'ExactAlarmLifecycle.java',
-  'DrugTrackerAlarmSystemReceiver.java',
-  'ExactAlarmFeatureAdapter.java',
-  'ExactAlarmPlugin.java',
-  'DoseReminderAlarmFeature.java',
-];
-if (!fs.existsSync(alarmRuntimeDestDir)) {
-  fs.mkdirSync(alarmRuntimeDestDir, { recursive: true });
-}
-for (const file of alarmRuntimeFiles) {
-  const src = path.join(alarmRuntimeSrcDir, file);
-  const dest = path.join(alarmRuntimeDestDir, file);
-  if (!fs.existsSync(src)) {
-    console.error('[prepare-android] FATAL: missing alarm-runtime source:', src);
-    process.exit(1);
+function requireSingleOwnedDirectChild(parent, localName, androidName, label) {
+  const matches = namedDescendants(parent, localName, androidName);
+  if (matches.length > 1) {
+    fail('duplicate owned ' + label + ' elements found for ' + androidName);
   }
-  fs.copyFileSync(src, dest);
-  console.info('[prepare-android] Installed ' + path.relative(root, src) + ' → ' + path.relative(root, dest));
-}
-// ── 4. Phase 2: install auto-deduction native sources ──────────────────
-const autoDeductionSrcDir = path.join(root, 'native-android', 'auto-deduction');
-const autoDeductionDestDir = path.join(
-  androidDir,
-  'app',
-  'src',
-  'main',
-  'java',
-  'app',
-  'drugtracker',
-  'autodeduction'
-);
-const autoDeductionFiles = [
-  'AutoDeductionContract.java',
-  'AutoDeductionEventStore.java',
-  'AutoDeductionScheduler.java',
-  'AutoDeductionSchedulingAdapter.java',
-  'AutoDeductionReceiver.java',
-  'AutoDeductionStockStore.java',
-  'AutoDeductionLifecycle.java',
-  'AutoDeductionAlarmFeature.java',
-  'AutoDeductionPlugin.java',
-];
-if (!fs.existsSync(autoDeductionDestDir)) {
-  fs.mkdirSync(autoDeductionDestDir, { recursive: true });
-}
-for (const file of autoDeductionFiles) {
-  const src = path.join(autoDeductionSrcDir, file);
-  const dest = path.join(autoDeductionDestDir, file);
-  if (!fs.existsSync(src)) {
-    console.error('[prepare-android] FATAL: missing auto-deduction source:', src);
-    process.exit(1);
+  if (matches.length === 1 && matches[0].parentElement !== parent) {
+    fail('owned ' + label + ' is not a direct child of its expected parent: ' + androidName);
   }
-  fs.copyFileSync(src, dest);
-  console.info(`[prepare-android] Installed ${path.relative(root, src)} → ${path.relative(root, dest)}`);
+  return matches[0] || null;
 }
 
-// ── 4b. Dose reminder native query plugin (re-arm evidence bridge) ─────
-const doseReminderSrcDir = path.join(root, 'native-android', 'dose-reminder');
-const doseReminderDestDir = path.join(
-  androidDir,
-  'app',
-  'src',
-  'main',
-  'java',
-  'app',
-  'drugtracker',
-  'dosereminder'
-);
-const doseReminderFiles = [
-  'DoseReminderAlarmAdapter.java',
-  'DoseReminderAlarmReceiver.java',
-  'DoseReminderPlugin.java',
-];
-if (!fs.existsSync(doseReminderDestDir)) {
-  fs.mkdirSync(doseReminderDestDir, { recursive: true });
-}
-for (const file of doseReminderFiles) {
-  const src = path.join(doseReminderSrcDir, file);
-  const dest = path.join(doseReminderDestDir, file);
-  if (!fs.existsSync(src)) {
-    console.error('[prepare-android] FATAL: missing dose-reminder source:', src);
-    process.exit(1);
-  }
-  fs.copyFileSync(src, dest);
-  console.info(`[prepare-android] Installed ${path.relative(root, src)} → ${path.relative(root, dest)}`);
+function createAction(doc, actionName) {
+  const action = doc.createElement('action');
+  setAndroidAttribute(action, 'name', actionName);
+  return action;
 }
 
-// ── 4c. Critical Stock native exact-alarm boundary ─────────────────────
-const criticalStockSrcDir = path.join(root, 'native-android', 'critical-stock');
-const criticalStockDestDir = path.join(
-  androidDir,
-  'app',
-  'src',
-  'main',
-  'java',
-  'app',
-  'drugtracker',
-  'criticalstock'
-);
-const criticalStockFiles = [
-  'CriticalStockAlarmAdapter.java',
-  'CriticalStockAlarmReceiver.java',
-  'CriticalStockPlugin.java',
-];
-if (!fs.existsSync(criticalStockDestDir)) {
-  fs.mkdirSync(criticalStockDestDir, { recursive: true });
-}
-for (const file of criticalStockFiles) {
-  const src = path.join(criticalStockSrcDir, file);
-  const dest = path.join(criticalStockDestDir, file);
-  if (!fs.existsSync(src)) {
-    console.error('[prepare-android] FATAL: missing critical-stock source:', src);
-    process.exit(1);
+function createReceiver(doc, config) {
+  const receiver = doc.createElement('receiver');
+  setAndroidAttribute(receiver, 'name', config.androidName);
+  setAndroidAttribute(receiver, 'exported', config.exported);
+  setAndroidAttribute(receiver, 'enabled', 'true');
+
+  const intentFilter = doc.createElement('intent-filter');
+  for (const actionName of config.actions) {
+    intentFilter.appendChild(createAction(doc, actionName));
   }
-  fs.copyFileSync(src, dest);
+  receiver.appendChild(intentFilter);
+  return receiver;
+}
+
+function upsertReceiver(application, doc, config) {
+  const existing = requireSingleOwnedDirectChild(
+    application,
+    'receiver',
+    config.androidName,
+    'receiver'
+  );
+  const next = createReceiver(doc, config);
+  if (existing) {
+    application.replaceChild(next, existing);
+  } else {
+    application.appendChild(next);
+  }
+}
+
+function removeReceiver(application, androidName) {
+  const existing = requireSingleOwnedDirectChild(
+    application,
+    'receiver',
+    androidName,
+    'receiver'
+  );
+  if (existing) {
+    application.removeChild(existing);
+  }
+}
+
+function upsertMetaData(application, doc, androidName, value) {
+  const existing = requireSingleOwnedDirectChild(
+    application,
+    'meta-data',
+    androidName,
+    'meta-data'
+  );
+  const next = doc.createElement('meta-data');
+  setAndroidAttribute(next, 'name', androidName);
+  setAndroidAttribute(next, 'value', value);
+  if (existing) {
+    application.replaceChild(next, existing);
+  } else {
+    application.appendChild(next);
+  }
+}
+
+function requireSinglePermission(manifest, permissionName) {
+  const matches = directChildren(manifest, 'uses-permission').filter(
+    (element) => androidAttribute(element, 'name') === permissionName
+  );
+  if (matches.length > 1) {
+    fail('duplicate uses-permission entries found for ' + permissionName);
+  }
+  return matches[0] || null;
+}
+
+function ensurePermission(manifest, doc, permissionName, application) {
+  if (requireSinglePermission(manifest, permissionName)) return;
+  const permission = doc.createElement('uses-permission');
+  setAndroidAttribute(permission, 'name', permissionName);
+  manifest.insertBefore(permission, application);
+}
+
+function removePermission(manifest, permissionName) {
+  const existing = requireSinglePermission(manifest, permissionName);
+  if (existing) {
+    manifest.removeChild(existing);
+  }
+}
+
+export function prepareAndroidManifest(xml) {
+  let dom;
+  try {
+    dom = new JSDOM(xml, { contentType: 'application/xml' });
+  } catch (error) {
+    throw new Error(
+      'AndroidManifest.xml could not be parsed: ' +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+
+  try {
+    const doc = dom.window.document;
+    if (!doc.documentElement || doc.documentElement.localName !== 'manifest') {
+      fail('AndroidManifest.xml root element must be <manifest>');
+    }
+    if (doc.getElementsByTagName('parsererror').length > 0) {
+      fail('AndroidManifest.xml is malformed');
+    }
+
+    const applicationNodes = directChildren(doc.documentElement, 'application');
+    if (applicationNodes.length !== 1) {
+      fail(
+        'AndroidManifest.xml must contain exactly one direct <application> element; found ' +
+          applicationNodes.length
+      );
+    }
+    const application = applicationNodes[0];
+    const manifest = doc.documentElement;
+
+    ensurePermission(
+      manifest,
+      doc,
+      'android.permission.SCHEDULE_EXACT_ALARM',
+      application
+    );
+    ensurePermission(
+      manifest,
+      doc,
+      'android.permission.RECEIVE_BOOT_COMPLETED',
+      application
+    );
+    removePermission(manifest, 'android.permission.USE_EXACT_ALARM');
+
+    upsertReceiver(application, doc, {
+      androidName: 'app.drugtracker.autodeduction.AutoDeductionReceiver',
+      exported: 'false',
+      actions: ['app.drugtracker.action.AUTO_DEDUCTION'],
+    });
+    upsertReceiver(application, doc, {
+      androidName: 'app.drugtracker.dosereminder.DoseReminderAlarmReceiver',
+      exported: 'false',
+      actions: [
+        'app.drugtracker.action.DOSE_REMINDER_ALARM',
+        'app.drugtracker.action.DOSE_REMINDER_SNOOZE',
+      ],
+    });
+    upsertReceiver(application, doc, {
+      androidName: 'app.drugtracker.criticalstock.CriticalStockAlarmReceiver',
+      exported: 'false',
+      actions: ['app.drugtracker.action.CRITICAL_STOCK_ALARM'],
+    });
+    upsertReceiver(application, doc, {
+      androidName: 'app.drugtracker.notificationruntime.NotificationRuntimeActionReceiver',
+      exported: 'false',
+      actions: ['app.drugtracker.notificationruntime.ACTION'],
+    });
+    upsertReceiver(application, doc, {
+      androidName: 'app.drugtracker.alarmruntime.DrugTrackerAlarmSystemReceiver',
+      exported: 'true',
+      actions: [
+        'android.intent.action.BOOT_COMPLETED',
+        'android.intent.action.QUICKBOOT_POWERON',
+        'android.intent.action.TIMEZONE_CHANGED',
+        'android.intent.action.TIME_SET',
+        'android.intent.action.TIMEZONE_OFFSET_CHANGED',
+        'android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED',
+      ],
+    });
+
+    removeReceiver(
+      application,
+      'app.drugtracker.autodeduction.AutoDeductionSystemReceiver'
+    );
+    removeReceiver(
+      application,
+      'app.drugtracker.criticalstock.CriticalStockSystemReceiver'
+    );
+    removeReceiver(
+      application,
+      'app.drugtracker.dosereminder.DoseReminderSystemReceiver'
+    );
+    removeReceiver(
+      application,
+      'com.capacitorjs.plugins.localnotifications.TimedNotificationPublisher'
+    );
+    removeReceiver(
+      application,
+      'app.drugtracker.alarmruntime.ExactAlarmSystemReceiver'
+    );
+
+    upsertMetaData(
+      application,
+      doc,
+      'app.drugtracker.EXACT_ALARM_FEATURE_ADAPTERS',
+      'app.drugtracker.autodeduction.AutoDeductionAlarmFeature,app.drugtracker.criticalstock.CriticalStockAlarmAdapter,app.drugtracker.alarmruntime.DoseReminderAlarmFeature'
+    );
+
+    return new dom.window.XMLSerializer().serializeToString(doc);
+  } finally {
+    dom.window.close();
+  }
+}
+
+export function prepareAndroidProject() {
+  if (!fs.existsSync(androidDir)) {
+    fail(
+      'Android project not found. Generate the clean Capacitor Android project before preparation.'
+    );
+  }
+  if (!fs.existsSync(manifestPath)) {
+    fail('AndroidManifest.xml missing at ' + manifestPath);
+  }
+
+  const manifest = fs.readFileSync(manifestPath, 'utf8');
+
+  const legacySoundPath = path.join(
+    root,
+    'android',
+    'app',
+    'src',
+    'main',
+    'res',
+    'raw',
+    'dose_reminder.wav'
+  );
+  if (fs.existsSync(legacySoundPath)) {
+    fs.unlinkSync(legacySoundPath);
+    console.info(
+      'Removed legacy dose_reminder.wav (notification runtime uses channel defaults).'
+    );
+  }
+
+  const legacyNotificationJavaDir = path.join(
+    androidDir,
+    'app',
+    'src',
+    'main',
+    'java',
+    'com',
+    'capacitorjs',
+    'plugins',
+    'localnotifications'
+  );
+  for (const file of [
+    'TimedNotificationPublisher.java',
+    'DoseReminderRecurrenceStore.java',
+    'AppForegroundState.java',
+  ]) {
+    const legacyPath = path.join(legacyNotificationJavaDir, file);
+    if (fs.existsSync(legacyPath)) {
+      fs.unlinkSync(legacyPath);
+      console.info(
+        '[prepare-android] Removed obsolete generated source ' +
+          path.relative(root, legacyPath)
+      );
+    }
+  }
+
+  syncJavaSourceSet(
+    path.join(root, 'native-android', 'notification-runtime'),
+    path.join(
+      androidDir,
+      'app',
+      'src',
+      'main',
+      'java',
+      'app',
+      'drugtracker',
+      'notificationruntime'
+    ),
+    'notification-runtime'
+  );
+  syncJavaSourceSet(
+    path.join(root, 'native-android', 'alarm-runtime'),
+    path.join(
+      androidDir,
+      'app',
+      'src',
+      'main',
+      'java',
+      'app',
+      'drugtracker',
+      'alarmruntime'
+    ),
+    'alarm-runtime'
+  );
+  syncJavaSourceSet(
+    path.join(root, 'native-android', 'auto-deduction'),
+    path.join(
+      androidDir,
+      'app',
+      'src',
+      'main',
+      'java',
+      'app',
+      'drugtracker',
+      'autodeduction'
+    ),
+    'auto-deduction'
+  );
+  syncJavaSourceSet(
+    path.join(root, 'native-android', 'dose-reminder'),
+    path.join(
+      androidDir,
+      'app',
+      'src',
+      'main',
+      'java',
+      'app',
+      'drugtracker',
+      'dosereminder'
+    ),
+    'dose-reminder'
+  );
+  syncJavaSourceSet(
+    path.join(root, 'native-android', 'critical-stock'),
+    path.join(
+      androidDir,
+      'app',
+      'src',
+      'main',
+      'java',
+      'app',
+      'drugtracker',
+      'criticalstock'
+    ),
+    'critical-stock'
+  );
+
+  fs.writeFileSync(manifestPath, prepareAndroidManifest(manifest));
   console.info(
-    '[prepare-android] Installed ' +
-      path.relative(root, src) +
-      ' → ' +
-      path.relative(root, dest)
+    '[prepare-android] Ensured private Auto/Dose/Critical receivers + private notification action receiver + shared DrugTrackerAlarmSystemReceiver.'
+  );
+  console.info(
+    'Prepared Android exact-alarm runtime + shared notification runtime + Auto/Dose/Critical feature boundaries.'
   );
 }
 
-// ── 5. Register private feature delivery + one shared system lifecycle receiver ─
-manifest = fs.readFileSync(manifestPath, 'utf8');
-const bootPermission = '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />';
-if (!manifest.includes(bootPermission)) {
-  manifest = manifest.replace(/(<manifest\b[^>]*>)/, `$1\n    ${bootPermission}`);
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
+if (invokedPath === path.resolve(fileURLToPath(import.meta.url))) {
+  try {
+    prepareAndroidProject();
+  } catch {
+    process.exitCode = 1;
+  }
 }
-
-/**
- * Replace or insert a single <receiver> whose android:name matches exactly.
- * Scans for the unique name attribute, then expands outward to the enclosing
- * <receiver>...</receiver> without crossing other receiver elements.
- * Returns { manifest, changed }.
- */
-function upsertReceiverByName(xml, androidName, receiverXml) {
-  const nameAttr = `android:name="${androidName}"`;
-  const nameIdx = xml.indexOf(nameAttr);
-  if (nameIdx === -1) {
-    if (!xml.includes('</application>')) {
-      console.error('[prepare-android] FATAL: </application> not found in AndroidManifest.xml');
-      process.exit(1);
-    }
-    return {
-      manifest: xml.replace('</application>', `${receiverXml}\n    </application>`),
-      changed: true,
-    };
-  }
-  // Walk backward to the nearest <receiver that starts this element.
-  const openTag = '<receiver';
-  let openIdx = xml.lastIndexOf(openTag, nameIdx);
-  if (openIdx === -1) {
-    console.error('[prepare-android] FATAL: could not find <receiver opening for', androidName);
-    process.exit(1);
-  }
-  // Ensure no other </receiver> sits between openIdx and nameIdx (malformed guard).
-  const between = xml.slice(openIdx, nameIdx);
-  if (between.includes('</receiver>')) {
-    console.error('[prepare-android] FATAL: ambiguous receiver block for', androidName);
-    process.exit(1);
-  }
-  const closeTag = '</receiver>';
-  const closeIdx = xml.indexOf(closeTag, nameIdx);
-  if (closeIdx === -1) {
-    console.error('[prepare-android] FATAL: unclosed <receiver for', androidName);
-    process.exit(1);
-  }
-  // Include any leading whitespace/newline before the open tag for clean replace.
-  let start = openIdx;
-  while (start > 0 && (xml[start - 1] === ' ' || xml[start - 1] === '\t')) start--;
-  if (start > 0 && xml[start - 1] === '\n') start--;
-  const end = closeIdx + closeTag.length;
-  const next = xml.slice(0, start) + '\n' + receiverXml + xml.slice(end);
-  return { manifest: next, changed: true };
-}
-
-// Private alarm delivery — explicit PendingIntent only; not externally invocable.
-const privateAlarmReceiver = `        <receiver
-            android:name="app.drugtracker.autodeduction.AutoDeductionReceiver"
-            android:exported="false"
-            android:enabled="true">
-            <intent-filter>
-                <action android:name="app.drugtracker.action.AUTO_DEDUCTION" />
-            </intent-filter>
-        </receiver>`;
-
-const doseReminderAlarmReceiver = `        <receiver
-            android:name="app.drugtracker.dosereminder.DoseReminderAlarmReceiver"
-            android:exported="false"
-            android:enabled="true">
-            <intent-filter>
-                <action android:name="app.drugtracker.action.DOSE_REMINDER_ALARM" />
-                <action android:name="app.drugtracker.action.DOSE_REMINDER_SNOOZE" />
-            </intent-filter>
-        </receiver>`;
-
-const criticalStockAlarmReceiver = `        <receiver
-            android:name="app.drugtracker.criticalstock.CriticalStockAlarmReceiver"
-            android:exported="false"
-            android:enabled="true">
-            <intent-filter>
-                <action android:name="app.drugtracker.action.CRITICAL_STOCK_ALARM" />
-            </intent-filter>
-        </receiver>`;
-
-const notificationActionReceiver = `        <receiver
-            android:name="app.drugtracker.notificationruntime.NotificationRuntimeActionReceiver"
-            android:exported="false"
-            android:enabled="true">
-            <intent-filter>
-                <action android:name="app.drugtracker.notificationruntime.ACTION" />
-            </intent-filter>
-        </receiver>`;
-
-// System lifecycle is owned by the shared exact-alarm runtime.
-// exported=true is required for system-delivered broadcasts on API 31+.
-const systemLifecycleReceiver = `        <receiver
-            android:name="app.drugtracker.alarmruntime.DrugTrackerAlarmSystemReceiver"
-            android:exported="true"
-            android:enabled="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
-                <action android:name="android.intent.action.TIME_SET" />
-                <action android:name="android.intent.action.TIMEZONE_OFFSET_CHANGED" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
-            </intent-filter>
-        </receiver>`;
-
-function removeReceiverByName(xml, androidName) {
-  const nameAttr = `android:name="${androidName}"`;
-  const nameIdx = xml.indexOf(nameAttr);
-  if (nameIdx === -1) return xml;
-  const openIdx = xml.lastIndexOf('<receiver', nameIdx);
-  if (openIdx === -1) return xml;
-  const closeTag = '</receiver>';
-  const closeIdx = xml.indexOf(closeTag, nameIdx);
-  if (closeIdx === -1) {
-    console.error('[prepare-android] FATAL: unclosed <receiver for', androidName);
-    process.exit(1);
-  }
-  let start = openIdx;
-  while (start > 0 && (xml[start - 1] === ' ' || xml[start - 1] === '\t')) start--;
-  if (start > 0 && xml[start - 1] === '\n') start--;
-  return xml.slice(0, start) + xml.slice(closeIdx + closeTag.length);
-}
-
-function upsertApplicationMetaData(xml, androidName, value) {
-  const nameAttr = `android:name="${androidName}"`;
-  const metaXml = `        <meta-data
-            android:name="${androidName}"
-            android:value="${value}" />`;
-  const nameIdx = xml.indexOf(nameAttr);
-  if (nameIdx === -1) {
-    if (!xml.includes('</application>')) {
-      console.error('[prepare-android] FATAL: </application> not found in AndroidManifest.xml');
-      process.exit(1);
-    }
-    return xml.replace('</application>', `${metaXml}\n    </application>`);
-  }
-  const openIdx = xml.lastIndexOf('<meta-data', nameIdx);
-  const closeIdx = xml.indexOf('/>', nameIdx);
-  if (openIdx === -1 || closeIdx === -1) {
-    console.error('[prepare-android] FATAL: malformed <meta-data for', androidName);
-    process.exit(1);
-  }
-  let start = openIdx;
-  while (start > 0 && (xml[start - 1] === ' ' || xml[start - 1] === '\t')) start--;
-  if (start > 0 && xml[start - 1] === '\n') start--;
-  return xml.slice(0, start) + metaXml + xml.slice(closeIdx + 2);
-}
-
-({ manifest } = upsertReceiverByName(
-  manifest,
-  'app.drugtracker.autodeduction.AutoDeductionReceiver',
-  privateAlarmReceiver
-));
-({ manifest } = upsertReceiverByName(
-  manifest,
-  'app.drugtracker.dosereminder.DoseReminderAlarmReceiver',
-  doseReminderAlarmReceiver
-));
-({ manifest } = upsertReceiverByName(
-  manifest,
-  'app.drugtracker.criticalstock.CriticalStockAlarmReceiver',
-  criticalStockAlarmReceiver
-));
-({ manifest } = upsertReceiverByName(
-  manifest,
-  'app.drugtracker.notificationruntime.NotificationRuntimeActionReceiver',
-  notificationActionReceiver
-));
-({ manifest } = removeReceiverByName(
-  manifest,
-  'app.drugtracker.autodeduction.AutoDeductionSystemReceiver'
-));
-({ manifest } = removeReceiverByName(
-  manifest,
-  'app.drugtracker.criticalstock.CriticalStockSystemReceiver'
-));
-({ manifest } = removeReceiverByName(
-  manifest,
-  'app.drugtracker.dosereminder.DoseReminderSystemReceiver'
-));
-({ manifest } = removeReceiverByName(
-  manifest,
-  'com.capacitorjs.plugins.localnotifications.TimedNotificationPublisher'
-));
-({ manifest } = removeReceiverByName(
-  manifest,
-  'app.drugtracker.alarmruntime.ExactAlarmSystemReceiver'
-));
-({ manifest } = upsertReceiverByName(
-  manifest,
-  'app.drugtracker.alarmruntime.DrugTrackerAlarmSystemReceiver',
-  systemLifecycleReceiver
-));
-manifest = upsertApplicationMetaData(
-  manifest,
-  'app.drugtracker.EXACT_ALARM_FEATURE_ADAPTERS',
-  'app.drugtracker.autodeduction.AutoDeductionAlarmFeature,app.drugtracker.criticalstock.CriticalStockAlarmAdapter,app.drugtracker.alarmruntime.DoseReminderAlarmFeature'
-);
-
-fs.writeFileSync(manifestPath, manifest);
-console.info(
-  '[prepare-android] Ensured private Auto/Dose/Critical alarm receivers + private notification action receiver + shared DrugTrackerAlarmSystemReceiver.'
-);
-console.info('Prepared Android exact-alarm runtime + shared notification runtime + Auto/Dose/Critical feature boundaries.');

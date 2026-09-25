@@ -175,7 +175,7 @@ describe('useDoseReminderScheduler — per-dose instruction', () => {
     await flushUntil(() => mocks.schedule.mock.calls.length >= 1);
 
     const last = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
-    expect(requireDefined(last[6], 'last[6]')?.doseDescription).toBe('قبل النوم');
+    expect(requireDefined(requireDefined(last, 'last')[6], 'last[6]')?.doseDescription).toBe('قبل النوم');
   });
 
   it('does not add an instruction option when the per-dose description is empty', async () => {

@@ -9,7 +9,6 @@ import {
 } from '../utils/dateCalculations';
 import {
   isDoseCompletedToday,
-  isDoseTimeElapsedToday,
   isMedicationAutoDeductActive,
 } from '../utils/doseSchedule';
 import {
@@ -149,8 +148,8 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
             </div>
           ) : (
             items.map(({ dose, eventDate }) => {
-              const completed = isDoseCompletedToday(medication, dose, today, now, isAutoActive);
               const skipped = isDoseSkippedOnDate(medication, dose.id, today);
+              const completed = isDoseCompletedToday(medication, dose, today, now, isAutoActive);
               const consumed = isDoseConsumedOnDate(medication, dose.id, today);
               const activeDeduction = findActiveDeductionForOccurrence(
                 logs,
@@ -178,7 +177,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
                 today
               );
               const scheduleAmount = Number(dose.amount) || 0;
-              const elapsed = isDoseTimeElapsedToday(dose.time, now);
               // Pure projection is never treated as restorable.
               const timeLabel = formatTimeArabic(dose.time);
               const dayLabel = relativeDoseDayLabel(eventDate, today);

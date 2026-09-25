@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { makeMedication as baseMed, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
@@ -39,7 +40,7 @@ describe('reconcileFiredEvents — invalid amount must not ACK', () => {
       ]);
       expect(r.toAcknowledge).toEqual([]);
       expect(r.mutated).toBe(false);
-      expect(r.medications[0].currentPills).toBe(10);
+      expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(10);
       expect(r.newExactLogs).toEqual([]);
       expect(r.logs).toEqual([]);
     }
@@ -57,9 +58,9 @@ describe('reconcileFiredEvents — invalid amount must not ACK', () => {
       amount: 0,
     });
     const r1 = reconcileFiredEvents([med], [], [invalid]);
-    expect(r1.details[0].outcome).toBe('skipped_invalid');
+    expect(requireDefined(r1.details[0], 'r1.details[0]').outcome).toBe('skipped_invalid');
     expect(r1.toAcknowledge).toEqual([]);
-    expect(r1.medications[0].currentPills).toBe(10);
+    expect(requireDefined(r1.medications[0], 'r1.medications[0]').currentPills).toBe(10);
     expect(r1.newExactLogs).toEqual([]);
 
     const valid = fired({
@@ -69,11 +70,11 @@ describe('reconcileFiredEvents — invalid amount must not ACK', () => {
       amount: 2,
     });
     const r2 = reconcileFiredEvents(r1.medications, r1.logs, [valid]);
-    expect(r2.details[0].outcome).toBe('applied');
+    expect(requireDefined(r2.details[0], 'r2.details[0]').outcome).toBe('applied');
     expect(r2.mutated).toBe(true);
-    expect(r2.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r2.medications[0], 'r2.medications[0]').currentPills).toBe(8);
     expect(r2.newExactLogs).toHaveLength(1);
-    expect(r2.newExactLogs[0].amount).toBe(-2);
+    expect(requireDefined(r2.newExactLogs[0], 'r2.newExactLogs[0]').amount).toBe(-2);
     expect(r2.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: 'd1', calendarDate: '2026-09-14' },
     ]);
@@ -91,12 +92,12 @@ describe('reconcileFiredEvents — invalid amount must not ACK', () => {
       amount: 2,
     });
     const r = reconcileFiredEvents([med], [], [e]);
-    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('skipped_invalid');
     expect(r.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: '', calendarDate: '2026-09-14' },
     ]);
     expect(r.mutated).toBe(false);
-    expect(r.medications[0].currentPills).toBe(10);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(10);
     expect(r.newExactLogs).toEqual([]);
     expect(r.logs).toEqual([]);
   });
@@ -113,12 +114,12 @@ describe('reconcileFiredEvents — invalid amount must not ACK', () => {
       amount: 2,
     });
     const r = reconcileFiredEvents([med], [], [e]);
-    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('skipped_invalid');
     expect(r.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: '', calendarDate: '2026-09-14' },
     ]);
     expect(r.mutated).toBe(false);
-    expect(r.medications[0].currentPills).toBe(10);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(10);
     expect(r.newExactLogs).toEqual([]);
   });
 
@@ -134,10 +135,10 @@ describe('reconcileFiredEvents — invalid amount must not ACK', () => {
       amount: 0,
     });
     const r = reconcileFiredEvents([med], [], [e]);
-    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('skipped_invalid');
     expect(r.toAcknowledge).toEqual([]);
     expect(r.mutated).toBe(false);
-    expect(r.medications[0].currentPills).toBe(10);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(10);
     expect(r.newExactLogs).toEqual([]);
   });
 

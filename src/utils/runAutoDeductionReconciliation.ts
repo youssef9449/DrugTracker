@@ -63,7 +63,7 @@ export interface RunReconciliationInput {
   /** Prefer omit — gate loads durable state. Kept for tests that inject. */
   medications?: Medication[] | undefined;
   logs?: ConsumptionLog[] | undefined;
-  listFired?: () => Promise<ListFiredEventsResult> | undefined;
+  listFired?: (() => Promise<ListFiredEventsResult>) | undefined;
   markReconciled?: (
     medicationId: string,
     doseId: string,
@@ -209,7 +209,7 @@ async function runOnce(
         logs: existingExact.logs,
         globalAutoDeductEnabled: existingExact.globalAutoDeductEnabled,
         toAcknowledge: existingExact.toAcknowledge,
-        clear: () => saveEnvelope(null),
+        clear: () => saveEnvelope(null) ?? null,
       });
     }
     if (pending.length > 0) {

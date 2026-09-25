@@ -334,25 +334,16 @@ export async function recoverAllPendingStockEnvelopes(
       calendarDate: string;
       type: 'CONSUMED' | 'SKIPPED';
     }> | undefined
-  ) => Promise<{
-    ok: boolean;
-    error?: string;
-    stocks?: Array<{ medicationId: string; currentPills: number }>;
-  }> = (
+  ) => Promise<ApplyForegroundStockDeltasResult> = (
     mutationSeq,
     deltas,
     occurrenceResolutions
-  ) => applyForegroundAutoStockDeltas(
-    mutationSeq,
-    deltas,
-    occurrenceResolutions ?? []
-  ) as Promise<{
-    ok: boolean;
-    alreadyApplied: boolean;
-    stocks: NativeAutoStockMedication[];
-    error?: string | undefined;
-    errorCode?: NativeErrorCode | undefined;
-  }>
+  ) =>
+    applyForegroundAutoStockDeltas(
+      mutationSeq,
+      deltas,
+      occurrenceResolutions ?? []
+    )
 ): Promise<UnifiedRecoveryResult> {
   let state = fresh;
   let recovered = false;

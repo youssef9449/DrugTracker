@@ -253,7 +253,6 @@ export default function App() {
         }}
         onSave={handleSaveMedication}
         initialData={editingMedication}
-        defaultAutoDeductEnabled={globalAutoDeductEnabled}
       />
       <RefillModal
         medication={refillMedication}

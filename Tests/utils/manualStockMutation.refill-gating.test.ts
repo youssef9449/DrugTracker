@@ -45,7 +45,7 @@ const TODAY = '2026-09-16';
 
 
 
-describe('Phase 4 — Refill/UndoRefill through the durable gate', () => {
+describe('Refill/UndoRefill through the durable gate', () => {
   let durable: AutoStockDurableState;
   let manualEnvelope: TestManualStockEnvelope | null;
   let failLogs: boolean;

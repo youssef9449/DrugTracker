@@ -131,6 +131,49 @@ describe('useAutoDeductionScheduler — global kill switch', () => {
     unmount();
   });
 
+  it('Global OFF → ON resumes scheduling from the unchanged per-med preferences', async () => {
+    const enabledMed = baseMed({ id: 'on', autoDeductEnabled: true });
+    const disabledMed = baseMed({ id: 'off', autoDeductEnabled: false });
+    persistDurableState([enabledMed, disabledMed], false);
+
+    const { rerender, unmount } = renderHook(
+      (props: { enabled: boolean; tick: number }) =>
+        useAutoDeductionScheduler({
+          medications: [enabledMed, disabledMed],
+          globalAutoDeductEnabled: props.enabled,
+          hydrated: true,
+          isFirstRun: false,
+          exactAlarmPermission: 'granted',
+          resumeTick: props.tick,
+        }),
+      { initialProps: { enabled: false, tick: 0 } }
+    );
+
+    await wait();
+    expect(scheduleMock).not.toHaveBeenCalled();
+    expect(enabledMed.autoDeductEnabled).toBe(true);
+    expect(disabledMed.autoDeductEnabled).toBe(false);
+
+    persistDurableState([enabledMed, disabledMed], true);
+    rerender({ enabled: true, tick: 1 });
+    await wait();
+
+    const scheduledIds = new Set(
+      scheduleMock.mock.calls.map((call) =>
+        (call[0] as { medicationId: string }).medicationId
+      )
+    );
+    expect(scheduledIds.has('on')).toBe(true);
+    expect(scheduledIds.has('off')).toBe(false);
+    expect(enabledMed.autoDeductEnabled).toBe(true);
+    expect(disabledMed.autoDeductEnabled).toBe(false);
+    expect(JSON.parse(localStorage.getItem(STORAGE_MEDS_KEY) ?? '[]').map(
+      (m: Medication) => m.autoDeductEnabled
+    )).toEqual([true, false]);
+
+    unmount();
+  });
+
   it('Global OFF prevents a stale queued schedule from reaching the native bridge after the durable kill switch is disabled', async () => {
     const med = baseMed();
     persistDurableState([med], true);

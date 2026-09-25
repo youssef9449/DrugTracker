@@ -8,8 +8,6 @@ import {
   isDoseSkippedOnDate,
 } from '../utils/dateCalculations';
 import {
-  isDoseCompletedToday,
-  isMedicationAutoDeductActive,
 } from '../utils/doseSchedule';
 import {
   relativeDoseDayLabel,
@@ -36,8 +34,6 @@ export interface SelectDoseModalProps {
   onSelect: (medicationId: string, doseId: string) => void;
   /** Restore action in manage mode (falls back to onSelect if omitted). */
   onRestore?: (medicationId: string, doseId: string) => void;
-  /** Global Auto kill switch; preserves medication.autoDeductEnabled. */
-  globalAutoDeductEnabled?: boolean | undefined;
   /** Durable stock logs used to classify source and show historical amounts. */
   logs?: ConsumptionLog[];
   onClose: () => void;
@@ -60,7 +56,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   onRestore,
   logs = [],
   onClose,
-  globalAutoDeductEnabled = true,
 }) => {
   if (!medication) return null;
   const today = getTodayDateString();
@@ -74,8 +69,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   const unit = medication.unit || 'قرص';
   const isManage = mode === 'manage';
   const isRestore = mode === 'restore';
-  const isAutoActive =
-    globalAutoDeductEnabled && isMedicationAutoDeductActive(medication);
   const title =
     isManage
       ? 'إدارة الجرعات'
@@ -149,7 +142,6 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
           ) : (
             items.map(({ dose, eventDate }) => {
               const skipped = isDoseSkippedOnDate(medication, dose.id, today);
-              const completed = isDoseCompletedToday(medication, dose, today, now, isAutoActive);
               const consumed = isDoseConsumedOnDate(medication, dose.id, today);
               const activeDeduction = findActiveDeductionForOccurrence(
                 logs,

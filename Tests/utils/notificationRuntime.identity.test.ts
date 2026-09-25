@@ -155,8 +155,7 @@ describe('notification logical identity boundary', () => {
     mocks.platform.mockReturnValue('ios');
 
     await scheduleNotification(baseOptions);
-    const scheduledId =
-      requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].requireDefined(notifications[0], 'notifications[0]').id;
+    const scheduledId = firstScheduledNotification().id;
 
     mocks.getPending.mockResolvedValue({
       notifications: [

@@ -99,7 +99,12 @@ describe('stock gate — fresh durable state', () => {
     await withAutoStockMutationGate((fresh) => {
       expect(requireDefined(fresh.medications[0], 'fresh.medications[0]').currentPills).toBe(staleReactSnapshot);
       commitDurableAutoStockState({
-        medications: [{ ...fresh.medications[0], currentPills: 8 }],
+        medications: [
+          {
+            ...requireDefined(fresh.medications[0], 'fresh.medications[0]'),
+            currentPills: 8,
+          },
+        ],
         logs: [],
       });
     });
@@ -216,12 +221,14 @@ describe('stock gate — fresh durable state', () => {
     ];
     // Two concurrent-looking calls — serialized by gate
     const p1 = withAutoStockMutationGate((fresh) => {
-      const r = reconcileFiredEvents(fresh.medications, fresh.logs, [events[0]]);
+      const event = requireDefined(events[0], 'events[0]');
+      const r = reconcileFiredEvents(fresh.medications, fresh.logs, [event]);
       commitDurableAutoStockState({ medications: r.medications, logs: r.logs });
       return requireDefined(r.medications[0], 'r.medications[0]').currentPills;
     });
     const p2 = withAutoStockMutationGate((fresh) => {
-      const r = reconcileFiredEvents(fresh.medications, fresh.logs, [events[1]]);
+      const event = requireDefined(events[1], 'events[1]');
+      const r = reconcileFiredEvents(fresh.medications, fresh.logs, [event]);
       commitDurableAutoStockState({ medications: r.medications, logs: r.logs });
       return requireDefined(r.medications[0], 'r.medications[0]').currentPills;
     });
@@ -256,9 +263,9 @@ describe('multi-dose', () => {
       [fired({ medicationId: 'med-1', doseId: 'b', calendarDate: '2026-09-14', amount: 2 })]
     );
     expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(18);
-    expect(isExactAutoOccurrenceApplied(r.logs, r.medications[0], 'b', '2026-09-14')).toBe(true);
-    expect(isExactAutoOccurrenceApplied(r.logs, r.medications[0], 'a', '2026-09-14')).toBe(false);
-    expect(isExactAutoOccurrenceApplied(r.logs, r.medications[0], 'c', '2026-09-14')).toBe(false);
+    expect(isExactAutoOccurrenceApplied(r.logs, requireDefined(r.medications[0], 'r.medications[0]'), 'b', '2026-09-14')).toBe(true);
+    expect(isExactAutoOccurrenceApplied(r.logs, requireDefined(r.medications[0], 'r.medications[0]'), 'a', '2026-09-14')).toBe(false);
+    expect(isExactAutoOccurrenceApplied(r.logs, requireDefined(r.medications[0], 'r.medications[0]'), 'c', '2026-09-14')).toBe(false);
   });
 
   it('siblingDateIsIndependent', () => {

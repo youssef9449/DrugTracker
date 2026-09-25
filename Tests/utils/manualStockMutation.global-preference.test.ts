@@ -102,11 +102,11 @@ describe('durable global preference and add-medication ordering', () => {
     });
 
     expect(result.outcome).toBe('applied');
-    expect(requireDefined(durable.medications[0], 'durable.medications[0]').autoDeductEnabled).toBe(false);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').autoDeductEnabled).toBe(true);
     expect(durable.globalAutoDeductEnabled).toBe(false);
   });
 
-  it('global toggle persists the master switch inside the same durable commit path', async () => {
+  it('global toggle persists only the master switch inside the same durable commit path', async () => {
     const result = await runGatedGlobalAutoDeductToggle({ enable: false });
 
     expect(result.outcome).toBe('applied');
@@ -121,7 +121,7 @@ describe('durable global preference and add-medication ordering', () => {
     const result = await runGatedGlobalAutoDeductToggle({ enable: false });
 
     expect(result.outcome).toBe('persist_failed');
-    expect(requireDefined(durable.medications[0], 'durable.medications[0]').autoDeductEnabled).toBe(false);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').autoDeductEnabled).toBe(true);
     expect(persistedGlobal).toBe(true);
     expect(manualEnvelope?.globalAutoDeductEnabled).toBe(false);
   });

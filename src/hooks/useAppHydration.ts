@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { AppHydrationPhaseSetters } from '../utils/appHydrationPhases';
 import {
   loadPersistedAppState,
@@ -39,7 +39,12 @@ export function useAppHydration(setters: AppHydrationSetters): void {
     setIsCompactView,
   } = setters;
 
+  const hydrationStartedRef = useRef(false);
+
   useEffect(() => {
+    if (hydrationStartedRef.current) return;
+    hydrationStartedRef.current = true;
+
     const persistedState = loadPersistedAppState({
       setLogs,
       setPharmacySettings,

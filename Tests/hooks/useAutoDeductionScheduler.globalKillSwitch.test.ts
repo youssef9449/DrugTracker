@@ -21,6 +21,8 @@ vi.mock('../../src/utils/autoDeductionNativeScheduling', () => ({
 vi.mock('../../src/utils/autoDeductionNativeRecovery', () => ({
   listScheduledAutoDeductionOccurrences: (...args: unknown[]) =>
     listScheduledMock(...args),
+  restoreFutureAutoDeductionSchedules: () =>
+    Promise.resolve({ ok: true, restored: 0, failed: 0 }),
 }));
 
 import { useAutoDeductionScheduler } from '../../src/hooks/useAutoDeductionScheduler';

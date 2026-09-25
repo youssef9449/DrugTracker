@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
@@ -71,11 +72,11 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
     expect(r.details[0]?.outcome).toBe('applied');
     expect(r.mutated).toBe(true);
     // event.amount (2) applied, NOT dailyDose (5).
-    expect(r.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
     // No schedule → no lastConsumedDate write.
-    expect(r.medications[0].lastConsumedDate).toBe('2026-09-12');
+    expect(requireDefined(r.medications[0], 'r.medications[0]').lastConsumedDate).toBe('2026-09-12');
     expect(r.newExactLogs).toHaveLength(1);
-    expect(r.newExactLogs[0].amount).toBe(-2);
+    expect(requireDefined(r.newExactLogs[0], 'r.newExactLogs[0]').amount).toBe(-2);
     expect(r.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: 'd1', calendarDate: '2026-09-14' },
     ]);
@@ -138,11 +139,11 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
 
     expect(first.details[0]?.outcome).toBe('applied');
     expect(first.mutated).toBe(true);
-    expect(first.medications[0].currentPills).toBe(8);
+    expect(requireDefined(first.medications[0], 'first.medications[0]').currentPills).toBe(8);
     expect(first.newExactLogs).toHaveLength(1);
-    expect(first.newExactLogs[0].amount).toBe(-2);
-    expect(first.newExactLogs[0].id).toBe(exactAutoLogId('med-1', 'd1', '2026-09-14'));
-    expect(first.newExactLogs[0].type).toBe('exact_auto');
+    expect(requireDefined(first.newExactLogs[0], 'first.newExactLogs[0]').amount).toBe(-2);
+    expect(requireDefined(first.newExactLogs[0], 'first.newExactLogs[0]').id).toBe(exactAutoLogId('med-1', 'd1', '2026-09-14'));
+    expect(requireDefined(first.newExactLogs[0], 'first.newExactLogs[0]').type).toBe('exact_auto');
     expect(first.logs.filter((l) => l.type === 'exact_auto')).toHaveLength(0);
     expect(first.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: 'd1', calendarDate: '2026-09-14' },
@@ -172,7 +173,7 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
 
     expect(second.mutated).toBe(false);
     // Stock unchanged (no second deduction).
-    expect(second.medications[0].currentPills).toBe(8);
+    expect(requireDefined(second.medications[0], 'second.medications[0]').currentPills).toBe(8);
     expect(second.newExactLogs).toEqual([]);
     // The single durable exact log remains (no duplicate).
     expect(second.logs.filter((l) => l.id === exactAutoLogId('med-1', 'd1', '2026-09-14'))).toHaveLength(1);
@@ -219,7 +220,7 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
 
     expect(r.details[0]?.outcome).toBe('skipped_invalid');
     expect(r.mutated).toBe(false);
-    expect(r.medications[0].currentPills).toBe(10);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(10);
     expect(r.newExactLogs).toEqual([]);
     expect(r.toAcknowledge).toEqual([]);
     expect(r.markedCount).toBe(0);

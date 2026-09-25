@@ -138,6 +138,9 @@ function parseToHourMinute(value: string): {
     return { hour12: 9, minute: 0, isPM: false };
   }
   const [hStr, mStr] = value.split(':');
+  if (hStr === undefined || mStr === undefined) {
+    return { hour12: 9, minute: 0, isPM: false };
+  }
   let h = parseInt(hStr, 10);
   const m = parseInt(mStr, 10);
   if (isNaN(h) || isNaN(m)) return { hour12: 9, minute: 0, isPM: false };

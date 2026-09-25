@@ -24,6 +24,16 @@ export function useMedicationCrudHandlers(deps: MedicationHandlersDeps, state: M
     medData: Omit<Medication, 'id' | 'createdAt'>,
     editId?: string
   ): Promise<boolean> => {
+    const normalizedName = medData.name.trim().replace(/\\s+/g, ' ').toLocaleLowerCase();
+    const hasDuplicateName = medicationsRef.current.some((medication) =>
+      medication.id !== editId &&
+      medication.name.trim().replace(/\\s+/g, ' ').toLocaleLowerCase() === normalizedName
+    );
+    if (hasDuplicateName) {
+      showToast('يوجد دواء بنفس الاسم بالفعل');
+      return false;
+    }
+
     if (editId) {
       const result = await runGatedMedicationUpdate({
         editId,

@@ -29,7 +29,7 @@ export const STORAGE_STOCK_GEN_KEY = 'android_med_tracker_stock_generation_v1';
 export interface AutoStockDurableState {
   medications: Medication[];
   logs: ConsumptionLog[];
-  globalAutoDeductEnabled?: boolean;
+  globalAutoDeductEnabled?: boolean | undefined;
 }
 
 const STOCK_MUTATION_LOCK = 'drugtracker:durable-stock-mutation';
@@ -107,7 +107,7 @@ export interface CommitDurableOptions {
    * Required finalization marker after meds+logs. If this write fails, the
    * whole commit fails so callers keep the envelope (recovery evidence).
    */
-  appliedMutationSeq?: number;
+  appliedMutationSeq?: number | undefined;
 }
 
 /**

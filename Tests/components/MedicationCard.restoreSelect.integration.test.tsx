@@ -199,8 +199,8 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
       expect(requireDefined(restores[0], 'restores[0]').amount).not.toBe(3); // not dailyDose
       expect(requireDefined(restores[0], 'restores[0]').amount).not.toBe(1); // not d1 amount
       // Manual restore settles amount back into snapshot.
-      expect(med.currentPills).toBe(pillsBefore + 2);
-      expect(med.doseConsumptionHistory?.d2).toBeUndefined();
+      expect(requireDefined(med, 'med').currentPills).toBe(pillsBefore + 2);
+      expect(requireDefined(med, 'med').doseConsumptionHistory?.d2).toBeUndefined();
     });
   });
 
@@ -218,10 +218,10 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
     await waitFor(() => {
       const med = readPersistedMedications()[0];
-      expect(med.doseConsumptionHistory?.d1).toBe(TEST_DATE);
-      expect(med.doseSkippedHistory?.d1).toBeUndefined();
-      expect(med.doseConsumptionHistory?.d2).toBeUndefined();
-      expect(med.doseSkippedHistory?.d2).toEqual([getTodayDateString()]);
+      expect(requireDefined(med, 'med').doseConsumptionHistory?.d1).toBe(TEST_DATE);
+      expect(requireDefined(med, 'med').doseSkippedHistory?.d1).toBeUndefined();
+      expect(requireDefined(med, 'med').doseConsumptionHistory?.d2).toBeUndefined();
+      expect(requireDefined(med, 'med').doseSkippedHistory?.d2).toEqual([getTodayDateString()]);
       expect(
         readLogs().filter((l) => l.type === 'skipped_day' && l.doseId === 'd1')
       ).toHaveLength(0);
@@ -244,16 +244,16 @@ describe('MedicationCard multi-dose Restore → SelectDoseModal', () => {
 
     await waitFor(() => {
       const med = readPersistedMedications()[0];
-      expect(med.doseConsumptionHistory?.d1).toBeUndefined();
-      expect(med.doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
-      expect(med.doseConsumptionHistory?.d2).toBe(TEST_DATE);
-      expect(med.doseSkippedHistory?.d2).toBeUndefined();
+      expect(requireDefined(med, 'med').doseConsumptionHistory?.d1).toBeUndefined();
+      expect(requireDefined(med, 'med').doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
+      expect(requireDefined(med, 'med').doseConsumptionHistory?.d2).toBe(TEST_DATE);
+      expect(requireDefined(med, 'med').doseSkippedHistory?.d2).toBeUndefined();
       const restores = readLogs().filter(
         (l) => l.type === 'skipped_day' && l.doseId === 'd1'
       );
       expect(restores).toHaveLength(1);
       expect(requireDefined(restores[0], 'restores[0]').amount).toBe(1);
-      expect(med.currentPills).toBe(pillsBefore + 1);
+      expect(requireDefined(med, 'med').currentPills).toBe(pillsBefore + 1);
     });
   });
 

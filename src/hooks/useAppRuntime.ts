@@ -72,11 +72,6 @@ export function useAppRuntime(deps: AppRuntimeDeps) {
   });
 
   const autoDeductMidnightTick = useMidnightTick();
-  // #502: the scheduler's explicit runtime status (including the
-  // "Auto enabled + missing/invalid doseSchedule" unsupported state) is
-  // consumed here so the application can surface it through the UI status
-  // path instead of silently showing a healthy-looking zero-occurrence
-  // medication.
   useAutoDeductionScheduler({
     medications, globalAutoDeductEnabled, hydrated, isFirstRun, exactAlarmPermission,
     resumeTick: doseAlarmResumeTick, midnightTick: autoDeductMidnightTick,

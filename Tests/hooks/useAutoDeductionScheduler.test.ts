@@ -113,7 +113,7 @@ describe('multi-dose amount isolation', () => {
       dailyDose: 99,
     });
     const slots = getAutoDeductionSlotsForDate(med, '2026-09-14');
-    expect(slots[0].amount).toBe(1.5);
+    expect(requireDefined(slots[0], 'slots[0]').amount).toBe(1.5);
   });
 });
 
@@ -138,10 +138,10 @@ describe('no doseSchedule (doseSchedule-only scheduler)', () => {
     });
     const slots = getAutoDeductionSlotsForDate(med, '2026-09-14');
     expect(slots).toHaveLength(1);
-    expect(slots[0].doseId).toBe('dose-med-1-s1');
-    expect(slots[0].amount).toBe(2);
-    expect(slots[0].time).toBe('08:30');
-    expect(slots[0].doseId).not.toBe('legacy');
+    expect(requireDefined(slots[0], 'slots[0]').doseId).toBe('dose-med-1-s1');
+    expect(requireDefined(slots[0], 'slots[0]').amount).toBe(2);
+    expect(requireDefined(slots[0], 'slots[0]').time).toBe('08:30');
+    expect(requireDefined(slots[0], 'slots[0]').doseId).not.toBe('legacy');
   });
 });
 
@@ -479,7 +479,7 @@ describe('Exact Auto desired slots ignore reminder/dailyDose fields', () => {
     );
     expect(slotsA).toEqual(slotsB);
     expect(slotsA).toHaveLength(1);
-    expect(slotsA[0].amount).toBe(1);
+    expect(requireDefined(slotsA[0], 'slotsA[0]').amount).toBe(1);
   });
 
   it('reminderTime change does not alter desired Exact slots when doseSchedule is unchanged', () => {

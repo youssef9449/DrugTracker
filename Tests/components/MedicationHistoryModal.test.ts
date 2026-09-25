@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { describe, it, expect } from 'vitest';
 import type { ConsumptionLog } from '@/types';
 import {

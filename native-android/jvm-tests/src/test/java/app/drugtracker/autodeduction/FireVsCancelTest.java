@@ -2,16 +2,16 @@ package app.drugtracker.autodeduction;
 
 import android.content.SharedPreferences;
 
-import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
-import static app.drugtracker.autodeduction.Phase2TestSupport.evtKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.eventPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.futureCalendarDate;
-import static app.drugtracker.autodeduction.Phase2TestSupport.futureEpochMs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.newScheduler;
-import static app.drugtracker.autodeduction.Phase2TestSupport.pendingPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.seedAutoStock;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.clearAllDurableState;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.evtKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.eventPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.futureCalendarDate;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.futureEpochMs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.newScheduler;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.pendingPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schedulePrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.seedAutoStock;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -207,7 +207,7 @@ public class FireVsCancelTest {
         JSONObject o = new JSONObject(raw);
         String v = o.optString(ExactAlarmContract.FIELD_OPERATION_VERSION, "");
         assertTrue("operationVersion present", v != null && !v.isEmpty());
-        SharedPreferences auth = Phase2TestSupport.appContext().getSharedPreferences(
+        SharedPreferences auth = AutoDeductionTestSupport.appContext().getSharedPreferences(
                 AutoDeductionContract.PREFS_RECURRENCE_AUTH, 0);
         long g = auth.getLong(
                 AutoDeductionContract.RECURRENCE_AUTH_KEY_PREFIX

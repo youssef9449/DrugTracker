@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import {
   __setStockMutationOrderingTestHooks,
   __resetStockMutationOrderingForTests,
@@ -178,7 +179,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
 
     expect(updated).not.toBeNull();
     expect(updated!.currentPills).toBe(10);
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     expect(setMedications).toHaveBeenCalled();
   });
 
@@ -224,7 +225,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     });
 
     expect(updated).not.toBeNull();
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
   });
 
   it('stale React skip/consumed does not prevent Restore', async () => {
@@ -264,7 +265,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       updated = (await result.current.handleRestoreDose('med-1', 'test', 'd1')).medication;
     });
     expect(updated).not.toBeNull();
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
   });
 
   it('double-click Restore is guarded (second call no-ops while in flight)', async () => {
@@ -304,7 +305,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     // One applied (returns med), one blocked by in-flight (null).
     const applied = results.filter((r) => r != null);
     expect(applied).toHaveLength(1);
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
   });
 
   it('Confirm Refill works when React medications is empty', async () => {
@@ -320,7 +321,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     });
 
     await waitFor(() => {
-      expect(durable.medications[0].currentPills).toBe(15);
+      expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(15);
     });
     expect(setMedications).toHaveBeenCalled();
   });
@@ -398,7 +399,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     });
 
     await waitFor(() => {
-      expect(durable.medications[0].currentPills).toBe(9);
+      expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     });
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
     expect(setMedications).toHaveBeenCalled();
@@ -433,7 +434,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     });
 
     await waitFor(() => {
-      expect(durable.medications[0].currentPills).toBe(7); // deducted 3 from durable
+      expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(7); // deducted 3 from durable
     });
   });
 
@@ -456,7 +457,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     });
 
     await waitFor(() => {
-      expect(durable.medications[0].currentPills).toBe(9);
+      expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     });
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
   });
@@ -484,7 +485,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       ],
     };
     reactMeds = [med({ currentPills: 10 })]; // not consumed in React
-    const pillsBefore = durable.medications[0].currentPills;
+    const pillsBefore = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
 
     const { result } = mountHandlers();
     await act(async () => {
@@ -496,7 +497,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     await waitFor(() => {
       expect(showToast).toHaveBeenCalled();
     });
-    expect(durable.medications[0].currentPills).toBe(pillsBefore);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(pillsBefore);
   });
 
   it('Take with durable doseId succeeds even when React schedule lacks that dose', async () => {
@@ -524,7 +525,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       await Promise.resolve();
     });
     await waitFor(() => {
-      expect(durable.medications[0].currentPills).toBe(8);
+      expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
     });
   });
 
@@ -541,7 +542,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       await Promise.resolve();
     });
     // No stock change
-    expect(durable.medications[0].currentPills).toBe(10);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(10);
     expect(durable.logs).toHaveLength(0);
   });
 
@@ -564,7 +565,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
       await Promise.resolve();
     });
     await waitFor(() => {
-      expect(durable.medications[0].currentPills).toBe(8);
+      expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
     });
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
   });
@@ -644,7 +645,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     // durableResult.medications), NOT from the empty React snapshot.
     expect(setSelectDoseMode).toHaveBeenCalledWith('manage');
     expect(setSelectDoseMed).toHaveBeenCalledTimes(1);
-    const modalMed = setSelectDoseMed.mock.calls[0][0] as Medication;
+    const modalMed = requireDefined(setSelectDoseMed.mock.calls[0], 'setSelectDoseMed.mock.calls[0]')[0] as Medication;
     expect(modalMed).not.toBeNull();
     expect(modalMed.id).toBe('med-1');
     expect(modalMed.doseSchedule).toBeDefined();
@@ -689,7 +690,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     });
     // The operation itself is already consumed, but the gate returned the
     // durable snapshot and the handler must still refresh React with it.
-    expect(reactMeds[0].currentPills).toBe(9);
+    expect(requireDefined(reactMeds[0], 'reactMeds[0]').currentPills).toBe(9);
     expect(isDoseConsumedOnDate(reactMeds[0], 'd1', TODAY)).toBe(true);
   });
   
@@ -708,7 +709,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
     });
 
     await waitFor(() => {
-      expect(durable.medications[0].currentPills).toBe(9);
+      expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(9);
     });
     expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
   });

@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { __setManualEnvelopeTestHooks, __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
@@ -101,7 +102,7 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
     });
 
     expect(result.outcome).toBe('applied');
-    expect(durable.medications[0].autoDeductEnabled).toBe(false);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').autoDeductEnabled).toBe(false);
     expect(durable.globalAutoDeductEnabled).toBe(false);
   });
 
@@ -111,7 +112,7 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
     expect(result.outcome).toBe('applied');
     expect(durable.globalAutoDeductEnabled).toBe(false);
     expect(persistedGlobal).toBe(false);
-    expect(durable.medications[0].autoDeductEnabled).toBe(false);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').autoDeductEnabled).toBe(false);
   });
 
   it('global persistence failure keeps the mutation envelope for restart recovery', async () => {
@@ -120,7 +121,7 @@ describe('Phase 4 — durable global preference and add-medication ordering', ()
     const result = await runGatedGlobalAutoDeductToggle({ enable: false });
 
     expect(result.outcome).toBe('persist_failed');
-    expect(durable.medications[0].autoDeductEnabled).toBe(false);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').autoDeductEnabled).toBe(false);
     expect(persistedGlobal).toBe(true);
     expect(manualEnvelope?.globalAutoDeductEnabled).toBe(false);
   });

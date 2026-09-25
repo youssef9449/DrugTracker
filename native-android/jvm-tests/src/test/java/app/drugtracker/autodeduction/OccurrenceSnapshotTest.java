@@ -1,14 +1,14 @@
 package app.drugtracker.autodeduction;
 
-import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
-import static app.drugtracker.autodeduction.Phase2TestSupport.futureCalendarDate;
-import static app.drugtracker.autodeduction.Phase2TestSupport.futureEpochMs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.newEventStore;
-import static app.drugtracker.autodeduction.Phase2TestSupport.newScheduler;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.cancelPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.cancelKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.clearAllDurableState;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.futureCalendarDate;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.futureEpochMs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.newEventStore;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.newScheduler;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schedulePrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.cancelPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.cancelKey;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -147,8 +147,8 @@ public class OccurrenceSnapshotTest {
                 obj.put("scheduledAtEpochMs", 1000L);
                 obj.put("createdAtEpochMs", 1000L);
                 String key = AutoDeductionContract.occurrenceKey("med", "dose", date);
-                Phase2TestSupport.eventPrefs().edit()
-                        .putString(Phase2TestSupport.evtKey(key), obj.toString())
+                AutoDeductionTestSupport.eventPrefs().edit()
+                        .putString(AutoDeductionTestSupport.evtKey(key), obj.toString())
                         .commit();
             } catch (Exception e) {
                 throw new AssertionError(e);
@@ -166,8 +166,8 @@ public class OccurrenceSnapshotTest {
 
         // The EventStore terminalized the malformed FIRED row as REJECTED.
         String key = AutoDeductionContract.occurrenceKey("med", "dose", date);
-        String raw = Phase2TestSupport.eventPrefs()
-                .getString(Phase2TestSupport.evtKey(key), null);
+        String raw = AutoDeductionTestSupport.eventPrefs()
+                .getString(AutoDeductionTestSupport.evtKey(key), null);
         assertNotNull("event row must still exist in storage", raw);
         JSONObject row = new JSONObject(raw);
         assertEquals(AutoDeductionContract.STATUS_REJECTED, row.optString("status"));
@@ -189,15 +189,15 @@ public class OccurrenceSnapshotTest {
         obj.put("calendarDate", date);
         obj.put("amount", 0.0);
         obj.put("status", AutoDeductionContract.STATUS_FIRED);
-        Phase2TestSupport.eventPrefs().edit()
-                .putString(Phase2TestSupport.evtKey(key), obj.toString())
+        AutoDeductionTestSupport.eventPrefs().edit()
+                .putString(AutoDeductionTestSupport.evtKey(key), obj.toString())
                 .commit();
 
         try {
             AutoDeductionScheduler.OccurrenceSnapshot snap =
                     new AutoDeductionScheduler(
-                            Phase2TestSupport.appContext(),
-                            Phase2TestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
+                            AutoDeductionTestSupport.appContext(),
+                            AutoDeductionTestSupport.denyEventCommit()).getOccurrenceSnapshot("med", "dose", date);
             assertFalse(snap.ok);
             assertEquals("rejected_persist_failed", snap.error);
             assertNull(snap.amount);

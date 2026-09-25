@@ -1,11 +1,11 @@
 package app.drugtracker.autodeduction;
 
-import static app.drugtracker.autodeduction.Phase2TestSupport.appContext;
-import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
-import static app.drugtracker.autodeduction.Phase2TestSupport.evtKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.eventPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.appContext;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.clearAllDurableState;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.evtKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.eventPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schedulePrefs;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -48,8 +48,8 @@ public class TerminalStateCompactionTest extends Group2AutoReliabilityFixture {
         assertTrue(stock.applyAutoDeduction(med, dose, date, 2.0).ok);
         assertTrue(events.markReconciled(med, dose, date).ok);
 
-        AutoDeductionScheduler failing = Phase2TestSupport.newScheduler(
-                Phase2TestSupport.denyTerminalCompactionCommit());
+        AutoDeductionScheduler failing = AutoDeductionTestSupport.newScheduler(
+                AutoDeductionTestSupport.denyTerminalCompactionCommit());
         assertFalse(failing.compactTerminalState());
         assertTrue("failed compaction must leave terminal event retryable",
                 eventPrefs().contains(evtKey(key)));
@@ -58,7 +58,7 @@ public class TerminalStateCompactionTest extends Group2AutoReliabilityFixture {
                         "drugtracker_auto_stock_v1", 0)
                         .contains("auto:" + key));
 
-        AutoDeductionScheduler succeeding = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler succeeding = AutoDeductionTestSupport.newScheduler();
         assertTrue(succeeding.compactTerminalState());
         assertFalse(eventPrefs().contains(evtKey(key)));
         assertFalse(appContext().getSharedPreferences(
@@ -72,7 +72,7 @@ public class TerminalStateCompactionTest extends Group2AutoReliabilityFixture {
         String med = "med-410-retry";
         String dose = "dose-410-retry";
         String date = localDateOffset(-10);
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
 
         synchronized (AutoDeductionScheduler.class) {
             assertTrue(scheduler.recordIndependentFireRetryEvidenceLocked(
@@ -112,7 +112,7 @@ public class TerminalStateCompactionTest extends Group2AutoReliabilityFixture {
                 med, dose, date, epoch(date, "08:00"), 2.0).isCreated());
         assertTrue(stock.applyAutoDeduction(med, dose, date, 2.0).ok);
 
-        assertTrue(Phase2TestSupport.newScheduler().compactTerminalState());
+        assertTrue(AutoDeductionTestSupport.newScheduler().compactTerminalState());
         assertTrue("unreconciled FIRED event is recovery state, not terminal history",
                 eventPrefs().contains(evtKey(key)));
         assertTrue("active Auto marker must remain while FIRED is unresolved",
@@ -120,7 +120,7 @@ public class TerminalStateCompactionTest extends Group2AutoReliabilityFixture {
                         "drugtracker_auto_stock_v1", 0)
                         .contains("auto:" + key));
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         AutoDeductionScheduler.RestoreResult recovered =
                 scheduler.recoverFiredStockPass();
         assertTrue(recovered.ok);
@@ -163,7 +163,7 @@ public class TerminalStateCompactionTest extends Group2AutoReliabilityFixture {
         assertTrue(eventPrefs().contains(evtKey(recentKey)));
         assertTrue(eventPrefs().contains(evtKey(oldKey)));
 
-        assertTrue(Phase2TestSupport.newScheduler().compactTerminalState());
+        assertTrue(AutoDeductionTestSupport.newScheduler().compactTerminalState());
 
         assertTrue("occurrence at max configured age must remain idempotent-safe",
                 stockPrefs.contains(recentMarker));
@@ -202,7 +202,7 @@ public class TerminalStateCompactionTest extends Group2AutoReliabilityFixture {
         assertTrue(stockPrefs.contains(markerKey));
         assertTrue(eventPrefs().contains(evtKey(key)));
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         assertTrue(scheduler.compactTerminalState());
 
         assertFalse("old RECONCILED event should be compacted",
@@ -225,7 +225,7 @@ public class TerminalStateCompactionTest extends Group2AutoReliabilityFixture {
                         new AutoDeductionStockStore.StockSeed(med, 20.0))).ok);
         assertTrue(stock.applyAutoDeduction(med, dose, date, 2.0).ok);
 
-        AutoDeductionScheduler scheduler = Phase2TestSupport.newScheduler();
+        AutoDeductionScheduler scheduler = AutoDeductionTestSupport.newScheduler();
         assertTrue(scheduler.persistSuccessorObligation(
                 med, dose, date, "08:00", 2.0, "", "v410-obligation", 1L));
         assertTrue(scheduler.compactTerminalState());
@@ -267,7 +267,7 @@ public class TerminalStateCompactionTest extends Group2AutoReliabilityFixture {
         String markerKey = "foreground:" + med + "\u001f" + dose + "\u001f" + date;
         assertTrue(stockPrefs.contains(markerKey));
 
-        assertTrue(Phase2TestSupport.newScheduler().compactTerminalState());
+        assertTrue(AutoDeductionTestSupport.newScheduler().compactTerminalState());
         assertFalse(stockPrefs.contains(markerKey));
         assertFalse(eventPrefs().contains(evtKey(key)));
     }
@@ -289,7 +289,7 @@ public class TerminalStateCompactionTest extends Group2AutoReliabilityFixture {
         rejected.put("storageKey", key);
         eventPrefs().edit().putString(key, rejected.toString()).commit();
 
-        assertTrue(Phase2TestSupport.newScheduler().compactTerminalState());
+        assertTrue(AutoDeductionTestSupport.newScheduler().compactTerminalState());
         assertFalse("old REJECTED terminal state must not remain forever",
                 eventPrefs().contains(key));
     }

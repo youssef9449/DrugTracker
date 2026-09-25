@@ -13,29 +13,29 @@ export interface NotificationRuntimePostOptions {
   channelId: string;
   channelName: string;
   channelImportance: 1 | 2 | 3 | 4 | 5;
-  channelVisibility?: number;
-  smallIcon?: string;
-  autoCancel?: boolean;
-  ongoing?: boolean;
+  channelVisibility?: number | undefined;
+  smallIcon?: string | undefined;
+  autoCancel?: boolean | undefined;
+  ongoing?: boolean | undefined;
   /** Feature payload retained for platform notification delivery; never used as identity. */
-  extra?: Record<string, unknown>;
+  extra?: Record<string, unknown> | undefined;
   action?: {
     id: string;
     title: string;
-    foreground?: boolean;
+    foreground?: boolean | undefined;
   };
   /** iOS-only scheduled delivery time. Android timing belongs to ExactAlarmRuntime. */
-  at?: Date;
+  at?: Date | undefined;
   /** Preserve feature fallback behavior when an iOS schedule operation fails. */
-  fallbackToWeb?: boolean;
+  fallbackToWeb?: boolean | undefined;
 }
 
 interface NotificationRuntimePlugin {
   post(
     options: Omit<NotificationRuntimePostOptions, 'at' | 'fallbackToWeb'> & {
-      actionId?: string;
-      actionTitle?: string;
-      actionForeground?: boolean;
+      actionId?: string | undefined;
+      actionTitle?: string | undefined;
+      actionForeground?: boolean | undefined;
     }
   ): Promise<{ ok: boolean; error?: string; code?: string }>;
   cancel(options: { namespace: string; identity: string }): Promise<{ ok: boolean; error?: string; code?: string }>;
@@ -45,7 +45,7 @@ interface NotificationRuntimePlugin {
     channelId: string;
     channelName: string;
     channelImportance: number;
-    channelVisibility?: number;
+    channelVisibility?: number | undefined;
   }): Promise<{ ok: boolean; error?: string; code?: string }>;
   retryPersistedNotificationDeliveries(): Promise<{ retried: number }>;
   addListener(
@@ -434,7 +434,7 @@ export async function ensureNotificationChannel(options: {
   channelId: string;
   channelName: string;
   channelImportance: 1 | 2 | 3 | 4 | 5;
-  channelVisibility?: number;
+  channelVisibility?: number | undefined;
 }): Promise<boolean> {
   if (!isAndroidNotificationRuntime()) return true;
   try {

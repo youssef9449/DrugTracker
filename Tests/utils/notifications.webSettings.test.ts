@@ -23,15 +23,11 @@ beforeEach(() => {
 });
 
 describe('openBrowserNotificationSettings', () => {
-  it('uses the Chromium settings URL only for a detected Chromium browser', () => {
-    // NOTE: the UA fallback in isChromiumNotificationSettingsSupported()
-    // excludes any UA carrying the legacy "Safari/" compatibility token —
-    // which real-world Chrome UAs always include — so the fallback only
-    // fires for Chromium-signature UAs without that token. The pinned
-    // contract is exercised with such a UA here; the Safari-token
-    // exclusion itself is pinned by the companion test below.
+  it('uses the Chromium settings URL for a standard desktop Chrome UA', () => {
+    // Standard Chrome user agents include the historical Safari/ token.
+    // That token must not prevent Chromium detection in the UA fallback.
     setUserAgent(
-      'Mozilla/5.0 (X11; Linux x86_64) Chrome/153.0.0.0'
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/153.0.0.0 Safari/537.36'
     );
     const open = vi.spyOn(window, 'open').mockReturnValue({} as Window);
 
@@ -41,24 +37,6 @@ describe('openBrowserNotificationSettings', () => {
       'chrome://settings/content/notifications',
       '_blank'
     );
-  });
-
-  it('excludes UA strings carrying the legacy Safari/ token from the Chromium fallback', () => {
-    // Current production contract: the UA fallback's Safari guard runs on
-    // the raw UA, so a Chrome UA that also carries the historical
-    // "Safari/537.36" token (every real-world Chrome UA) is treated as
-    // Safari by the fallback and gets the instructional alert instead of
-    // the chrome:// URL. (Browsers exposing navigator.userAgentData take
-    // the brands-based path before this fallback is consulted.)
-    setUserAgent(
-      'Mozilla/5.0 Chrome/153.0.0.0 Safari/537.36'
-    );
-    const open = vi.spyOn(window, 'open');
-
-    openBrowserNotificationSettings();
-
-    expect(open).not.toHaveBeenCalled();
-    expect(window.alert).toHaveBeenCalled();
   });
 
   it('does not open a chrome:// URL for Firefox', () => {

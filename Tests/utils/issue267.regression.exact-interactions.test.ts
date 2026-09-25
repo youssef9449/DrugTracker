@@ -169,7 +169,7 @@ describe('#267 regression 7 — Manual Take → Exact Auto: same occurrence not 
     expect(take.outcome).toBe('applied');
     const pillsAfterTake = requireDefined(durable.medications[0], 'durable.medications[0]').currentPills;
     expect(pillsAfterTake).toBe(29); // 30 - 1
-    expect(isDoseConsumedOnDate(durable.medications[0], 'd1', TODAY)).toBe(true);
+    expect(isDoseConsumedOnDate(requireDefined(durable.medications[0], 'durable.medications[0]'), 'd1', TODAY)).toBe(true);
 
     // Exact Auto reconciliation with FIRED d1: consume marker exists → already_applied.
     const recon = await runAutoDeductionReconciliation({

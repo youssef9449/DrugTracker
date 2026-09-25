@@ -19,10 +19,10 @@ export interface MedicationMenuProps {
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
   onToggleAutoDeduct: (id: string) => void;
-  onToggleMedicationReminder?: (id: string) => void | undefined;
-  onToggleMedicationCriticalStockAlerts?: (id: string) => void | undefined;
-  onOpenHistory?: (medication: Medication) => void | undefined;
-  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void | undefined;
+  onToggleMedicationReminder?: ((id: string) => void) | undefined;
+  onToggleMedicationCriticalStockAlerts?: ((id: string) => void) | undefined;
+  onOpenHistory?: ((medication: Medication) => void) | undefined;
+  onRegisterBackHandler?: ((id: string, close: () => void, priority?: number) => () => void) | undefined;
   size?: 'xs' | 'sm' | 'md' | undefined;
   showTypeIcon?: boolean | undefined;
   showOverflow?: boolean | undefined;

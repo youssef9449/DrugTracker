@@ -198,16 +198,18 @@ export const MedicationCourseAndSchedule: FC<MedicationCourseAndScheduleProps> =
                 {totalDailyAmount(doseSchedule) || 0} {unit}
               </span>
             </div>
-            <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-100">
-              <span className="text-xs font-bold text-slate-700 leading-snug">
-                تفعيل اشعار التنبيه بالجرعة
-              </span>
-              <Toggle
-                checked={reminderEnabled}
-                onChange={() => setReminderEnabled(!reminderEnabled)}
-                label="تفعيل اشعار التنبيه بالجرعة"
-                size="md"
-              />
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-bold text-slate-700 leading-snug">
+                  تفعيل اشعار التنبيه بالجرعة
+                </span>
+                <Toggle
+                  checked={reminderEnabled}
+                  onChange={() => setReminderEnabled(!reminderEnabled)}
+                  label="تفعيل اشعار التنبيه بالجرعة"
+                  size="md"
+                />
+              </div>
             </div>
           </div>
           {/* Per-medication sound selector removed — all dose reminders

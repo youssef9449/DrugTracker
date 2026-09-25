@@ -35,6 +35,8 @@ export interface ManualStockTransactionOptions<TFailure, TResult> {
   todayStr?: string | undefined;
   now?: Date | undefined;
   globalAutoDeductEnabled?: boolean | undefined;
+  /** Preference-only operations can skip Exact stock reconciliation; they must not mutate inventory. */
+  reconcileExactBeforeMutation?: boolean | undefined;
   onFailure: (failure: ManualStockTransactionFailure) => TFailure;
   operation: (context: ManualStockTransactionContext) => TResult | Promise<TResult>;
 }
@@ -87,13 +89,19 @@ export function runManualStockTransaction<TFailure, TResult>(
 
     await acknowledgeExactAutoEvents(recovered.exactToAcknowledge);
 
-    const pre = await reconcileExactBeforeManualMutation({
-      fresh: recovered.state,
+    const pre = options.reconcileExactBeforeMutation === false
+      ? {
+          state: recovered.state,
+          nativeListFailed: false,
+          durabilityBlocked: false,
+        }
+      : await reconcileExactBeforeManualMutation({
+          fresh: recovered.state,
       globalAutoDeductEnabled:
         options.globalAutoDeductEnabled ??
         (recovered.state.globalAutoDeductEnabled !== false),
-      now,
-    });
+          now,
+        });
 
     if (pre.nativeListFailed || pre.durabilityBlocked === true) {
       return options.onFailure({

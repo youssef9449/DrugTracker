@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 /**
  * Issue #268 / PR #271 — no-schedule occurrence Exact fallback removed.
  *
@@ -132,18 +133,18 @@ describe('no-schedule FIRED occurrence (no doseSchedule): FIRED is durable; no n
     const r = reconcileFiredEvents([med], [], [noScheduleFiredEvent(2)], {
       now: NOW,
     });
-    expect(r.details[0].outcome).toBe('applied');
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('applied');
     expect(r.mutated).toBe(true);
     // event.amount (2), NOT dailyDose (5).
-    expect(r.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
     expect(r.newExactLogs).toHaveLength(1);
-    expect(r.newExactLogs[0].amount).toBe(-2);
-    expect(r.newExactLogs[0].id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
+    expect(requireDefined(r.newExactLogs[0], 'r.newExactLogs[0]').amount).toBe(-2);
+    expect(requireDefined(r.newExactLogs[0], 'r.newExactLogs[0]').id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
     expect(r.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: 'd1', calendarDate: TODAY },
     ]);
     // No lastConsumedDate write (no schedule).
-    expect(r.medications[0].lastConsumedDate).toBeUndefined();
+    expect(requireDefined(r.medications[0], 'r.medications[0]').lastConsumedDate).toBeUndefined();
   });
 
   it('reconcileFiredEvents: no doseSchedule + empty doseId → skipped_invalid, terminal ACK (malformed identity)', () => {
@@ -151,12 +152,12 @@ describe('no-schedule FIRED occurrence (no doseSchedule): FIRED is durable; no n
     const med = unscheduledMed();
     const e: AutoDeductionEvent = { ...noScheduleFiredEvent(2), doseId: '' };
     const r = reconcileFiredEvents([med], [], [e], { now: NOW });
-    expect(r.details[0].outcome).toBe('skipped_invalid');
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('skipped_invalid');
     expect(r.toAcknowledge).toEqual([
       { medicationId: 'med-1', doseId: '', calendarDate: TODAY },
     ]);
     expect(r.mutated).toBe(false);
-    expect(r.medications[0].currentPills).toBe(10);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(10);
     expect(r.newExactLogs).toEqual([]);
     expect(r.logs).toEqual([]);
   });
@@ -166,14 +167,14 @@ describe('no-schedule FIRED occurrence (no doseSchedule): FIRED is durable; no n
     const e = noScheduleFiredEvent(2);
     const r1 = reconcileFiredEvents([med], [], [e], { now: NOW });
     expect(r1.mutated).toBe(true);
-    expect(r1.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r1.medications[0], 'r1.medications[0]').currentPills).toBe(8);
 
     // Second pass re-lists the same FIRED; the durable exact log + consume
     // marker make it already_applied (no duplicate deduction or log).
     const r2 = reconcileFiredEvents(r1.medications, r1.logs, [e], { now: NOW });
-    expect(r2.details[0].outcome).toBe('already_applied');
+    expect(requireDefined(r2.details[0], 'r2.details[0]').outcome).toBe('already_applied');
     expect(r2.mutated).toBe(false);
-    expect(r2.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r2.medications[0], 'r2.medications[0]').currentPills).toBe(8);
     expect(r2.newExactLogs).toEqual([]);
     expect(
       r2.logs.filter((l) => l.id === exactAutoLogId('med-1', 'd1', TODAY))
@@ -189,7 +190,7 @@ describe('no-schedule FIRED occurrence (no doseSchedule): FIRED is durable; no n
     const r = reconcileFiredEvents([med], [], [noScheduleFiredEvent(2)], {
       now: NOW,
     });
-    expect(r.medications[0].doseConsumptionHistory?.['d1']).toEqual([TODAY]);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').doseConsumptionHistory?.['d1']).toEqual([TODAY]);
   });
 
   it('no Exact log id is ever built with an empty doseId', () => {
@@ -219,8 +220,8 @@ describe('explicit doseSchedule: Exact Auto amount authority', () => {
       doseId: 'd1',
     };
     const r = reconcileFiredEvents([multiMed], [], [event], { now: NOW });
-    expect(r.medications[0].currentPills).toBe(8);
-    expect(r.newExactLogs[0].amount).toBe(-2);
-    expect(r.newExactLogs[0].id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
+    expect(requireDefined(r.newExactLogs[0], 'r.newExactLogs[0]').amount).toBe(-2);
+    expect(requireDefined(r.newExactLogs[0], 'r.newExactLogs[0]').id).toBe(exactAutoLogId('med-1', 'd1', TODAY));
   });
 });

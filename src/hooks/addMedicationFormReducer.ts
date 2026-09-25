@@ -73,7 +73,7 @@ export type AddMedicationFormAction =
   | { type: 'PILLS_PER_STRIP_CHANGED'; value: string };
 
 export function createDefaultFormModel(
-  defaultAutoDeductEnabled = true
+  defaultAutoDeductEnabled = false
 ): AddMedicationFormModel {
   const defaultSchedule = resizeDoseSchedule([], 1);
   return {
@@ -97,7 +97,7 @@ export function createDefaultFormModel(
       dosesPerDay: 1,
       doseSchedule: defaultSchedule,
       warningThresholdDays: '5',
-      criticalStockAlertsEnabled: true,
+      criticalStockAlertsEnabled: false,
     },
     treatment: {
       isChronic: true,

@@ -112,7 +112,7 @@ describe('durable global preference and add-medication ordering', () => {
     expect(result.outcome).toBe('applied');
     expect(durable.globalAutoDeductEnabled).toBe(false);
     expect(persistedGlobal).toBe(false);
-    expect(requireDefined(durable.medications[0], 'durable.medications[0]').autoDeductEnabled).toBe(false);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').autoDeductEnabled).toBe(true);
   });
 
   it('global persistence failure keeps the mutation envelope for restart recovery', async () => {

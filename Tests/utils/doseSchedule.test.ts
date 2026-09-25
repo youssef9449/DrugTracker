@@ -21,7 +21,9 @@ function dose(partial: Partial<MedicationDose> & { amount: number; time: string 
 
 function timesAreChronological(schedule: MedicationDose[]): boolean {
   for (let i = 1; i < schedule.length; i++) {
-    if (timeMinutes(schedule[i].time) < timeMinutes(schedule[i - 1].time)) return false;
+    const current = requireDefined(schedule[i], 'schedule[i]');
+    const previous = requireDefined(schedule[i - 1], 'schedule[i - 1]');
+    if (timeMinutes(current.time) < timeMinutes(previous.time)) return false;
   }
   return true;
 }
@@ -113,8 +115,10 @@ describe('doseSchedule helpers', () => {
   // ── Default times are chronological ───────────────────────────────
   it('DEFAULT_DOSE_TIMES is chronological', () => {
     for (let i = 1; i < DEFAULT_DOSE_TIMES.length; i++) {
-      expect(timeMinutes(DEFAULT_DOSE_TIMES[i])).toBeGreaterThan(
-        timeMinutes(DEFAULT_DOSE_TIMES[i - 1])
+      expect(
+        timeMinutes(requireDefined(DEFAULT_DOSE_TIMES[i], 'DEFAULT_DOSE_TIMES[i]'))
+      ).toBeGreaterThan(
+        timeMinutes(requireDefined(DEFAULT_DOSE_TIMES[i - 1], 'DEFAULT_DOSE_TIMES[i - 1]'))
       );
     }
   });
@@ -243,13 +247,13 @@ describe('doseSchedule helpers', () => {
       dose({ amount: 1, time: '00:00' }),
     ]);
     expect(midnight.ok).toBe(true);
-    expect(midnight.schedule?.[0].time).toBe('00:00');
+    expect(requireDefined(midnight.schedule?.[0], 'midnight.schedule[0]').time).toBe('00:00');
 
     const endOfDay = validateAndNormalizeDoseSchedule(1, [
       dose({ amount: 1, time: '23:59' }),
     ]);
     expect(endOfDay.ok).toBe(true);
-    expect(endOfDay.schedule?.[0].time).toBe('23:59');
+    expect(requireDefined(endOfDay.schedule?.[0], 'endOfDay.schedule[0]').time).toBe('23:59');
   });
 
   it('requires schedule length to equal dosesPerDay', () => {

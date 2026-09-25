@@ -371,15 +371,13 @@ export function addMedicationFormReducer(
             },
           };
         }
-        if (
-          next.dosage.doseSchedule.length === 1 &&
-          Number(next.dosage.doseSchedule[0].amount) === 1
-        ) {
+        const onlyDose = next.dosage.doseSchedule[0];
+        if (onlyDose && next.dosage.doseSchedule.length === 1 && Number(onlyDose.amount) === 1) {
           next = {
             ...next,
             dosage: {
               ...next.dosage,
-              doseSchedule: [{ ...next.dosage.doseSchedule[0], amount: 5 }],
+              doseSchedule: [{ ...onlyDose, amount: 5 }],
             },
           };
         }
@@ -400,15 +398,13 @@ export function addMedicationFormReducer(
             },
           };
         }
-        if (
-          next.dosage.doseSchedule.length === 1 &&
-          Number(next.dosage.doseSchedule[0].amount) === 5
-        ) {
+        const onlyDose = next.dosage.doseSchedule[0];
+        if (onlyDose && next.dosage.doseSchedule.length === 1 && Number(onlyDose.amount) === 5) {
           next = {
             ...next,
             dosage: {
               ...next.dosage,
-              doseSchedule: [{ ...next.dosage.doseSchedule[0], amount: 1 }],
+              doseSchedule: [{ ...onlyDose, amount: 1 }],
             },
           };
         }

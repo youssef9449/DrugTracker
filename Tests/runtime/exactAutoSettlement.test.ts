@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { describe, expect, it, vi } from 'vitest';
 import {
   getExactOccurrenceSettlementState,
@@ -114,9 +115,9 @@ describe('canonical exact-occurrence settlement decision (#532)', () => {
     });
     // Reconciliation runner: same evidence → already_applied, no mutation.
     const r = reconcileFiredEvents([med()], logs, [firedEvent()]);
-    expect(r.details[0].outcome).toBe('already_applied');
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('already_applied');
     expect(r.mutated).toBe(false);
-    expect(r.medications[0].currentPills).toBe(10);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(10);
     expect(r.toAcknowledge).toHaveLength(1);
   });
 
@@ -128,17 +129,17 @@ describe('canonical exact-occurrence settlement decision (#532)', () => {
       doseConsumptionHistory: { d1: [DATE] },
     };
     const rA = reconcileFiredEvents([markerOnlyMed], [], [firedEvent()]);
-    expect(rA.details[0].outcome).toBe('already_applied');
+    expect(requireDefined(rA.details[0], 'rA.details[0]').outcome).toBe('already_applied');
     expect(rA.mutated).toBe(false);
-    expect(rA.medications[0].currentPills).toBe(10);
+    expect(requireDefined(rA.medications[0], 'rA.medications[0]').currentPills).toBe(10);
     expect(rA.toAcknowledge).toHaveLength(1);
 
     // Variant B: exact log durable, the marker was lost (e.g. pruned).
     const logOnlyMed = med();
     const rB = reconcileFiredEvents([logOnlyMed], [exactLog()], [firedEvent()]);
-    expect(rB.details[0].outcome).toBe('already_applied');
+    expect(requireDefined(rB.details[0], 'rB.details[0]').outcome).toBe('already_applied');
     expect(rB.mutated).toBe(false);
-    expect(rB.medications[0].currentPills).toBe(10);
+    expect(requireDefined(rB.medications[0], 'rB.medications[0]').currentPills).toBe(10);
     expect(rB.toAcknowledge).toHaveLength(1);
   });
 });

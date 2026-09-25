@@ -1,4 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="8" fill="#0f766e"/>
-  <path d="M10 8h4v6h6v4h-6v6h-4v-6H4v-4h6V8zm14 4.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9z" fill="#ccfbf1"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <clipPath id="fav-capsule">
+      <rect x="-12" y="-5.5" width="24" height="11" rx="5.5" ry="5.5" />
+    </clipPath>
+    <clipPath id="fav-blue">
+      <rect x="-13" y="-7" width="13" height="14" />
+    </clipPath>
+    <clipPath id="fav-red">
+      <rect x="0" y="-7" width="13" height="14" />
+    </clipPath>
+  </defs>
+  <g transform="translate(16 16) rotate(-45)">
+    <g clip-path="url(#fav-capsule)">
+      <!-- Blue half -->
+      <g clip-path="url(#fav-blue)">
+        <rect x="-12" y="-5.5" width="12" height="11" fill="#29B6F6" />
+        <path d="M -12 0 C -12 3.5 -9 5.5 -6 5.5 L 0 5.5 L 0 1.5 C -3 1.5 -6 0 -12 0 Z" fill="#0288D1" opacity="0.9" />
+        <rect x="-10" y="-4" width="7" height="2" rx="1" fill="#FFFFFF" opacity="0.8" />
+      </g>
+      <!-- Red half -->
+      <g clip-path="url(#fav-red)">
+        <rect x="0" y="-5.5" width="12" height="11" fill="#FF3B30" />
+        <path d="M 0 5.5 L 6 5.5 C 9 5.5 12 3.5 12 0 C 6 0 3 1.5 0 1.5 Z" fill="#C62828" opacity="0.9" />
+        <rect x="3" y="-4" width="7" height="2" rx="1" fill="#FFFFFF" opacity="0.8" />
+      </g>
+      <line x1="0" y1="-5.5" x2="0" y2="5.5" stroke="rgba(0,0,0,0.2)" stroke-width="0.5" />
+    </g>
+  </g>
 </svg>

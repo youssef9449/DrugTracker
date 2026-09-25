@@ -1,30 +1,52 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0f766e"/>
-      <stop offset="100%" stop-color="#115e59"/>
-    </linearGradient>
+    <!-- Master capsule clip path: width 380, height 180, corner radius 90 -->
+    <clipPath id="capsule-body">
+      <rect x="-190" y="-90" width="380" height="180" rx="90" ry="90" />
+    </clipPath>
+
+    <!-- Clip path for lower-left (blue) half: u in [-190, 0] -->
+    <clipPath id="blue-half-clip">
+      <rect x="-200" y="-100" width="200" height="200" />
+    </clipPath>
+
+    <!-- Clip path for upper-right (red) half: u in [0, 190] -->
+    <clipPath id="red-half-clip">
+      <rect x="0" y="-100" width="200" height="200" />
+    </clipPath>
   </defs>
-  <!-- Rounded square background (matches Android adaptive icon style) -->
-  <rect x="0" y="0" width="192" height="192" rx="44" fill="url(#bg)"/>
-  <!-- Bell icon representing medication reminders -->
-  <g transform="translate(96 96)" fill="none" stroke="#fef3c7" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
-    <!-- Bell body -->
-    <path d="M -28 -10 a 28 28 0 0 1 56 0 v 16 l 8 12 h -72 l 8 -12 z" fill="rgba(254, 243, 199, 0.15)"/>
-    <!-- Bell clapper -->
-    <circle cx="0" cy="22" r="6" fill="#fef3c7" stroke="none"/>
-    <!-- Bell top -->
-    <line x1="0" y1="-30" x2="0" y2="-40"/>
-    <circle cx="0" cy="-44" r="4" fill="#fef3c7" stroke="none"/>
-  </g>
-  <!-- Sound waves on the right side (representing "نغنغ" - ringing) -->
-  <g transform="translate(140 96)" fill="none" stroke="#fbbf24" stroke-width="6" stroke-linecap="round">
-    <path d="M 0 -14 a 14 14 0 0 1 0 28"/>
-    <path d="M 8 -22 a 22 22 0 0 1 0 44" opacity="0.7"/>
-  </g>
-  <!-- Sound waves on the left side (mirror) -->
-  <g transform="translate(52 96) scale(-1 1)" fill="none" stroke="#fbbf24" stroke-width="6" stroke-linecap="round">
-    <path d="M 0 -14 a 14 14 0 0 1 0 28"/>
-    <path d="M 8 -22 a 22 22 0 0 1 0 44" opacity="0.7"/>
+
+  <!-- Centered at (256, 256) and rotated -45 deg: lower-left is blue, upper-right is red -->
+  <g transform="translate(256 256) rotate(-45)">
+    <g clip-path="url(#capsule-body)">
+      <!-- ===== BLUE (LOWER-LEFT) HALF ===== -->
+      <g clip-path="url(#blue-half-clip)">
+        <!-- Base Blue fill -->
+        <rect x="-190" y="-90" width="190" height="180" fill="#29B6F6" />
+
+        <!-- Deep curved shadow along bottom curve -->
+        <path d="M -190 0 C -190 52 -148 90 -95 90 L 0 90 L 0 25 C -55 25 -105 0 -190 0 Z" fill="#0288D1" opacity="0.9" />
+
+        <!-- Pill-shaped glossy highlight reflection (upper side) -->
+        <rect x="-155" y="-66" width="115" height="28" rx="14" fill="#81D4FA" opacity="0.85" />
+        <rect x="-145" y="-61" width="75" height="16" rx="8" fill="#FFFFFF" opacity="0.65" />
+      </g>
+
+      <!-- ===== RED (UPPER-RIGHT) HALF ===== -->
+      <g clip-path="url(#red-half-clip)">
+        <!-- Base Red fill -->
+        <rect x="0" y="-90" width="190" height="180" fill="#FF3B30" />
+
+        <!-- Deep curved shadow along bottom curve -->
+        <path d="M 0 90 L 95 90 C 148 90 190 52 190 0 C 105 0 55 25 0 25 Z" fill="#C62828" opacity="0.9" />
+
+        <!-- Pill-shaped glossy highlight reflection (upper side) -->
+        <rect x="40" y="-66" width="115" height="28" rx="14" fill="#FF8A80" opacity="0.85" />
+        <rect x="50" y="-61" width="75" height="16" rx="8" fill="#FFFFFF" opacity="0.65" />
+      </g>
+
+      <!-- Center seam between capsule halves -->
+      <line x1="0" y1="-90" x2="0" y2="90" stroke="rgba(0, 0, 0, 0.16)" stroke-width="2" />
+    </g>
   </g>
 </svg>

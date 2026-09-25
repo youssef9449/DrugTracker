@@ -1,32 +1,12 @@
 /**
- * Generate PNG icons from icon.svg for the PWA manifest (#120).
+ * Generate PNG icons from icon.svg for PWA manifest and multiple device resolutions.
  *
- * Replaces the previous Python script (scripts/generate-icons.py) which
- * required cairosvg + Pillow — undocumented deps that broke on Windows
- * (python3 vs python). This Node script uses sharp (a cross-platform
- * native image library) so it works on all platforms with no external
- * Python dependencies.
- *
- * The PWA manifest references these PNG icons:
- *   - /icon-180.png          (180x180, any — iOS apple-touch-icon preferred size #119)
- *   - /icon-192.png           (192x192, any purpose)
- *   - /icon-512.png           (512x512, any purpose)
- *   - /icon-maskable-192.png  (192x192, maskable)
- *   - /icon-maskable-512.png  (512x512, maskable)
- *
- * The "any" icons render the SVG as-is onto a transparent background
- * (except for the rounded square background baked into the SVG).
- *
- * The "maskable" icons add extra padding so that Android's adaptive-icon
- * masking doesn't crop the bell. Android's safe zone for maskable icons
- * is a circle with radius = 80 / 192 ≈ 41.7% of the icon width, centered.
- * We place the bell content within the inner 66% of the icon, leaving a
- * ~17% safe padding on every side.
- *
- * Usage:
- *     node scripts/generate-icons.mjs
- *     # or via npm:
- *     npm run icons
+ * Supports all target densities:
+ *   - 16x16, 32x32, 48x48 (favicons / low-dpi)
+ *   - 72x72, 96x96, 128x128, 144x144 (medium / high-dpi Android)
+ *   - 180x180 (iOS apple-touch-icon)
+ *   - 192x192, 384x384, 512x512 (standard & high-dpi PWA)
+ *   - 192x192, 512x512 (Android adaptive maskable icons)
  */
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -38,8 +18,8 @@ const REPO_ROOT = join(__dirname, '..');
 const ICONS_DIR = join(REPO_ROOT, 'public', 'assets', 'icons');
 const SVG_PATH = join(ICONS_DIR, 'icon.svg');
 
-// Teal-800 (#0f766e) for the maskable icon background.
-const MASKABLE_BG = { r: 15, g: 118, b: 110, alpha: 1 };
+// Clean white background for Android adaptive maskable icons
+const MASKABLE_BG = { r: 255, g: 255, b: 255, alpha: 1 };
 
 async function renderSvgToPng(svgPath, outputPath, size) {
   const svgBuffer = readFileSync(svgPath);
@@ -50,17 +30,16 @@ async function renderSvgToPng(svgPath, outputPath, size) {
 }
 
 async function makeMaskableIcon(svgPath, outputPath, size) {
-  const innerSize = Math.round(size * 0.66);
+  // Safe zone for Android Adaptive icons is inner 66% (leaving ~17% safe margin)
+  const innerSize = Math.round(size * 0.68);
   const offset = Math.round((size - innerSize) / 2);
 
-  // Render the SVG at the inner content size (66% of the target).
   const svgBuffer = readFileSync(svgPath);
   const innerPng = await sharp(svgBuffer, { density: 300 })
     .resize(innerSize, innerSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .png()
     .toBuffer();
 
-  // Composite the inner PNG onto a solid teal background, centered.
   await sharp({
     create: {
       width: size,
@@ -83,12 +62,23 @@ async function main() {
   mkdirSync(ICONS_DIR, { recursive: true });
 
   const targets = [
-    { name: 'icon-180.png', size: 180, purpose: 'any' }, // #119: iOS apple-touch-icon preferred size
-    { name: 'icon-192.png', size: 192, purpose: 'any' },
-    { name: 'icon-512.png', size: 512, purpose: 'any' },
+    { name: 'icon-16.png', size: 16, purpose: 'any' },
+    { name: 'icon-32.png', size: 32, purpose: 'any' },
+    { name: 'icon-48.png', size: 48, purpose: 'any' },
+    { name: 'icon-72.png', size: 72, purpose: 'any' },
+    { name: 'icon-96.png', size: 96, purpose: 'any' },
+    { name: 'icon-128.png', size: 128, purpose: 'any' },
+    { name: 'icon-144.png', size: 144, purpose: 'any' },
+    { name: 'icon-180.png', size: 180, purpose: 'any' }, // iOS Apple Touch icon
+    { name: 'icon-192.png', size: 192, purpose: 'any' }, // Android standard PWA
+    { name: 'icon-256.png', size: 256, purpose: 'any' },
+    { name: 'icon-384.png', size: 384, purpose: 'any' }, // Android xxhdpi
+    { name: 'icon-512.png', size: 512, purpose: 'any' }, // Android xxxhdpi
     { name: 'icon-maskable-192.png', size: 192, purpose: 'maskable' },
     { name: 'icon-maskable-512.png', size: 512, purpose: 'maskable' },
   ];
+
+  console.log(`Generating ${targets.length} icon sizes from ${SVG_PATH}...\n`);
 
   for (const { name, size, purpose } of targets) {
     const output = join(ICONS_DIR, name);
@@ -99,10 +89,10 @@ async function main() {
     }
     const { statSync } = await import('node:fs');
     const actual = statSync(output).size;
-    console.log(`  ✓ ${name} (${size}x${size}, ${purpose}) — ${actual} bytes`);
+    console.log(`  ✓ ${name.padEnd(24)} (${size}x${size}, ${purpose}) — ${actual} bytes`);
   }
 
-  console.log('\nAll PWA icons generated successfully.');
+  console.log('\nAll app icons generated successfully.');
 }
 
 main().catch((err) => {

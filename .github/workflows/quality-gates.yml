@@ -52,6 +52,7 @@ jobs:
       - name: Test
         run: npm test
       - name: Build and verify PWA asset graph
+        if: ${{ !cancelled() }}
         run: npm run build && node scripts/test-pwa-build.mjs
 
   android-integration:

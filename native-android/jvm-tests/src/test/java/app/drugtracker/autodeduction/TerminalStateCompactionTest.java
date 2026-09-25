@@ -28,7 +28,7 @@ import java.util.TimeZone;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 33)
-public class TerminalStateCompactionTest extends Group2AutoReliabilityFixture {
+public class TerminalStateCompactionTest extends AutoReliabilityFixture {
 
     @Test
     public void terminalStateCompaction_commitFailure_isReportedAndRetryable()

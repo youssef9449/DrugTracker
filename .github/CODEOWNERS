@@ -1,0 +1,5 @@
+# Protect critical repository files from accidental deletion or unauthorized changes.
+
+/package-lock.json @youssef9449
+/native-android/jvm-tests/src/main/java/android/compat/annotation/UnsupportedAppUsage.java @youssef9449
+/.github/CODEOWNERS @youssef9449

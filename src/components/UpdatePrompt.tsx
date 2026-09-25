@@ -46,8 +46,10 @@ export function UpdatePrompt() {
       if (reg.waiting && isMounted) setWaitingWorker(reg.waiting);
     };
 
+    const serviceWorkerUrl = new URL('./sw.js', window.location.href).href;
+
     navigator.serviceWorker
-      .getRegistration('/sw.js')
+      .getRegistration(serviceWorkerUrl)
       .then((reg) => {
         if (!reg || !isMounted) return;
         handleNewWaiter(reg);

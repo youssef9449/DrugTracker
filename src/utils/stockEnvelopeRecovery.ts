@@ -338,7 +338,15 @@ export async function recoverAllPendingStockEnvelopes(
     ok: boolean;
     error?: string;
     stocks?: Array<{ medicationId: string; currentPills: number }>;
-  }> = applyForegroundAutoStockDeltas
+  }> = (
+    mutationSeq,
+    deltas,
+    occurrenceResolutions
+  ) => applyForegroundAutoStockDeltas(
+    mutationSeq,
+    deltas,
+    occurrenceResolutions ?? []
+  )
 ): Promise<UnifiedRecoveryResult> {
   let state = fresh;
   let recovered = false;

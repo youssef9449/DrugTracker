@@ -67,8 +67,12 @@ function lastDoseSchedulePayload(): {
   doseRecurring: boolean | undefined;
 } {
   expect(mocks.schedule).toHaveBeenCalled();
-  const call = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
-  const n = requireDefined(call, 'call')[0].notifications[0];
+  const call = requireDefined(
+    mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1],
+    'schedule call'
+  );
+  const request = requireDefined(call[0], 'schedule request');
+  const n = requireDefined(request.notifications[0], 'notification');
   return {
     at: n.schedule.at as Date,
     // Phase 2: dose reminders are ONE-SHOT (no Capacitor repeats/every —

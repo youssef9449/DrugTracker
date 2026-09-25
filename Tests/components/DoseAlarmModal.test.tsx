@@ -125,8 +125,8 @@ describe('DoseAlarmModal', () => {
     );
     fireEvent.click(screen.getByTestId('alarm-take-dose'));
     expect(onTakeDose).toHaveBeenCalledTimes(1);
-    expect(onTakeDose.mock.calls[0][0].id).toBe('med-alarm');
-    expect(onTakeDose.mock.calls[0][1]).toBe('slot-b');
+    expect(requireDefined(onTakeDose.mock.calls[0], 'onTakeDose.mock.calls[0]')[0].id).toBe('med-alarm');
+    expect(requireDefined(onTakeDose.mock.calls[0], 'onTakeDose.mock.calls[0]')[1]).toBe('slot-b');
   });
 
 
@@ -191,8 +191,8 @@ describe('DoseAlarmModal', () => {
         />
       );
       fireEvent.click(screen.getByTestId('alarm-take-dose'));
-      expect(onTakeDose.mock.calls[0][1]).toBe('d1');
-      expect(onTakeDose.mock.calls[0][1]).not.toBe('d2');
+      expect(requireDefined(onTakeDose.mock.calls[0], 'onTakeDose.mock.calls[0]')[1]).toBe('d1');
+      expect(requireDefined(onTakeDose.mock.calls[0], 'onTakeDose.mock.calls[0]')[1]).not.toBe('d2');
     });
   });
 });

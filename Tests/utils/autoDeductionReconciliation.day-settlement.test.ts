@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { makeMedication as baseMed, makeAutoDeductionEvent as fired } from '../fixtures/testFixtures';
@@ -30,7 +31,7 @@ describe('deterministicLogPreventsDuplicate', () => {
     });
     const r = reconcileFiredEvents([med], [], [e, e]);
     expect(r.newExactLogs).toHaveLength(1);
-    expect(r.medications[0].currentPills).toBe(4);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(4);
   });
 });
 describe('exact event day must not be double-settled', () => {
@@ -61,8 +62,8 @@ describe('exact event day must not be double-settled', () => {
         }),
       ]
     );
-    expect(r.details[0].outcome).toBe('applied');
-    expect(r.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('applied');
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
   });
 
   it('partialMultiDoseDayDoesNotDeductSibling', () => {
@@ -88,7 +89,7 @@ describe('exact event day must not be double-settled', () => {
         }),
       ]
     );
-    expect(r.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
     expect(
       isExactAutoOccurrenceApplied(r.logs, r.medications[0], 'morning', '2026-09-13')
     ).toBe(true);
@@ -123,7 +124,7 @@ describe('exact event day must not be double-settled', () => {
       }),
     ];
     const r = reconcileFiredEvents([med], [], events);
-    expect(r.medications[0].currentPills).toBe(5);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(5);
     expect(r.newExactLogs).toHaveLength(2);
   });
 
@@ -151,11 +152,11 @@ describe('exact event day must not be double-settled', () => {
         }),
       ]
     );
-    expect(r.details[0].outcome).toBe('applied');
-    expect(r.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('applied');
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
     // Exactly one exact log (the FIRED occurrence); no second day-based settlement log.
     expect(r.newExactLogs).toHaveLength(1);
-    expect(r.newExactLogs[0].amount).toBe(-2);
+    expect(requireDefined(r.newExactLogs[0], 'r.newExactLogs[0]').amount).toBe(-2);
   });
 
   it('sameDayExactEventDoesNotUsePastDueWindow', () => {
@@ -176,7 +177,7 @@ describe('exact event day must not be double-settled', () => {
         }),
       ]
     );
-    expect(r.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
   });
 
   it('duplicateExactOccurrenceIsIdempotent', () => {
@@ -192,7 +193,7 @@ describe('exact event day must not be double-settled', () => {
       amount: 2,
     });
     const r = reconcileFiredEvents([med], [], [e, e]);
-    expect(r.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
     expect(r.newExactLogs).toHaveLength(1);
   });
 
@@ -217,8 +218,8 @@ describe('exact event day must not be double-settled', () => {
       ],
       { globalAutoDeductEnabled: false }
     );
-    expect(r.details[0].outcome).toBe('applied');
-    expect(r.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('applied');
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
     expect(r.toAcknowledge).toHaveLength(1);
   });
 
@@ -242,8 +243,8 @@ describe('exact event day must not be double-settled', () => {
       ],
       { globalAutoDeductEnabled: true }
     );
-    expect(r.details[0].outcome).toBe('applied');
-    expect(r.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('applied');
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
   });
 
   it('repeated reconciliation remains idempotent after apply', () => {
@@ -260,9 +261,9 @@ describe('exact event day must not be double-settled', () => {
     });
     const r1 = reconcileFiredEvents([med], [], [e]);
     const r2 = reconcileFiredEvents(r1.medications, r1.logs, [e]);
-    expect(r1.medications[0].currentPills).toBe(8);
-    expect(r2.medications[0].currentPills).toBe(8);
-    expect(r2.details[0].outcome).toBe('already_applied');
+    expect(requireDefined(r1.medications[0], 'r1.medications[0]').currentPills).toBe(8);
+    expect(requireDefined(r2.medications[0], 'r2.medications[0]').currentPills).toBe(8);
+    expect(requireDefined(r2.details[0], 'r2.details[0]').outcome).toBe('already_applied');
   });
 
 });

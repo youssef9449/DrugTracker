@@ -28,7 +28,7 @@ import java.util.TimeZone;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 33)
-public class CancellationReliabilityTest extends Group2AutoReliabilityFixture {
+public class CancellationReliabilityTest extends AutoReliabilityFixture {
 
     @Test
     public void rollbackCompensation_recoversPastOccurrenceThroughNativeCatchUp()

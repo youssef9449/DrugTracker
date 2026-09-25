@@ -346,7 +346,13 @@ export async function recoverAllPendingStockEnvelopes(
     mutationSeq,
     deltas,
     occurrenceResolutions ?? []
-  )
+  ) as Promise<{
+    ok: boolean;
+    alreadyApplied: boolean;
+    stocks: NativeAutoStockMedication[];
+    error?: string | undefined;
+    errorCode?: NativeErrorCode | undefined;
+  }>
 ): Promise<UnifiedRecoveryResult> {
   let state = fresh;
   let recovered = false;

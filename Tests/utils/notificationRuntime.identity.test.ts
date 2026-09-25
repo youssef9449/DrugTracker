@@ -131,16 +131,15 @@ describe('notification logical identity boundary', () => {
     mocks.platform.mockReturnValue('ios');
 
     await scheduleNotification(baseOptions);
-    const scheduledId =
-      requireDefined(
-        requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0],
-        'schedule request'
-      ).notifications[0]
-        ? requireDefined(
-            requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0].notifications[0],
-            'scheduled notification'
-          ).id
-        : (() => { throw new Error('scheduled notification is missing'); })();
+    const scheduleRequest = requireDefined(
+      requireDefined(mocks.schedule.mock.calls[0], 'mocks.schedule.mock.calls[0]')[0],
+      'schedule request'
+    );
+    const scheduledNotification = requireDefined(
+      scheduleRequest.notifications[0],
+      'scheduled notification'
+    );
+    const scheduledId = scheduledNotification.id;
 
     await cancelNotification(
       baseOptions.namespace,

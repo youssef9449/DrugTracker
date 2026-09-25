@@ -240,10 +240,16 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     expect(screen.queryByText('الجرعة 2')).not.toBeInTheDocument();
   });
 
-  it('does not render the removed treatment-duration progress explanation', () => {
+  it('removes the treatment-duration progress explanation and native number spinner', () => {
     render(<AddMedicationModal {...baseProps()} />);
     fireEvent.click(screen.getByText('مدة محددة'));
+
     expect(screen.queryByText('سيعتمد شريط التقدم')).not.toBeInTheDocument();
+
+    const durationInput = screen.getByPlaceholderText('مثال: 5، 7، 10، 14 يوماً...') as HTMLInputElement;
+    expect(durationInput).toHaveAttribute('inputmode', 'numeric');
+    expect(durationInput).toHaveAttribute('pattern', '[0-9]*');
+    expect(durationInput.type).toBe('text');
   });
 
   it('defaults stock notifications and auto-deduction off and places them below the dose reminder', () => {

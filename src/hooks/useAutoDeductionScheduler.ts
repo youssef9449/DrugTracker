@@ -228,6 +228,7 @@ export function useAutoDeductionScheduler({
       hydrated,
       isFirstRun,
       exactAlarmPermission,
+      globalAutoDeductEnabled,
     });
     if (decision.action !== 'schedule') {
       if (decision.action === 'cancel_armed_and_wait') {

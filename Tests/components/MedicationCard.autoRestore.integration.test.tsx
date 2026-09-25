@@ -155,7 +155,7 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
     expect(screen.getByTestId(`restore-dose-${MED_ID}`)).toBeInTheDocument();
     expect(screen.queryAllByTitle(/تناول جرعة/)).toHaveLength(0);
 
-    const pillsBefore = readPersistedMedications()[0].currentPills;
+    const pillsBefore = requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills;
     await clickRestore();
 
     await waitFor(() => {
@@ -182,11 +182,11 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
     expect(screen.getByTestId(`restore-dose-${MED_ID}`)).toBeInTheDocument();
 
-    const pillsBefore = readPersistedMedications()[0].currentPills;
+    const pillsBefore = requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills;
     await clickRestore();
 
     await waitFor(() => {
-      expect(readPersistedMedications()[0].currentPills).toBe(pillsBefore + 2);
+      expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills).toBe(pillsBefore + 2);
     });
   });
 
@@ -202,7 +202,7 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
 
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
     expect(screen.queryByTestId(`restore-dose-${MED_ID}`)).toBeNull();
-    expect(readPersistedMedications()[0].currentPills).toBe(20);
+    expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills).toBe(20);
   });
 });
 
@@ -247,7 +247,7 @@ describe('MedicationCard Manual Take → Restore (auto OFF)', () => {
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
 
     const takeBtn = screen.getByTitle(/تناول جرعة/);
-    const pillsBefore = readPersistedMedications()[0].currentPills;
+    const pillsBefore = requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills;
     fireEvent.click(takeBtn);
 
     await waitFor(() => {

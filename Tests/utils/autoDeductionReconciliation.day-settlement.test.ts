@@ -152,7 +152,7 @@ describe('exact event day must not be double-settled', () => {
         }),
       ]
     );
-    expect(requireDefined(requireDefined(r.details[0], 'r.details[0]'), 'requireDefined(r.details[0], 'r.details[0]')').outcome).toBe('applied');
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('applied');
     expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
     // Exactly one exact log (the FIRED occurrence); no second day-based settlement log.
     expect(r.newExactLogs).toHaveLength(1);
@@ -218,7 +218,7 @@ describe('exact event day must not be double-settled', () => {
       ],
       { globalAutoDeductEnabled: false }
     );
-    expect(requireDefined(requireDefined(r.details[0], 'r.details[0]'), 'requireDefined(r.details[0], 'r.details[0]')').outcome).toBe('applied');
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('applied');
     expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
     expect(r.toAcknowledge).toHaveLength(1);
   });
@@ -243,7 +243,7 @@ describe('exact event day must not be double-settled', () => {
       ],
       { globalAutoDeductEnabled: true }
     );
-    expect(requireDefined(requireDefined(r.details[0], 'r.details[0]'), 'requireDefined(r.details[0], 'r.details[0]')').outcome).toBe('applied');
+    expect(requireDefined(r.details[0], 'r.details[0]').outcome).toBe('applied');
     expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
   });
 

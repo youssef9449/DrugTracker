@@ -75,6 +75,10 @@ describe('MedicationMenu — medication preference vs Global kill switch', () =>
       'title',
       'إعداد الخصم التلقائي لهذا الدواء مفعّل، لكن المفتاح العام متوقف — اضغط لتغيير إعداد الدواء'
     );
+    // Global OFF pauses runtime only; the card's Auto control stays visibly ON.
+    expect(btn.className).toContain('bg-teal-100');
+    expect(btn.className).not.toContain('bg-amber-100');
+    expect(btn.querySelector('svg')?.getAttribute('class')).toContain('fill-teal-600/30');
   });
 
   it('preference OFF: not pressed, effective OFF', () => {

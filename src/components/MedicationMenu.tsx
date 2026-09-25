@@ -58,21 +58,20 @@ export function MedicationMenu({
   showTypeIcon = false,
   showOverflow = false,
 }: MedicationMenuProps) {
-  // The button edits only the medication-level preference. Its visual state
-  // uses the effective state so the global kill switch can pause Auto without
-  // rewriting the medication configuration.
+  // The button edits and displays only the medication-level preference.
+  // The global kill switch affects runtime execution, not this per-med UI.
   const isMedicationAutoDeductEnabled = medication.autoDeductEnabled === true;
   const autoTogglePressed = isMedicationAutoDeductEnabled;
   const autoToggleAriaLabel = isMedicationAutoDeductEnabled
     ? 'إيقاف الخصم التلقائي لهذا الدواء'
     : 'تفعيل الخصم التلقائي لهذا الدواء';
   const autoToggleTitle =
-    isAutoActive
-      ? 'الخصم التلقائي مفعّل لهذا الدواء — اضغط للإيقاف'
-      : isMedicationAutoDeductEnabled
-        ? 'إعداد الخصم التلقائي لهذا الدواء مفعّل، لكن المفتاح العام متوقف — اضغط لتغيير إعداد الدواء'
-        : 'الخصم التلقائي متوقف لهذا الدواء — اضغط للتفعيل';
-  const autoToggleClass = isAutoActive
+    isMedicationAutoDeductEnabled
+      ? isAutoActive
+        ? 'الخصم التلقائي مفعّل لهذا الدواء — اضغط للإيقاف'
+        : 'إعداد الخصم التلقائي لهذا الدواء مفعّل، لكن المفتاح العام متوقف — اضغط لتغيير إعداد الدواء'
+      : 'الخصم التلقائي متوقف لهذا الدواء — اضغط للتفعيل';
+  const autoToggleClass = isMedicationAutoDeductEnabled
     ? 'bg-teal-100 text-teal-800 hover:bg-teal-200'
     : 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-300/50';
 
@@ -113,7 +112,7 @@ export function MedicationMenu({
         data-auto-effective={isAutoActive ? 'on' : 'off'}
       >
         <Zap
-          className={`${iconDims} ${isAutoActive ? 'fill-teal-600/30' : 'text-amber-600 fill-amber-400/20'}`}
+          className={`${iconDims} ${isMedicationAutoDeductEnabled ? 'fill-teal-600/30' : 'text-amber-600 fill-amber-400/20'}`}
           aria-hidden="true"
         />
       </button>

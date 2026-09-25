@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
+import sharp from 'sharp';
 
 /**
  * Post-cap-sync Android preparation for Drug Tracker.
@@ -317,7 +318,96 @@ export function prepareAndroidManifest(xml) {
   }
 }
 
-export function prepareAndroidProject() {
+/**
+ * Generate native Android launcher icons from the repository's PWA icon.
+ *
+ * `npx cap add android` seeds the generated project with the default
+ * Capacitor Android-robot launcher icons in res/mipmap-{density}/ic_launcher{,_round,_foreground}.png.
+ * This replaces every launcher icon (legacy + adaptive foreground) with the
+ * Drug Tracker capsule icon sourced from public/assets/icons/icon-512.png,
+ * so the app's icon in the Android launcher / recents matches the PWA icon.
+ *
+ * Generated resources (per Android density):
+ *   - ic_launcher.png / ic_launcher_round.png  (legacy, pre-Android 8)
+ *       mdpi=48, hdpi=72, xhdpi=96, xxhdpi=144, xxxhdpi=192
+ *   - ic_launcher_foreground.png  (adaptive, Android 8+)
+ *       mdpi=108, hdpi=162, xhdpi=216, xxhdpi=324, xxxhdpi=432
+ *
+ * The adaptive-icon background stays white (res/values/ic_launcher_background.xml
+ * = #FFFFFF, the Capacitor default) — no color change is needed.
+ *
+ * Requires the `sharp` npm dependency (already used by scripts/generate-icons.mjs).
+ */
+const LAUNCHER_ICON_DENSITIES = [
+  { name: 'mipmap-mdpi', legacy: 48, fg: 108 },
+  { name: 'mipmap-hdpi', legacy: 72, fg: 162 },
+  { name: 'mipmap-xhdpi', legacy: 96, fg: 216 },
+  { name: 'mipmap-xxhdpi', legacy: 144, fg: 324 },
+  { name: 'mipmap-xxxhdpi', legacy: 192, fg: 432 },
+];
+
+async function generateLauncherIcons() {
+  const sourcePath = path.join(root, 'public', 'assets', 'icons', 'icon-512.png');
+  if (!fs.existsSync(sourcePath)) {
+    fail('Launcher icon source not found: ' + sourcePath);
+  }
+
+  const resDir = path.join(androidDir, 'app', 'src', 'main', 'res');
+
+  for (const density of LAUNCHER_ICON_DENSITIES) {
+    const dir = path.join(resDir, density.name);
+    fs.mkdirSync(dir, { recursive: true });
+
+    // Legacy square launcher icon.
+    await sharp(sourcePath)
+      .resize(density.legacy, density.legacy)
+      .png()
+      .toFile(path.join(dir, 'ic_launcher.png'));
+
+    // Circular launcher icon (used by round launchers / some OEM themes).
+    const circleSvg = Buffer.from(
+      '<svg width="' +
+        density.legacy +
+        '" height="' +
+        density.legacy +
+        '"><circle cx="' +
+        density.legacy / 2 +
+        '" cy="' +
+        density.legacy / 2 +
+        '" r="' +
+        density.legacy / 2 +
+        '" fill="white"/></svg>'
+    );
+    const roundBuffer = await sharp(sourcePath)
+      .resize(density.legacy, density.legacy)
+      .composite([{ input: circleSvg, blend: 'dest-in' }])
+      .png()
+      .toBuffer();
+    await sharp(roundBuffer)
+      .png()
+      .toFile(path.join(dir, 'ic_launcher_round.png'));
+
+    // Adaptive-icon foreground (Android 8+). The icon content sits inside
+    // the inner ~66% safe zone; the remaining border is transparent so the
+    // launcher's adaptive masking can apply its shape.
+    const fgSize = density.fg;
+    const iconSize = Math.round(fgSize * 0.62);
+    const pad = Math.round((fgSize - iconSize) / 2);
+    await sharp(sourcePath)
+      .resize(iconSize, iconSize)
+      .extend({
+        top: pad,
+        bottom: pad,
+        left: pad,
+        right: pad,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      })
+      .png()
+      .toFile(path.join(dir, 'ic_launcher_foreground.png'));
+  }
+}
+
+export async function prepareAndroidProject() {
   if (!fs.existsSync(androidDir)) {
     fail(
       'Android project not found. Generate the clean Capacitor Android project before preparation.'
@@ -469,6 +559,12 @@ export function prepareAndroidProject() {
   console.info(
     '[prepare-android] Ensured private Auto/Dose/Critical receivers + private notification action receiver + shared DrugTrackerAlarmSystemReceiver.'
   );
+
+  await generateLauncherIcons();
+  console.info(
+    '[prepare-android] Generated native launcher icons from public/assets/icons/icon-512.png.'
+  );
+
   console.info(
     'Prepared Android exact-alarm runtime + shared notification runtime + Auto/Dose/Critical feature boundaries.'
   );
@@ -476,9 +572,7 @@ export function prepareAndroidProject() {
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
 if (invokedPath === path.resolve(fileURLToPath(import.meta.url))) {
-  try {
-    prepareAndroidProject();
-  } catch {
+  prepareAndroidProject().catch(() => {
     process.exitCode = 1;
-  }
+  });
 }

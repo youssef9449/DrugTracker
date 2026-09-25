@@ -12,7 +12,7 @@ import {
  */
 
 class FakeNotification {
-  static instances: Array<{ title: string; body?: string }> = [];
+  static instances: Array<{ title: string; body?: string | undefined }> = [];
   static permission: NotificationPermission = 'granted';
 
   constructor(title: string, options?: NotificationOptions) {

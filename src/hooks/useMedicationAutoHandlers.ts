@@ -129,6 +129,7 @@ export function useMedicationAutoHandlers(deps: MedicationHandlersDeps, state: M
           showToast(markerError);
           return;
         }
+        globalAutoDeductEnabledRef.current = enable;
         setGlobalAutoDeductEnabled(enable);
         setIsAutoDeductPromptOpen(false);
         setIsFirstRun(false);

@@ -138,7 +138,7 @@ async function takeDoseViaCard(doseId: string): Promise<void> {
   expect(target).toBeTruthy();
   fireEvent.click(target!);
   await waitFor(() => {
-    expect(readPersistedMedications()[0].doseConsumptionHistory?.[doseId]).toBe(getTodayDateString());
+    expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').doseConsumptionHistory?.[doseId]).toBe(getTodayDateString());
   });
 }
 
@@ -192,7 +192,7 @@ describe('App — Take → Restore → Restore blocked (explicit doseId via card
     });
 
     await takeDoseViaCard('d1');
-    const pillsAfterTake = readPersistedMedications()[0].currentPills;
+    const pillsAfterTake = requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').currentPills;
 
     await restoreDoseViaCardModal('d1');
     await waitFor(() => {
@@ -212,7 +212,7 @@ describe('App — Take → Restore → Restore blocked (explicit doseId via card
         (l) => l.type === 'skipped_day' && l.doseId === 'd1'
       );
       expect(restores).toHaveLength(1);
-      expect(restores[0].amount).toBe(1);
+      expect(requireDefined(restores[0], 'restores[0]').amount).toBe(1);
     });
 
     // Second Restore same d1: control gone or modal marks d1 disabled.
@@ -272,7 +272,7 @@ describe('App — Take → Restore → Restore blocked (explicit doseId via card
 
     await waitFor(() => {
       expect(readLogs().filter((l) => l.type === 'skipped_day' && l.doseId === 'd1')).toHaveLength(1);
-      expect(readPersistedMedications()[0].doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
+      expect(requireDefined(readPersistedMedications()[0], 'readPersistedMedications()[0]').doseSkippedHistory?.d1).toEqual([getTodayDateString()]);
     });
   });
 });
@@ -329,7 +329,7 @@ describe('App — independent multi-dose Restore via SelectDoseModal', () => {
         (l) => l.type === 'skipped_day' && l.doseId === 'd2'
       );
       expect(d2Restores).toHaveLength(1);
-      expect(d2Restores[0].amount).toBe(1);
+      expect(requireDefined(d2Restores[0], 'd2Restores[0]').amount).toBe(1);
     });
   });
 });
@@ -354,7 +354,7 @@ describe('App — Take → Restore → Take → Restore for the SAME doseId (car
         (l) => l.type === 'skipped_day' && l.doseId === 'd1'
       );
       expect(restores).toHaveLength(1);
-      expect(restores[0].amount).toBe(1);
+      expect(requireDefined(restores[0], 'restores[0]').amount).toBe(1);
       expect(med.doseSkippedHistory?.d2).toBeUndefined();
       expect(med.doseSkippedHistory?.d3).toBeUndefined();
       expect(med.doseConsumptionHistory?.d2).toBeUndefined();

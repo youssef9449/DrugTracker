@@ -79,7 +79,11 @@ public final class NativeErrorCodes {
         // emitted by the Capacitor call.reject(message, code) catch paths are
         // registered here too so the native vocabulary stays synchronized
         // with the JS mapping table (src/utils/nativeErrors.ts).
+        // platform_failure is the generic structuredCode fallback token; it
+        // must pass through as a known code so a result message that is
+        // already the generic token is not re-mapped per caller.
         for (String t : new String[] {
+                "platform_failure",
                 "notification_post_failed", "notification_cancel_failed",
                 "notification_manager_unavailable", "notification_security_exception",
                 "stock_not_initialized", "trigger_in_past", "open_settings_failed",

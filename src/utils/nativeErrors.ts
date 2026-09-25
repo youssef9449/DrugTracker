@@ -120,6 +120,10 @@ export const NATIVE_CODE_CATEGORIES: Readonly<Record<string, NativeErrorCode>> =
   // emitted via the Capacitor call.reject(message, code) catch paths are
   // registered here too so the JS vocabulary stays synchronized with the
   // native authority (native-android/alarm-runtime/NativeErrorCodes.java).
+  // The generic platform_failure token is itself emitted as a code by the
+  // native structuredCode fallbacks, so it must classify deterministically
+  // from the code alone (never by re-inspecting the raw message).
+  platform_failure: 'platform_failure',
   notification_post_failed: 'platform_failure',
   notification_cancel_failed: 'platform_failure',
   notification_manager_unavailable: 'platform_failure',

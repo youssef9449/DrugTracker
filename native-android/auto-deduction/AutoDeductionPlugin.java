@@ -356,9 +356,13 @@ public class AutoDeductionPlugin extends Plugin {
                 call.resolve(ret);
             } catch (Exception e) {
                 Log.e(TAG, "listScheduledOccurrences failed", e);
-                call.reject(e.getMessage() != null
-                        ? e.getMessage()
-                        : "list_schedules_failed");
+                // #534: the stable machine code crosses the bridge separately
+                // from the raw human-readable exception text.
+                call.reject(
+                        e.getMessage() != null
+                                ? e.getMessage()
+                                : "list_schedules_failed",
+                        "list_schedules_failed");
             }
         });
     }

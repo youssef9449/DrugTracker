@@ -189,7 +189,11 @@ public final class NotificationRuntimePlugin extends Plugin {
             ret.put("ok", true);
         } catch (Exception e) {
             ret.put("ok", false);
-            ret.put("error", "channel_bootstrap_failed");
+            // #534: the raw diagnostic stays in `error`; the stable machine
+            // code crosses separately and never depends on message wording.
+            ret.put("error", e.getMessage() != null
+                    ? e.getMessage()
+                    : "channel_bootstrap_failed");
             ret.put("code", "channel_bootstrap_failed");
         }
         call.resolve(ret);

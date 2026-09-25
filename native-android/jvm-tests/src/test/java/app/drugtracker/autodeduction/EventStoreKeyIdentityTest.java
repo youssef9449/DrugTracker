@@ -1,9 +1,9 @@
 package app.drugtracker.autodeduction;
 
-import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
-import static app.drugtracker.autodeduction.Phase2TestSupport.evtKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.eventPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.newEventStore;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.clearAllDurableState;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.evtKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.eventPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.newEventStore;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;

@@ -254,7 +254,7 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     expect(durationInput.type).toBe('text');
   });
 
-  it('defaults stock notifications and auto-deduction off and places them below the dose reminder', () => {
+  it('defaults stock notifications and auto-deduction off, keeps all three toggles as cards, and places color last', () => {
     const onSave = vi.fn();
     render(<AddMedicationModal {...baseProps({ onSave })} />);
 

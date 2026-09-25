@@ -81,7 +81,17 @@ export const PharmacyShoppingView: FC<PharmacyShoppingViewProps> = ({
       </div>
       <div className="space-y-2">
         {displayList.map((med) => {
-          const { status } = calculateMedicationStatus(med);
+          const statusInfo = calculateMedicationStatus(med);
+          const isTemporaryCourse =
+            med.isChronic === false &&
+            typeof med.durationDays === 'number' &&
+            med.durationDays > 0;
+          const status =
+            statusInfo.status === 'out_of_stock'
+              ? 'out_of_stock'
+              : isTemporaryCourse && statusInfo.daysLeft < med.durationDays!
+                ? 'critical'
+                : statusInfo.status;
           const { quantity: suggestedPills } = getRequestedAmount(med);
           const requestedPills = getRequestedPills(med, suggestedPills);
           return (

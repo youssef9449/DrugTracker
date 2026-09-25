@@ -6,7 +6,7 @@ import {
   isSnoozeActive,
   setSnoozeUntil } from '@/utils/doseReminderStorage';
 
-describe('doseReminderStorage Phase 3B dose-scoped snooze', () => {
+describe('doseReminderStorage dose-scoped snooze', () => {
   beforeEach(() => {
     localStorage.clear();
   });

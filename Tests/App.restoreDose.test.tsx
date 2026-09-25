@@ -1,3 +1,4 @@
+import { requireDefined } from './helpers/requireDefined';
 /// <reference types="@testing-library/jest-dom/vitest" />
 /**
  * App-layer restore lifecycle regressions (PR #185).

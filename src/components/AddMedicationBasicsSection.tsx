@@ -10,7 +10,7 @@ interface Props {
   currentPillsStr: string;
   setCurrentPills: (value: number) => void;
   setCurrentPillsStr: (value: string) => void;
-  initialData?: Medication | null;
+  initialData?: Medication | null | undefined;
   unit: string;
   handleUnitChange: (unit: string) => void;
   showStockHelper: boolean;

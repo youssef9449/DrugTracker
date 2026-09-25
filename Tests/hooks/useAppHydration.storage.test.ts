@@ -1,6 +1,10 @@
+import { StrictMode, type PropsWithChildren } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { NOTIFICATIONS_KEY } from '@/constants/storageKeys';
+import {
+  NOTIFICATIONS_KEY,
+  STORAGE_PHARMACY_KEY,
+} from '@/constants/storageKeys';
 
 const permissionMocks = vi.hoisted(() => ({
   get: vi.fn(),
@@ -34,6 +38,7 @@ import { useAppHydration } from '@/hooks/useAppHydration';
 import {
   applyNotificationPermissionResultIfUnset,
   initializeAppPermissions,
+  loadPersistedAppState,
 } from '@/utils/appHydrationPhases';
 
 function makeSetters() {
@@ -62,6 +67,58 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+const StrictModeWrapper = ({ children }: PropsWithChildren) => (
+  <StrictMode>{children}</StrictMode>
+);
+
+describe('pharmacy settings hydration', () => {
+  it.each([30, 60])(
+    'accepts supported defaultDurationDays=%s without reporting invalid persisted settings',
+    (defaultDurationDays) => {
+      localStorage.setItem(
+        STORAGE_PHARMACY_KEY,
+        JSON.stringify({ defaultDurationDays })
+      );
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const setters = makeSetters();
+
+      loadPersistedAppState(setters);
+
+      expect(
+        warn.mock.calls.filter(([message]) =>
+          String(message).includes('Persisted pharmacy settings unusable')
+        )
+      ).toHaveLength(0);
+      expect(setters.setPharmacySettings).toHaveBeenCalledWith(
+        expect.objectContaining({ defaultDurationDays })
+      );
+    }
+  );
+
+  it('runs hydration only once under React StrictMode, so one real storage warning is logged once', async () => {
+    localStorage.setItem(
+      STORAGE_PHARMACY_KEY,
+      JSON.stringify({ defaultDurationDays: 45 })
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const setters = makeSetters();
+
+    renderHook(() => useAppHydration(setters), {
+      wrapper: StrictModeWrapper,
+    });
+
+    await waitFor(() => {
+      expect(setters.setHydrated).toHaveBeenCalledWith(true);
+    });
+
+    expect(
+      warn.mock.calls.filter(([message]) =>
+        String(message).includes('Persisted pharmacy settings unusable (invalid)')
+      )
+    ).toHaveLength(1);
+  });
 });
 
 describe('useAppHydration — storage failures', () => {

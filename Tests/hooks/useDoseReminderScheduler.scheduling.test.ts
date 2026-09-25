@@ -338,7 +338,11 @@ describe('useDoseReminderScheduler — doseSignature (no unnecessary reschedule)
     rerender({ medications: [shortened] });
 
     await flushUntil(() => mocks.schedule.mock.calls.length >= 2);
-    expect(mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1][6]).toEqual({
+    const lastCall = requireDefined(
+      mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1],
+      'last schedule call'
+    );
+    expect(lastCall[6]).toEqual({
       treatmentEndDate: '2024-09-11',
     });
   });

@@ -488,10 +488,10 @@ function isChromiumNotificationSettingsSupported(): boolean {
   const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
   const hasChromiumSignature = /Chrome|Chromium|CriOS/i.test(ua);
   const isKnownAlternateChromium =
-    /Edg\\/|OPR\\/|Brave\\/|Vivaldi\\/|SamsungBrowser\\//i.test(ua);
+    /Edg\/|OPR\/|Brave\/|Vivaldi\/|SamsungBrowser\//i.test(ua);
   const isFirefox = /Firefox|FxiOS/i.test(ua);
   const isSafariWithoutChromiumSignature =
-    /Safari\\//i.test(ua) && !hasChromiumSignature;
+    /Safari\//i.test(ua) && !hasChromiumSignature;
 
   return (
     !isMobile &&

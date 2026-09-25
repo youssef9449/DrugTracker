@@ -28,6 +28,7 @@ public class NotificationRuntimeRetryPersistenceTest {
     private static final int MAX_ENTRIES = 64;
 
     private NotificationRuntime runtime;
+    private NotificationRetryStore retryStore;
     private SharedPreferences prefs;
 
     @Before
@@ -36,6 +37,10 @@ public class NotificationRuntimeRetryPersistenceTest {
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         prefs.edit().clear().commit();
         runtime = new NotificationRuntime(context);
+        // #489: retry persistence/cleanup was extracted into the
+        // responsibility-oriented NotificationRetryStore (package-private;
+        // this test lives in the same package).
+        retryStore = new NotificationRetryStore(context);
     }
 
     private NotificationRuntime.Request request(String namespace, String identity) {
@@ -117,22 +122,22 @@ public class NotificationRuntimeRetryPersistenceTest {
                 .getString("retryToken");
         assertFalse(oldToken.equals(replacementToken));
 
-        java.lang.reflect.Method clearRetryIfUnchanged =
-                NotificationRuntime.class.getDeclaredMethod(
-                        "clearRetryIfUnchanged",
-                        String.class,
-                        String.class);
-        clearRetryIfUnchanged.setAccessible(true);
+        // #489: the token compare-and-set cleanup lives on
+        // NotificationRetryStore. A stale replay holding the OLD token must
+        // not remove the replacement record for the same identity.
+        boolean staleRemoved = retryStore.clearIfUnchanged(entryKey, oldToken);
 
-        boolean removed = (Boolean) clearRetryIfUnchanged.invoke(
-                runtime, entryKey, oldToken);
-
-        assertFalse(removed);
+        assertFalse(staleRemoved);
         assertEquals(1, entryCount());
         assertEquals(
                 replacementToken,
                 new JSONObject(prefs.getString(entryKey, null))
                         .getString("retryToken"));
+
+        // The matching-token CAS must still remove the entry: the stale
+        // rejection above is real compare-and-set semantics, not a stub.
+        assertTrue(retryStore.clearIfUnchanged(entryKey, replacementToken));
+        assertEquals(0, entryCount());
     }
 
     @Test
@@ -140,13 +145,9 @@ public class NotificationRuntimeRetryPersistenceTest {
         runtime.persistRetry(request("dose", "med-a"));
         runtime.persistRetry(request("dose", "med-b"));
 
-        java.lang.reflect.Method clearRetry =
-                NotificationRuntime.class.getDeclaredMethod(
-                        "clearRetry",
-                        String.class,
-                        String.class);
-        clearRetry.setAccessible(true);
-        clearRetry.invoke(runtime, "dose", "med-a");
+        // #489: unconditional identity-keyed cleanup after successful
+        // delivery lives on NotificationRetryStore.
+        retryStore.clear("dose", "med-a");
 
         assertEquals(1, entryCount());
         String raw = (String) prefs.getAll().entrySet().stream()

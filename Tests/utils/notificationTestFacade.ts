@@ -4,7 +4,6 @@ export {
   openNotificationSettings,
 } from '../../src/utils/notifications/notificationPermissions';
 
-export { sendMedicineAlert } from '../../src/utils/notifications/stockNotifications';
 export { sendCriticalStockAlert } from '../../src/utils/notifications/criticalStockNotifications';
 
 export {

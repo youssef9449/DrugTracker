@@ -63,7 +63,6 @@ import {
   isAppInForeground,
   scheduleDoseReminder,
   scheduleSnoozedDoseReminder,
-  sendMedicineAlert,
   cancelDoseReminder } from './notificationTestFacade';
 
 beforeEach(() => {
@@ -85,26 +84,6 @@ beforeEach(() => {
   });
   // Reset to default foreground state before each test.
   setAppInForeground(true);
-});
-
-// ---------------------------------------------------------------------------
-// Phase 6. Android immediate notification boundary.
-// ---------------------------------------------------------------------------
-
-describe('Android Phase 6 notification boundary', () => {
-  it('posts through NotificationRuntime instead of LocalNotifications.schedule', async () => {
-    mocks.platform.mockReturnValue('android');
-
-    await sendMedicineAlert('med-notify', 'Test', 3, 3);
-
-    expect(mocks.nativePost).toHaveBeenCalledTimes(1);
-    expect(mocks.schedule).not.toHaveBeenCalled();
-
-    const options = mocks.nativePost.mock.calls[0][0];
-    expect(options.namespace).toBe('low-stock');
-    expect(options.identity).toBe('med-notify');
-    expect(options.channelId).toBe('low-stock');
-  });
 });
 
 // ---------------------------------------------------------------------------

@@ -191,40 +191,6 @@ export function buildWhatsAppUrl(
     ? `https://wa.me/${clean}?text=${encodedText}`
     : `https://wa.me/?text=${encodedText}`;
 }
-/**
- * Open a WhatsApp deep-link in a new tab or the WhatsApp app.
- * Robust multi-tier strategy:
- * 1. Direct window.open (works when called synchronously in click handlers)
- * 2. Fallback to synthetic anchor appended to document.body and clicked
- * Returns boolean indicating whether a navigation attempt was made.
- */
-export function openWhatsAppLink(phone: string, message: string): boolean {
-  const url = buildWhatsAppUrl(phone, message);
-  let opened = false;
-  // Tier 1: Try window.open first (standard browser API for user-initiated gestures)
-  try {
-    const win = window.open(url, '_blank', 'noopener,noreferrer');
-    if (win) {
-      return true;
-    }
-  } catch {
-    // window.open blocked by sandbox or browser popup settings
-  }
-  // Tier 2: Synthetic anchor click (Firefox & Safari user-gesture fallback)
-  try {
-    const link = document.createElement('a');
-    link.href = url;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    opened = true;
-  } catch {
-    // anchor click blocked
-  }
-  return opened;
-}
 export interface CalculatedOrderQuantity {
   quantity: number;
   isCustom: boolean;

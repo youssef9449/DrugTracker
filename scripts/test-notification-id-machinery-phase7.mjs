@@ -95,7 +95,6 @@ for (const rel of sourceFiles('src')) {
 }
 
 const featureFiles = [
-  'src/utils/notifications/stockNotifications.ts',
   'src/utils/notifications/criticalStockNotifications.ts',
   'src/utils/notifications/doseReminderNotifications.ts',
   'src/utils/doseReminderScheduling.ts',
@@ -118,8 +117,6 @@ for (const rel of featureFiles) {
   }
 }
 
-assert(read('src/utils/notifications/stockNotifications.ts').includes("import { scheduleNotification } from '../notificationRuntime';"),
-  'stock notification feature must call the shared Notification Runtime directly');
 assert(read('src/utils/notifications/criticalStockNotifications.ts').includes("import { scheduleNotification } from '../notificationRuntime';"),
   'critical notification feature must call the shared Notification Runtime directly');
 assert(read('src/utils/notifications/doseReminderNotifications.ts').includes("from '../notificationRuntime';"),

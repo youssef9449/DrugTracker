@@ -28,7 +28,7 @@ import java.util.TimeZone;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 33)
-public class SuccessorObligationRecoveryTest extends Group2AutoReliabilityFixture {
+public class SuccessorObligationRecoveryTest extends AutoReliabilityFixture {
 
     @Test
     public void firedWithoutSuccessorObligation_recoveryRebuildsJournalAndContinues()

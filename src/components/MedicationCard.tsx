@@ -77,7 +77,9 @@ interface MedicationCardProps {
   /** Durable stock logs used to display the exact historical Restore amount. */
   logs?: ConsumptionLog[] | undefined;
   onRegisterBackHandler?: ((id: string, close: () => void, priority?: number) => () => void) | undefined;
-}
+  /** Global Auto kill switch; does not mutate medication.autoDeductEnabled. */
+  globalAutoDeductEnabled?: boolean | undefined;
+
 export const MedicationCard: FC<MedicationCardProps> = ({
   medication,
   viewFilter = 'all',
@@ -94,8 +96,10 @@ export const MedicationCard: FC<MedicationCardProps> = ({
   onOpenHistory,
   logs = [],
   onRegisterBackHandler,
+  globalAutoDeductEnabled = true,
 }) => {
-  const isAutoActive = isMedicationAutoDeductActive(medication);
+  const isAutoActive =
+    globalAutoDeductEnabled && isMedicationAutoDeductActive(medication);
   // Durable currentPills is the sole live stock balance.
   const statusInfo = calculateMedicationStatus(medication);
   const depletion = getDepletionDate(medication);

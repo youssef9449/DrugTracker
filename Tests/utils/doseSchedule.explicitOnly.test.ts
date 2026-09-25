@@ -73,6 +73,25 @@ describe('explicit schedule only', () => {
     expect(t.amount).not.toBe(99);
   });
 
+
+
+  it('global Auto OFF allows manual Take while preserving the medication-level Auto preference', () => {
+    const med = baseMed({
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 'd1', amount: 3, time: '09:00' }],
+    });
+    const target = getCardDoseToggleTarget(
+      med,
+      new Date('2026-09-14T22:00:00'),
+      '2026-09-14',
+      false
+    );
+    expect(med.autoDeductEnabled).toBe(true);
+    expect(target.doseId).toBe('d1');
+    expect(target.canTake).toBe(true);
+    expect(target.canRestore).toBe(false);
+  });
+
   it('empty doseId rows are ignored by reminder scheduling sources', () => {
     const med = baseMed({
       doseSchedule: [{ id: '', amount: 1, time: '08:00' }],

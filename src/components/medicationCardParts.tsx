@@ -340,7 +340,12 @@ export const MedicationCardDoseActions: FC<MedicationCardDoseActionsProps> = ({
   onConsumeDose,
   onRestoreDose,
 }) => {
-  const doseToggle = getCardDoseToggleTarget(medication, new Date(), getTodayDateString());
+  const doseToggle = getCardDoseToggleTarget(
+    medication,
+    new Date(),
+    getTodayDateString(),
+    false
+  );
   const todayStr = getTodayDateString();
   const manualRestoreAmount = getHistoricalRestoreDisplayAmount(
     logs,
@@ -391,7 +396,10 @@ export const MedicationCardDoseActions: FC<MedicationCardDoseActionsProps> = ({
     );
   }
 
-  if (!isAutoActive && doseToggle.canTake && onConsumeDose) {
+  // Manual Take availability is intentionally independent of Auto state.
+  // Auto already produced durable evidence is still represented by Restore
+  // above, preventing a duplicate manual action for the same occurrence.
+  if (doseToggle.canTake && onConsumeDose) {
     return (
       <button
         type="button"

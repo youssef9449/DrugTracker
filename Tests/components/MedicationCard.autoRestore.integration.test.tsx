@@ -3,10 +3,10 @@ import { requireDefined } from '../helpers/requireDefined';
 /**
  * Auto-deduct Restore button on MedicationCard — real App wiring.
  *
- * Contract (Issue #267):
- * - isAutoActive → no Manual Take button
+ * Contract:
+ * - Manual Take remains available whenever the dose is unconsumed, regardless of Auto state
  * - Restore requires durable deduction evidence (no pure-projection Auto Restore)
- * - manual Take/Restore when auto inactive
+ * - Auto-deducted or manually consumed doses expose the appropriate Restore action
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readPersistedMedications } from '../helpers/persistedMedications';
@@ -207,8 +207,28 @@ describe('MedicationCard Restore — durable Exact evidence', () => {
   });
 });
 
-describe('MedicationCard Auto ON → no Manual Take', () => {
-  it('when isAutoActive, Take button is never shown (even before slot time)', async () => {
+describe('MedicationCard Manual Take is independent of Auto state', () => {
+  it('Global Auto OFF also leaves Manual Take available without changing the per-med preference', async () => {
+    localStorage.setItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'false');
+    vi.setSystemTime(new Date(`${TEST_DATE}T10:00:00`));
+
+    const med = makeSingleAuto({
+      autoDeductEnabled: true,
+      doseSchedule: [{ id: 's1', amount: 2, time: '08:00' }],
+    });
+    localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify([med]));
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Auto Restore Single')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId(`take-dose-${MED_ID}`)).toBeInTheDocument();
+    expect(readPersistedMedications()[0]?.autoDeductEnabled).toBe(true);
+  });
+
+  it('when Auto is ON, Manual Take is still shown before the dose is consumed', async () => {
     vi.setSystemTime(new Date(`${TEST_DATE}T07:00:00`));
     localStorage.setItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'true');
     localStorage.setItem(
@@ -222,13 +242,13 @@ describe('MedicationCard Auto ON → no Manual Take', () => {
       expect(screen.getByText('Auto Restore Single')).toBeInTheDocument();
     });
 
-    expect(screen.queryAllByTitle(/تناول جرعة/)).toHaveLength(0);
+    expect(screen.getByTestId(`take-dose-${MED_ID}`)).toBeInTheDocument();
     expect(screen.queryByTestId(`auto-restore-dose-${MED_ID}`)).toBeNull();
     expect(screen.queryByTestId(`restore-dose-${MED_ID}`)).toBeNull();
   });
 });
 
-describe('MedicationCard Manual Take → Restore (auto OFF)', () => {
+describe('MedicationCard Manual Take → Restore', () => {
   it('Take then manual Restore works; pure-projection auto-restore never appears', async () => {
     localStorage.setItem(STORAGE_GLOBAL_AUTO_DEDUCT_KEY, 'false');
     vi.setSystemTime(new Date(`${TEST_DATE}T10:00:00`));

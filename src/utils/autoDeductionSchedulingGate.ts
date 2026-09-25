@@ -5,7 +5,9 @@
  * alarm capability. This module is the ONE pure decision point for whether
  * the Auto scheduler may arm desired occurrences, so the runtime contract
  * (and its test coverage) lives outside the React hook:
- * - capability unknown → wait (never arm on a guess; never cancel either)
+ * - global Auto OFF → cancel-and-wait regardless of exact-alarm capability;
+ *   this is the durable kill switch and must remove armed Auto schedules
+ * - capability unknown → wait when Global Auto is ON
  * - capability denied  → cancel-and-wait: no future Auto alarm stays armed,
  *   configuration remains intact, and the UI can surface an actionable
  *   "grant Exact Alarms" state
@@ -24,7 +26,7 @@ export type AutoDeductionSchedulingDecision =
   | {
       /** Denial is terminal for arming: cancel tracked alarms, keep config. */
       action: 'cancel_armed_and_wait';
-      reason: 'exact_alarm_permission_denied';
+      reason: 'exact_alarm_permission_denied' | 'global_auto_deduct_disabled';
     }
   | {
       /** Transiently not schedulable; no destructive action. */
@@ -39,12 +41,19 @@ export function resolveAutoDeductionSchedulingDecision(input: {
   hydrated: boolean;
   isFirstRun: boolean;
   exactAlarmPermission: ExactAlarmPermission | null;
+  globalAutoDeductEnabled?: boolean | undefined;
 }): AutoDeductionSchedulingDecision {
   if (!input.hydrated) {
     return { action: 'wait', reason: 'not_hydrated' };
   }
   if (input.isFirstRun) {
     return { action: 'wait', reason: 'first_run' };
+  }
+  if (input.globalAutoDeductEnabled === false) {
+    return {
+      action: 'cancel_armed_and_wait',
+      reason: 'global_auto_deduct_disabled',
+    };
   }
   if (input.exactAlarmPermission === null) {
     return { action: 'wait', reason: 'exact_alarm_capability_unknown' };

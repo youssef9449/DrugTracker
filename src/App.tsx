@@ -190,6 +190,7 @@ export default function App() {
             medicationSortField,
             medicationSortDirection,
             soundEnabled,
+            globalAutoDeductEnabled,
           }}
           stockActions={{
             setFilter,

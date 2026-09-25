@@ -27,6 +27,7 @@ interface StockViewModel {
   medicationSortField: MedicationSortField;
   medicationSortDirection: MedicationSortDirection;
   soundEnabled: boolean;
+  globalAutoDeductEnabled: boolean;
 }
 
 interface StockActions {
@@ -88,7 +89,8 @@ export const AppTabContent: FC<AppTabContentProps> = ({
 }) => {
   const {
     medications, logs, medicationsWithStatus, filteredMedications, alertsCount, sufficientCount,
-    filter, searchQuery, isCompactView, medicationSortField, medicationSortDirection, soundEnabled,
+    filter, searchQuery, isCompactView, medicationSortField, medicationSortDirection,
+    soundEnabled, globalAutoDeductEnabled,
   } = stock;
   const {
     setFilter, setSearchQuery, setMedicationSortField, setMedicationSortDirection, setIsCompactView,
@@ -191,6 +193,7 @@ export const AppTabContent: FC<AppTabContentProps> = ({
                         medication={med}
                         viewFilter={filter}
                         isCompact={isCompactView}
+                        globalAutoDeductEnabled={globalAutoDeductEnabled}
                         logs={logs}
                         onOpenRefill={setRefillMedication}
                         onEdit={(m) => {

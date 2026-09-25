@@ -9,7 +9,7 @@ export interface AppPreferencesSectionProps {
   setDraftSound: Dispatch<SetStateAction<boolean>>;
 }
 
-/** App preference toggles: auto-deduct and sound. */
+/** App preference toggles: Global Auto kill switch and sound. */
 export const AppPreferencesSection: FC<AppPreferencesSectionProps> = ({
   draftAutoDeduct,
   setDraftAutoDeduct,
@@ -35,7 +35,7 @@ export const AppPreferencesSection: FC<AppPreferencesSectionProps> = ({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-800">الخصم التلقائي للمخزون</span>
+              <span className="text-xs font-bold text-slate-800">المفتاح العام للخصم التلقائي</span>
               <span
                 className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                   draftAutoDeduct ? 'bg-teal-200 text-teal-900' : 'bg-slate-200 text-slate-700'
@@ -45,20 +45,20 @@ export const AppPreferencesSection: FC<AppPreferencesSectionProps> = ({
               </span>
             </div>
             <p className="text-[10px] text-slate-500 leading-tight">
-              يُخصم تلقائياً عند ميعاد كل جرعة
+              مفتاح إيقاف/تشغيل عام؛ لا يغيّر إعداد الخصم التلقائي لكل دواء
             </p>
           </div>
         </div>
         <Toggle
           checked={draftAutoDeduct}
           onChange={() => setDraftAutoDeduct((v) => !v)}
-          label="تبديل الخصم التلقائي"
+          label="تبديل المفتاح العام للخصم التلقائي"
         />
       </div>
       <p className="text-[10px] text-slate-500 leading-tight border-t border-teal-100/80 pt-2">
         {draftAutoDeduct
-          ? 'عند التفعيل يُخصم عند ميعاد الجرعات ويُحدَّث الرصيد وموعد النفاذ.'
-          : 'عند الإيقاف يتوقف الخصم التلقائي ويبقى الرصيد ثابتاً.'}
+          ? 'عند التفعيل يعمل الخصم التلقائي فقط للأدوية التي إعدادها الفردي مفعّل.'
+          : 'عند الإيقاف يتوقف الخصم التلقائي للجميع مؤقتاً مع الاحتفاظ بإعداد كل دواء.'}
       </p>
     </div>
     <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5">

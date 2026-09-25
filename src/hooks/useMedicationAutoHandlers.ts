@@ -92,9 +92,9 @@ export function useMedicationAutoHandlers(deps: MedicationHandlersDeps, state: M
       setMedications(result.medications);
       setLogs(result.logs);
       if (!result.enable) {
-        showToast('تم إيقاف الخصم التلقائي لجميع الأدوية ⏸️');
+        showToast('تم إيقاف الخصم التلقائي مؤقتًا للجميع — إعدادات كل دواء محفوظة ⏸️');
       } else {
-        showToast('تم تفعيل الخصم التلقائي لجميع الأدوية ⚡');
+        showToast('تم تفعيل الخصم التلقائي للجميع وفق إعداد كل دواء ⚡');
       }
       if (soundEnabled) playSuccessChime();
       },

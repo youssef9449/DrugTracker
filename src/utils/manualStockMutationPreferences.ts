@@ -2,11 +2,10 @@ import type { ConsumptionLog, Medication } from '../types';
 import { runManualStockTransaction, commitWithManualEnvelope } from './manualStockTransaction';
 import type { GatedAutoDeductToggleResult, GatedGlobalAutoDeductToggleResult } from './manualStockMutationTypes';
 import {
-  invalidateMedicationRecurrences,
   invalidateMedicationDoseReminders,
-  restoreInvalidatedRecurrences,
+  invalidateMedicationRecurrences,
   restoreInvalidatedDoseReminders,
-  type RecurrenceInvalidationResult,
+  restoreInvalidatedRecurrences,
 } from './manualStockMutationShared';
 
 export function runGatedAutoDeductToggle(opts: {
@@ -133,182 +132,108 @@ export function runGatedGlobalAutoDeductToggle(opts: {
   now?: Date;
 }): Promise<GatedGlobalAutoDeductToggleResult> {
   return runManualStockTransaction({
-      now: opts.now, globalAutoDeductEnabled: opts.enable,
-      onFailure: (failure) => ({
-        outcome: failure.kind === 'reconciliation' ? 'native_list_failed' as const : 'persist_failed' as const,
-        medications: failure.state.medications,
-        logs: failure.state.logs,
-        enable: opts.enable,
-        settleLogs: [],
-        reason: failure.reason,
-      }),
-      operation: async ({ fresh }) => {
-    // Global is a bulk state setter for ALL existing medications AND the
-    // default for newly added ones. Flip autoDeductEnabled only — do not
-    // settle stock, invent consumption logs, or mutate currentPills here.
-    // Schedulers/reminders react to the resulting medication-level flags.
-    // Any global Auto change also changes the neutral manual-Take capability
-    // carried by Dose Reminder payloads. Both Auto and Dose Reminder native
-    // state are invalidated before the durable bulk commit.
-    const invalidatedMeds: Array<{
-      med: Medication;
-      doseIds: string[];
-      invalidated: Array<{ doseId: string; generation: number }>;
-    }> = [];
-    const invalidatedDoseMeds: Medication[] = [];
+    now: opts.now,
+    globalAutoDeductEnabled: opts.enable,
+    onFailure: (failure) => ({
+      outcome: failure.kind === 'reconciliation'
+        ? 'native_list_failed' as const
+        : 'persist_failed' as const,
+      medications: failure.state.medications,
+      logs: failure.state.logs,
+      enable: opts.enable,
+      settleLogs: [],
+      reason: failure.reason,
+    }),
+    operation: async ({ fresh }) => {
+      // Global Auto is a runtime kill switch. It must NEVER rewrite
+      // medication.autoDeductEnabled; that flag remains the user's per-med
+      // configuration and is restored automatically when the global switch
+      // is enabled again.
+      //
+      // Disabling the switch invalidates currently authorized Exact Auto
+      // recurrences for medications that are individually enabled, then
+      // commits ONLY the global switch. Dose reminders are intentionally
+      // untouched because they are an independent feature.
+      const invalidatedMeds: Array<{
+        med: Medication;
+        invalidated: Array<{ doseId: string; generation: number }>;
+      }> = [];
 
-    for (const med of fresh.medications) {
-      if (med.autoDeductEnabled === opts.enable) continue;
-
-      let autoInvalidation:
-        | RecurrenceInvalidationResult
-        | null = null;
-
-      if (opts.enable === false) {
-        const invalidation = await invalidateMedicationRecurrences(med);
-        autoInvalidation = invalidation;
-        if (!invalidation.ok) {
-          let compensationError: string | null = null;
-
-          for (const completed of invalidatedMeds) {
-            if (completed.invalidated.length === 0) continue;
-            const compensation = await restoreInvalidatedRecurrences(
-              completed.med,
-              completed.invalidated
-            );
-            if (!compensation.ok && compensationError == null) {
-              compensationError = compensation.error ?? null;
-            }
-          }
-
-          return {
-            outcome: 'native_invalidation_failed' as const,
-            medications: fresh.medications,
-            logs: fresh.logs,
-            enable: opts.enable,
-            settleLogs: [],
-            reason: compensationError
-              ? invalidation.error + ';compensation:' + compensationError
-              : invalidation.error ?? 'native_invalidation_failed',
-          };
-        }
-
-        invalidatedMeds.push({
-          med,
-          doseIds: invalidation.invalidatedDoseIds,
-          invalidated: invalidation.invalidated,
-        });
-      }
-
-      const doseInvalidation = await invalidateMedicationDoseReminders(med);
-      if (!doseInvalidation.ok) {
-        let compensationError: string | null = null;
-
-        if (
-          opts.enable === false
-          && autoInvalidation
-          && autoInvalidation.invalidated.length > 0
-        ) {
-          const compensation = await restoreInvalidatedRecurrences(
-            med,
-            autoInvalidation.invalidated
-          );
-          if (!compensation.ok) {
-            compensationError = compensation.error ?? null;
-          }
-        }
-
+      const compensate = async (): Promise<string | null> => {
         for (const completed of invalidatedMeds) {
           if (completed.invalidated.length === 0) continue;
           const compensation = await restoreInvalidatedRecurrences(
             completed.med,
             completed.invalidated
           );
-          if (!compensation.ok && compensationError == null) {
-            compensationError = compensation.error ?? null;
+          if (!compensation.ok) {
+            return compensation.error ?? 'recurrence_restore_failed';
           }
         }
+        return null;
+      };
 
-        for (const completed of invalidatedDoseMeds) {
-          const compensation = await restoreInvalidatedDoseReminders(
-            completed
-          );
-          if (!compensation.ok && compensationError == null) {
-            compensationError = compensation.error ?? null;
+      if (!opts.enable) {
+        for (const med of fresh.medications) {
+          // A medication that is already individually OFF has no Auto
+          // recurrence authorization to invalidate here.
+          if (med.autoDeductEnabled === false) continue;
+
+          const invalidation = await invalidateMedicationRecurrences(med);
+          if (!invalidation.ok) {
+            const compensationError = await compensate();
+            return {
+              outcome: 'native_invalidation_failed' as const,
+              medications: fresh.medications,
+              logs: fresh.logs,
+              enable: opts.enable,
+              settleLogs: [],
+              reason: compensationError
+                ? (invalidation.error ?? 'native_invalidation_failed') +
+                  ';compensation:' + compensationError
+                : invalidation.error ?? 'native_invalidation_failed',
+            };
           }
-        }
 
-        // The current medication's Dose Reminder invalidation may have
-        // partially completed before reporting failure. Compensate it too.
-        const currentDoseCompensation =
-          await restoreInvalidatedDoseReminders(med);
-        if (!currentDoseCompensation.ok && compensationError == null) {
-          if (currentDoseCompensation.error) compensationError = currentDoseCompensation.error;
+          invalidatedMeds.push({
+            med,
+            invalidated: invalidation.invalidated,
+          });
         }
+      }
 
+      // Commit the global master switch only. The medication array is passed
+      // through unchanged so the per-med Auto preferences survive OFF → ON.
+      const err = await commitWithManualEnvelope(
+        {
+          medications: fresh.medications,
+          logs: fresh.logs,
+          globalAutoDeductEnabled: opts.enable,
+        },
+        fresh.medications
+      );
+
+      if (err) {
+        const compensationError = await compensate();
         return {
-          outcome: 'native_invalidation_failed' as const,
+          outcome: 'persist_failed' as const,
           medications: fresh.medications,
           logs: fresh.logs,
           enable: opts.enable,
           settleLogs: [],
           reason: compensationError
-            ? doseInvalidation.error + ';compensation:' + compensationError
-            : doseInvalidation.error ?? 'native_invalidation_failed',
+            ? 'persist_failed;compensation:' + compensationError
+            : 'persist_failed',
         };
       }
 
-      invalidatedDoseMeds.push(med);
-    }
-    const medications = fresh.medications.map((med) =>
-      med.autoDeductEnabled === opts.enable
-        ? med
-        : { ...med, autoDeductEnabled: opts.enable }
-    );
-    const err = await commitWithManualEnvelope({
-      medications,
-      logs: fresh.logs,
-      globalAutoDeductEnabled: opts.enable,
-    }, fresh.medications);
-    if (err) {
-      let compensationError: string | null = null;
-      for (const completed of invalidatedMeds) {
-        if (completed.invalidated.length > 0) {
-          const compensation = await restoreInvalidatedRecurrences(
-            completed.med,
-            completed.invalidated
-          );
-          if (!compensation.ok && compensationError == null) {
-            compensationError = compensation.error ?? null;
-          }
-        }
-      }
-      for (const completed of invalidatedDoseMeds) {
-        const compensation = await restoreInvalidatedDoseReminders(
-          completed
-        );
-        if (!compensation.ok && compensationError == null) {
-          compensationError = compensation.error ?? null;
-        }
-      }
       return {
-        outcome: 'persist_failed' as const,
+        outcome: 'applied' as const,
         medications: fresh.medications,
         logs: fresh.logs,
         enable: opts.enable,
         settleLogs: [],
-        reason: compensationError
-          ? 'persist_failed;compensation:' + compensationError
-          : 'persist_failed',
       };
-    }
-    return {
-      outcome: 'applied' as const,
-      medications,
-      logs: fresh.logs,
-      enable: opts.enable,
-      settleLogs: [],
-    };
-  }
+    },
   });
 }

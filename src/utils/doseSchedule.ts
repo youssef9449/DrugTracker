@@ -280,8 +280,8 @@ export function isDoseTimeElapsedToday(
  * Auto-elapsed completion uses the effective Auto-Deduct state when provided
  * (`autoDeductActive`); when the option is omitted,
  * `autoDeductEnabled !== false` uses the current default.
- * Effective state must come from {@link isMedicationAutoDeductActive}
- * (medication.autoDeductEnabled only — Global is not a kill switch).
+ * The default remains the medication-level preference; callers that know the
+ * global master state should pass the effective value explicitly.
  */
 export function isDoseCompletedToday(
   med: Medication,
@@ -374,22 +374,24 @@ export function getNextDoseAmount(
  *    Skipped/restored slots are incomplete again so Take d1 works after Restore.
  * 3. All completed via auto-deduct only → non-interactive (no fake restore).
  *
- * Auto-Deduct state (via {@link isMedicationAutoDeductActive}) controls
- * whether elapsed time alone marks a slot completed. Medication-level only.
+ * Effective Auto-Deduct state controls whether elapsed time alone marks a slot
+ * completed. Callers may supply the global kill-switch-aware effective value;
+ * the default remains the medication-level preference.
  *
  * Without doseSchedule: no toggle target.
  */
 export function getCardDoseToggleTarget(
   med: Medication,
   now: Date = new Date(),
-  todayStr: string = getTodayDateString()
+  todayStr: string = getTodayDateString(),
+  autoDeductActive: boolean = isMedicationAutoDeductActive(med)
 ): {
   doseId?: string;
   amount: number;
   canTake: boolean;
   canRestore: boolean;
 } {
-  const autoActive = isMedicationAutoDeductActive(med);
+  const autoActive = autoDeductActive;
   const schedule = Array.isArray(med.doseSchedule) ? med.doseSchedule : [];
   if (schedule.length === 0) {
     return { amount: 0, canTake: false, canRestore: false };

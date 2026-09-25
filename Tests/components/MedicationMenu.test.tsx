@@ -43,7 +43,7 @@ afterEach(() => {
   cleanup();
 });
 
-describe('MedicationMenu — medication-level Auto (not Global kill switch)', () => {
+describe('MedicationMenu — medication preference vs Global kill switch', () => {
   it('preference ON: pressed, effective ON', () => {
     const med = makeMed({ autoDeductEnabled: true });
     const { isAutoActive } = renderMenu(med);
@@ -52,7 +52,29 @@ describe('MedicationMenu — medication-level Auto (not Global kill switch)', ()
     expect(btn).toHaveAttribute('aria-pressed', 'true');
     expect(btn).toHaveAttribute('data-auto-pref', 'on');
     expect(btn).toHaveAttribute('data-auto-effective', 'on');
-    expect(btn).toHaveAttribute('aria-label', 'إيقاف الخصم التلقائي');
+    expect(btn).toHaveAttribute('aria-label', 'إيقاف الخصم التلقائي لهذا الدواء');
+  });
+
+  it('Global OFF: per-med preference stays pressed while effective Auto is OFF', () => {
+    const med = makeMed({ autoDeductEnabled: true });
+    render(
+      <MedicationMenu
+        medication={med}
+        isAutoActive={false}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onToggleAutoDeduct={() => {}}
+      />
+    );
+    const btn = autoToggleButton();
+    expect(btn).toHaveAttribute('aria-pressed', 'true');
+    expect(btn).toHaveAttribute('data-auto-pref', 'on');
+    expect(btn).toHaveAttribute('data-auto-effective', 'off');
+    expect(btn).toHaveAttribute('aria-label', 'إيقاف الخصم التلقائي لهذا الدواء');
+    expect(btn).toHaveAttribute(
+      'title',
+      'إعداد الخصم التلقائي لهذا الدواء مفعّل، لكن المفتاح العام متوقف — اضغط لتغيير إعداد الدواء'
+    );
   });
 
   it('preference OFF: not pressed, effective OFF', () => {
@@ -62,7 +84,7 @@ describe('MedicationMenu — medication-level Auto (not Global kill switch)', ()
     const btn = autoToggleButton();
     expect(btn).toHaveAttribute('aria-pressed', 'false');
     expect(btn).toHaveAttribute('data-auto-pref', 'off');
-    expect(btn).toHaveAttribute('aria-label', 'تفعيل الخصم التلقائي');
+    expect(btn).toHaveAttribute('aria-label', 'تفعيل الخصم التلقائي لهذا الدواء');
   });
 
   it('click toggles preference via harness (med-level only)', () => {

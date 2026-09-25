@@ -103,13 +103,13 @@ export const AppHeader: FC<AppHeaderProps> = ({
             onClick={onToggleGlobalAutoDeduct}
             title={
               globalAutoDeductEnabled
-                ? 'الخصم التلقائي لجميع الأدوية مفعّل (انقر للإيقاف)'
-                : 'الخصم التلقائي لجميع الأدوية متوقف (انقر للتفعيل)'
+                ? 'المفتاح العام للخصم التلقائي مفعّل (انقر للإيقاف)'
+                : 'المفتاح العام للخصم التلقائي متوقف (انقر للتفعيل)'
             }
             aria-label={
               globalAutoDeductEnabled
-                ? 'الخصم التلقائي لجميع الأدوية مفعّل — انقر للإيقاف'
-                : 'الخصم التلقائي لجميع الأدوية متوقف — انقر للتفعيل'
+                ? 'المفتاح العام للخصم التلقائي مفعّل — انقر للإيقاف'
+                : 'المفتاح العام للخصم التلقائي متوقف — انقر للتفعيل'
             }
             aria-pressed={globalAutoDeductEnabled}
             className="w-10 h-10 rounded-full transition-all active:scale-95 flex items-center justify-center cursor-pointer text-teal-200"

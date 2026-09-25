@@ -5,8 +5,7 @@ import {
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Medication } from '@/types';
 import { runGatedGlobalAutoDeductToggle } from '@/utils/manualStockMutation';
-import {
-type AutoStockDurableState } from '@/utils/autoDeductionStockGate';
+import type { AutoStockDurableState } from '@/utils/autoDeductionStockGate';
 import * as preSettleModule from '@/utils/reconcileExactBeforeManualMutation';
 
 const autoSchedulingMocks = vi.hoisted(() => ({
@@ -37,15 +36,16 @@ function med(over: Partial<Medication> = {}): Medication {
     createdAt: '2026-01-01T00:00:00.000Z',
     autoDeductEnabled: true,
     doseSchedule: [
-      { id: 'd1', amount: 1, time: '08:00' },
+      { id: 'd1', amount: 1, time: '16:00' },
       { id: 'd2', amount: 1, time: '20:00' },
     ],
     dosesPerDay: 2,
+    isChronic: true,
     ...over,
   };
 }
 
-describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation order', () => {
+describe('runGatedGlobalAutoDeductToggle — global kill switch', () => {
   let durable: AutoStockDurableState;
   let manualEnvelope: unknown = null;
   let commitCalls: number;
@@ -60,33 +60,23 @@ describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation orde
     scheduleCalls.length = 0;
     durable = {
       medications: [
-        // isChronic: compensation only re-schedules occurrences inside an
-        // ACTIVE treatment window; a chronic med is always active.
-        // Both dose times are in the FUTURE relative to the fake clock
-        // (15:00): compensation restore of a past occurrence goes through
-        // the native-only missed-occurrence recovery (unavailable in this
-        // web test runtime), while future occurrences restore through the
-        // cross-platform schedule path this suite exercises.
         med({
-          id: 'a', name: 'A', autoDeductEnabled: true, currentPills: 11, isChronic: true,
-          doseSchedule: [
-            { id: 'd1', amount: 1, time: '16:00' },
-            { id: 'd2', amount: 1, time: '20:00' },
-          ],
+          id: 'a',
+          name: 'A',
+          autoDeductEnabled: true,
+          currentPills: 11,
         }),
         med({
-          id: 'b', name: 'B', autoDeductEnabled: false, currentPills: 22, isChronic: true,
-          doseSchedule: [
-            { id: 'd1', amount: 1, time: '16:00' },
-            { id: 'd2', amount: 1, time: '20:00' },
-          ],
+          id: 'b',
+          name: 'B',
+          autoDeductEnabled: false,
+          currentPills: 22,
         }),
         med({
-          id: 'c', name: 'C', autoDeductEnabled: true, currentPills: 33, isChronic: true,
-          doseSchedule: [
-            { id: 'd1', amount: 1, time: '16:00' },
-            { id: 'd2', amount: 1, time: '20:00' },
-          ],
+          id: 'c',
+          name: 'C',
+          autoDeductEnabled: true,
+          currentPills: 33,
         }),
       ],
       logs: [],
@@ -116,7 +106,10 @@ describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation orde
         };
         return null;
       },
-      persistGlobal: () => null,
+      persistGlobal: (value) => {
+        durable.globalAutoDeductEnabled = value;
+        return null;
+      },
     });
 
     vi.spyOn(
@@ -139,7 +132,6 @@ describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation orde
       scheduleCalls.push({ medId: args.medicationId, doseId: args.doseId });
       return { ok: true };
     });
-
   });
 
   afterEach(() => {
@@ -152,9 +144,10 @@ describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation orde
     vi.useRealTimers();
   });
 
-  it('Global OFF: invalidates native recurrences then bulk-sets all meds OFF without stock settle', async () => {
+  it('Global OFF preserves every medication Auto preference and does not directly mutate medication stock when no exact reconciliation is present', async () => {
+    const medsBefore = durable.medications.map((m) => m.autoDeductEnabled);
     const pillsBefore = durable.medications.map((m) => m.currentPills);
-    const logsBefore = durable.logs.length;
+    const logsBefore = durable.logs.map((l) => ({ ...l }));
 
     const result = await runGatedGlobalAutoDeductToggle({
       enable: false,
@@ -163,53 +156,51 @@ describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation orde
 
     expect(result.outcome).toBe('applied');
     expect(result.enable).toBe(false);
-    expect(result.medications.map((m) => m.autoDeductEnabled)).toEqual([
-      false,
-      false,
-      false,
-    ]);
-    expect(result.medications.map((m) => m.currentPills)).toEqual(pillsBefore);
-    expect(result.settleLogs).toEqual([]);
-    expect(result.logs.length).toBe(logsBefore);
     expect(durable.globalAutoDeductEnabled).toBe(false);
-    // Invalidation ran for each dose of each med whose state actually changed
-    // before the durable commit. A med already at the target state (b) is
-    // skipped — production never re-invalidates an unchanged med.
-    expect(invalidationCalls.length).toBeGreaterThan(0);
-    const medIdsInvalidated = new Set(invalidationCalls.map((c) => c.medId));
-    expect(medIdsInvalidated.has('a')).toBe(true);
-    expect(medIdsInvalidated.has('c')).toBe(true);
-    expect(medIdsInvalidated.has('b')).toBe(false);
+    expect(durable.medications.map((m) => m.autoDeductEnabled)).toEqual(medsBefore);
+    expect(durable.medications.map((m) => m.currentPills)).toEqual(pillsBefore);
+    expect(durable.logs).toEqual(logsBefore);
+    expect(result.settleLogs).toEqual([]);
     expect(commitCalls).toBe(1);
+
+    const invalidatedMedIds = new Set(invalidationCalls.map((c) => c.medId));
+    expect(invalidatedMedIds).toEqual(new Set(['a', 'c']));
+    expect(invalidationCalls).toHaveLength(4);
   });
 
-  it('Global ON: bulk-sets all meds ON without native invalidation', async () => {
-    durable = {
-      medications: [
-        med({ id: 'a', autoDeductEnabled: false, currentPills: 5 }),
-        med({ id: 'b', autoDeductEnabled: false, currentPills: 9 }),
-      ],
-      logs: [],
-      globalAutoDeductEnabled: false,
-    };
-    const pillsBefore = durable.medications.map((m) => m.currentPills);
+  it('Global ON changes only the master switch and keeps mixed per-med preferences intact', async () => {
+    durable.globalAutoDeductEnabled = false;
 
-    const result = await runGatedGlobalAutoDeductToggle({
-      enable: true,
-      todayStr: '2026-09-14',
-    });
+    const result = await runGatedGlobalAutoDeductToggle({ enable: true });
 
     expect(result.outcome).toBe('applied');
     expect(result.enable).toBe(true);
-    expect(result.medications.every((m) => m.autoDeductEnabled === true)).toBe(true);
-    expect(result.medications.map((m) => m.currentPills)).toEqual(pillsBefore);
-    expect(result.settleLogs).toEqual([]);
-    expect(invalidationCalls).toEqual([]);
-    expect(commitCalls).toBe(1);
     expect(durable.globalAutoDeductEnabled).toBe(true);
+    expect(durable.medications.map((m) => m.autoDeductEnabled)).toEqual([true, false, true]);
+    expect(invalidationCalls).toEqual([]);
+    expect(scheduleCalls).toEqual([]);
+    expect(commitCalls).toBe(1);
   });
 
-  it('Global OFF: native invalidation failure does not bulk-commit OFF', async () => {
+  it('Global OFF → ON round trip preserves every per-med Auto preference', async () => {
+    const medsBefore = durable.medications.map((m) => ({ ...m }));
+    
+    const offResult = await runGatedGlobalAutoDeductToggle({ enable: false });
+    expect(offResult.outcome).toBe('applied');
+    expect(durable.globalAutoDeductEnabled).toBe(false);
+    expect(durable.medications.map((m) => m.autoDeductEnabled)).toEqual(
+      medsBefore.map((m) => m.autoDeductEnabled)
+    );
+
+    const onResult = await runGatedGlobalAutoDeductToggle({ enable: true });
+    expect(onResult.outcome).toBe('applied');
+    expect(durable.globalAutoDeductEnabled).toBe(true);
+    expect(durable.medications.map((m) => m.autoDeductEnabled)).toEqual(
+      medsBefore.map((m) => m.autoDeductEnabled)
+    );
+  });
+
+  it('Global OFF native invalidation failure leaves the master switch and medication preferences unchanged', async () => {
     autoSchedulingMocks.invalidateAutoDeductionRecurrence.mockImplementation(
       async (medicationId, doseId) => {
         invalidationCalls.push({ medId: medicationId, doseId });
@@ -220,29 +211,19 @@ describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation orde
       }
     );
 
-    const result = await runGatedGlobalAutoDeductToggle({
-      enable: false,
-      todayStr: '2026-09-14',
-    });
+    const result = await runGatedGlobalAutoDeductToggle({ enable: false });
 
     expect(result.outcome).toBe('native_invalidation_failed');
     expect(result.reason).toBe('native_fail_test');
     expect(commitCalls).toBe(0);
     expect(durable.globalAutoDeductEnabled).toBe(true);
-    expect(durable.medications.map((m) => m.autoDeductEnabled)).toEqual([
-      true,
-      false,
-      true,
-    ]);
+    expect(durable.medications.map((m) => m.autoDeductEnabled)).toEqual([true, false, true]);
   });
 
-  it('Global OFF: partial invalidation restores successfully invalidated recurrences', async () => {
+  it('Global OFF compensates earlier recurrence invalidations when a later medication fails', async () => {
     autoSchedulingMocks.invalidateAutoDeductionRecurrence.mockImplementation(
       async (medicationId, doseId) => {
         invalidationCalls.push({ medId: medicationId, doseId });
-        // Fail after med a is fully invalidated (all its doses succeed
-        // first). Med b is already OFF and is skipped by the bulk toggle;
-        // med c is the next med whose state actually changes.
         if (medicationId === 'c') {
           return { ok: false, error: 'partial_fail' };
         }
@@ -250,16 +231,31 @@ describe('runGatedGlobalAutoDeductToggle — bulk + Global OFF invalidation orde
       }
     );
 
-    const result = await runGatedGlobalAutoDeductToggle({
-      enable: false,
-      todayStr: '2026-09-14',
-    });
+    const result = await runGatedGlobalAutoDeductToggle({ enable: false });
 
     expect(result.outcome).toBe('native_invalidation_failed');
     expect(result.reason).toBe('partial_fail');
     expect(commitCalls).toBe(0);
     expect(durable.globalAutoDeductEnabled).toBe(true);
-    // Compensation: restore schedules for meds fully invalidated before the failure.
+    expect(durable.medications.map((m) => m.autoDeductEnabled)).toEqual([true, false, true]);
     expect(scheduleCalls.some((c) => c.medId === 'a')).toBe(true);
+  });
+
+  it('Global OFF persistence failure keeps the original per-med preferences', async () => {
+    __setAutoStockGateTestHooks({
+      load: () => ({
+        medications: durable.medications.map((m) => ({ ...m })),
+        logs: durable.logs.map((l) => ({ ...l })),
+        globalAutoDeductEnabled: durable.globalAutoDeductEnabled,
+      }),
+      commit: () => 'persist_failed',
+      persistGlobal: () => 'persist_failed',
+    });
+
+    const result = await runGatedGlobalAutoDeductToggle({ enable: false });
+
+    expect(result.outcome).toBe('persist_failed');
+    expect(durable.medications.map((m) => m.autoDeductEnabled)).toEqual([true, false, true]);
+    expect(result.medications.map((m) => m.autoDeductEnabled)).toEqual([true, false, true]);
   });
 });

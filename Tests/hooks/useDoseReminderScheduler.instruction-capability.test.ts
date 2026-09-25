@@ -160,11 +160,12 @@ describe('useDoseReminderScheduler — per-dose instruction', () => {
     mocks.schedule.mockClear();
     mocks.cancel.mockClear();
 
+    const currentDose = requireDefined(med.doseSchedule?.[0], 'med.doseSchedule[0]');
     const updated = {
       ...med,
       doseSchedule: [
         {
-          ...med.doseSchedule![0],
+          ...currentDose,
           description: 'قبل النوم',
         },
       ],

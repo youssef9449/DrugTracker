@@ -301,7 +301,6 @@ export default function App() {
         }
         mode={selectDoseMode}
         logs={logs}
-        globalAutoDeductEnabled={globalAutoDeductEnabled}
         onSelect={handleSelectDoseFromModal}
         onRestore={handleCardRestoreDose}
         onClose={() => {

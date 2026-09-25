@@ -1,14 +1,14 @@
 package app.drugtracker.autodeduction;
 
-import static app.drugtracker.autodeduction.Phase2TestSupport.cancelKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.cancelPrefs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.clearAllDurableState;
-import static app.drugtracker.autodeduction.Phase2TestSupport.futureCalendarDate;
-import static app.drugtracker.autodeduction.Phase2TestSupport.futureEpochMs;
-import static app.drugtracker.autodeduction.Phase2TestSupport.newScheduler;
-import static app.drugtracker.autodeduction.Phase2TestSupport.readAuthGeneration;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schKey;
-import static app.drugtracker.autodeduction.Phase2TestSupport.schedulePrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.cancelKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.cancelPrefs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.clearAllDurableState;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.futureCalendarDate;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.futureEpochMs;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.newScheduler;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.readAuthGeneration;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schKey;
+import static app.drugtracker.autodeduction.AutoDeductionTestSupport.schedulePrefs;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;

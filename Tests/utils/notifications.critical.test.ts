@@ -66,8 +66,12 @@ async function scheduleIOSNotificationAndGetPlatformId(
   at: number
 ): Promise<number> {
   await scheduleCriticalAlarm(medId, 'Test Med', at, 'قرص');
-  const call = mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1];
-  return requireDefined(call, 'call')[0].notifications[0].id;
+  const call = requireDefined(
+    mocks.schedule.mock.calls[mocks.schedule.mock.calls.length - 1],
+    'schedule call'
+  );
+  const request = requireDefined(call[0], 'schedule request');
+  return requireDefined(request.notifications[0], 'notification').id;
 }
 
 describe('cancelCriticalAlarm (web path)', () => {

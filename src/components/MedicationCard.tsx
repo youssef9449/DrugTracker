@@ -67,16 +67,16 @@ interface MedicationCardProps {
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
   onToggleAutoDeduct: (id: string) => void;
-  onToggleMedicationReminder?: (id: string) => void | undefined;
-  onToggleMedicationCriticalStockAlerts?: (id: string) => void | undefined;
-  onNavigateToShopping?: () => void | undefined;
-  onConsumeDose?: (medicationId: string, doseId?: string) => void | undefined;
+  onToggleMedicationReminder?: ((id: string) => void) | undefined;
+  onToggleMedicationCriticalStockAlerts?: ((id: string) => void) | undefined;
+  onNavigateToShopping?: (() => void) | undefined;
+  onConsumeDose?: ((medicationId: string, doseId?: string) => void) | undefined;
   /** Restore a manually consumed dose via the same App path as logs. */
-  onRestoreDose?: (medicationId: string, doseId?: string) => void | undefined;
-  onOpenHistory?: (medication: Medication) => void | undefined;
+  onRestoreDose?: ((medicationId: string, doseId?: string) => void) | undefined;
+  onOpenHistory?: ((medication: Medication) => void) | undefined;
   /** Durable stock logs used to display the exact historical Restore amount. */
   logs?: ConsumptionLog[] | undefined;
-  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void | undefined;
+  onRegisterBackHandler?: ((id: string, close: () => void, priority?: number) => () => void) | undefined;
 }
 export const MedicationCard: FC<MedicationCardProps> = ({
   medication,

@@ -39,14 +39,14 @@ export interface MedicationCardViewProps {
   onEdit: (medication: Medication) => void;
   onDelete: (id: string) => void;
   onToggleAutoDeduct: (id: string) => void;
-  onToggleMedicationReminder?: (id: string) => void;
-  onToggleMedicationCriticalStockAlerts?: (id: string) => void;
-  onNavigateToShopping?: () => void;
-  onConsumeDose?: (medicationId: string, doseId?: string) => void;
-  onRestoreDose?: (medicationId: string, doseId?: string) => void;
-  onOpenHistory?: (medication: Medication) => void;
+  onToggleMedicationReminder?: (id: string) => void | undefined;
+  onToggleMedicationCriticalStockAlerts?: (id: string) => void | undefined;
+  onNavigateToShopping?: () => void | undefined;
+  onConsumeDose?: (medicationId: string, doseId?: string) => void | undefined;
+  onRestoreDose?: (medicationId: string, doseId?: string) => void | undefined;
+  onOpenHistory?: (medication: Medication) => void | undefined;
   logs: ConsumptionLog[];
-  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void;
+  onRegisterBackHandler?: (id: string, close: () => void, priority?: number) => () => void | undefined;
 }
 
 function shortDepletionLabel(depletion: { dateStr: string; daysLeft: number }, isOut: boolean): string {

@@ -89,6 +89,27 @@ describe('Auto-Deduction First Run Prompt Integration', () => {
     expect(screen.getByRole('button', { name: /لا \(إيقاف\)/ })).toBeInTheDocument();
   });
 
+  it('persists the clean-install preference without entering the stock mutation path', async () => {
+    const spy = vi.spyOn(manualStockMutation, 'runGatedGlobalAutoDeductToggle');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('تفعيل الخصم التلقائي للأدوية؟')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /نعم \\(تفعيل\\)/ }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('تفعيل الخصم التلقائي للأدوية؟')).not.toBeInTheDocument();
+    });
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(localStorage.getItem(PROMPTED_KEY)).toBe('true');
+    expect(localStorage.getItem(GLOBAL_KEY)).toBe('true');
+    spy.mockRestore();
+  });
+
   it('enables auto-deduct and closes modal when user chooses "نعم"', async () => {
     render(<App />);
 

@@ -255,6 +255,10 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     const thresholdInput = screen.getByPlaceholderText('مثال: 5') as HTMLInputElement;
     fireEvent.change(thresholdInput, { target: { value: '9' } });
 
+    fireEvent.change(screen.getByPlaceholderText(/بانادول|كونكور/), {
+      target: { value: 'Stock Alert Med' },
+    });
+
     fireEvent.click(screen.getByText('إضافة الدواء'));
 
     expect(onSave).toHaveBeenCalledTimes(1);

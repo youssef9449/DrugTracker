@@ -1,3 +1,4 @@
+import { requireDefined } from '../helpers/requireDefined';
 import { __setAutoStockGateTestHooks } from './autoStockTestHooks';
 import type { AutoStockDurableState } from '../../src/utils/autoDeductionStockGate';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -78,25 +79,25 @@ describe('stock gate — fresh durable state', () => {
 
   it('usesFreshDurableStateInsideGate', async () => {
     await withAutoStockMutationGate((fresh) => {
-      expect(fresh.medications[0].currentPills).toBe(10);
+      expect(requireDefined(fresh.medications[0], 'fresh.medications[0]').currentPills).toBe(10);
       const next = {
         ...fresh.medications[0],
         currentPills: 8,
       };
       commitDurableAutoStockState({ medications: [next], logs: fresh.logs });
     });
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
 
     // Second entry must see 8, not a stale 10
     await withAutoStockMutationGate((fresh) => {
-      expect(fresh.medications[0].currentPills).toBe(8);
+      expect(requireDefined(fresh.medications[0], 'fresh.medications[0]').currentPills).toBe(8);
     });
   });
 
   it('staleSnapshotsCannotOverwriteCommittedState', async () => {
     const staleReactSnapshot = 10; // ignored — gate does not use it
     await withAutoStockMutationGate((fresh) => {
-      expect(fresh.medications[0].currentPills).toBe(staleReactSnapshot);
+      expect(requireDefined(fresh.medications[0], 'fresh.medications[0]').currentPills).toBe(staleReactSnapshot);
       commitDurableAutoStockState({
         medications: [{ ...fresh.medications[0], currentPills: 8 }],
         logs: [],
@@ -104,11 +105,11 @@ describe('stock gate — fresh durable state', () => {
     });
     await withAutoStockMutationGate((fresh) => {
       // Even if caller still "thinks" 10, durable is 8
-      expect(fresh.medications[0].currentPills).toBe(8);
+      expect(requireDefined(fresh.medications[0], 'fresh.medications[0]').currentPills).toBe(8);
       // Attempting to re-apply same logical -2 from stale 10 would be wrong;
       // here we just assert second op sees 8
     });
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
   });
 
   it('nativeThenLegacyDoesNotDoubleDeduct', async () => {
@@ -133,7 +134,7 @@ describe('stock gate — fresh durable state', () => {
       expect(r.details[0]?.outcome).toBe('applied');
       commitDurableAutoStockState({ medications: r.medications, logs: r.logs });
     });
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
     expect(
       isExactAutoOccurrenceApplied(durable.logs, durable.medications[0], 'd', '2026-09-13')
     ).toBe(true);
@@ -147,9 +148,9 @@ describe('stock gate — fresh durable state', () => {
       const r = reconcileFiredEvents(fresh.medications, fresh.logs, [e]);
       expect(r.details[0]?.outcome).toBe('already_applied');
       expect(r.mutated).toBe(false);
-      expect(r.medications[0].currentPills).toBe(8);
+      expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
     });
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
   });
 
   it('elapsed-day settlementDoesNotBlockFIRED (#265/#267)', async () => {
@@ -175,7 +176,7 @@ describe('stock gate — fresh durable state', () => {
       commitDurableAutoStockState({ medications: r.medications, logs: r.logs });
     });
     // event.amount (2) deducted exactly once.
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
 
     // Second reconciliation of the same FIRED: now there IS durable evidence
     // (consume marker) → already_applied → no second deduction.
@@ -184,7 +185,7 @@ describe('stock gate — fresh durable state', () => {
       expect(r.details[0]?.outcome).toBe('already_applied');
       expect(r.mutated).toBe(false);
     });
-    expect(durable.medications[0].currentPills).toBe(8);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(8);
   });
 
   it('twoExactEventsSerializeCorrectly', async () => {
@@ -217,15 +218,15 @@ describe('stock gate — fresh durable state', () => {
     const p1 = withAutoStockMutationGate((fresh) => {
       const r = reconcileFiredEvents(fresh.medications, fresh.logs, [events[0]]);
       commitDurableAutoStockState({ medications: r.medications, logs: r.logs });
-      return r.medications[0].currentPills;
+      return requireDefined(r.medications[0], 'r.medications[0]').currentPills;
     });
     const p2 = withAutoStockMutationGate((fresh) => {
       const r = reconcileFiredEvents(fresh.medications, fresh.logs, [events[1]]);
       commitDurableAutoStockState({ medications: r.medications, logs: r.logs });
-      return r.medications[0].currentPills;
+      return requireDefined(r.medications[0], 'r.medications[0]').currentPills;
     });
     await Promise.all([p1, p2]);
-    expect(durable.medications[0].currentPills).toBe(7);
+    expect(requireDefined(durable.medications[0], 'durable.medications[0]').currentPills).toBe(7);
   });
 });
 
@@ -254,7 +255,7 @@ describe('multi-dose', () => {
       [],
       [fired({ medicationId: 'med-1', doseId: 'b', calendarDate: '2026-09-14', amount: 2 })]
     );
-    expect(r.medications[0].currentPills).toBe(18);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(18);
     expect(isExactAutoOccurrenceApplied(r.logs, r.medications[0], 'b', '2026-09-14')).toBe(true);
     expect(isExactAutoOccurrenceApplied(r.logs, r.medications[0], 'a', '2026-09-14')).toBe(false);
     expect(isExactAutoOccurrenceApplied(r.logs, r.medications[0], 'c', '2026-09-14')).toBe(false);
@@ -290,6 +291,6 @@ describe('durable currentPills after Exact apply (Issue #266)', () => {
       [],
       [fired({ medicationId: 'med-1', doseId: 'd', calendarDate: '2026-09-14', amount: 2 })]
     );
-    expect(r.medications[0].currentPills).toBe(8);
+    expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
   });
 });

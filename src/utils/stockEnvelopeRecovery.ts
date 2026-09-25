@@ -333,7 +333,7 @@ export async function recoverAllPendingStockEnvelopes(
       doseId: string;
       calendarDate: string;
       type: 'CONSUMED' | 'SKIPPED';
-    }>
+    }> | undefined
   ) => Promise<{
     ok: boolean;
     error?: string;

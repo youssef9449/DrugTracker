@@ -28,7 +28,7 @@ import java.util.TimeZone;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 33)
-public class RetryEvidenceStalenessTest extends Group2AutoReliabilityFixture {
+public class RetryEvidenceStalenessTest extends AutoReliabilityFixture {
 
     @Test
     public void staleRetryEvidence_afterScheduleReplacement_cannotMutateStock()

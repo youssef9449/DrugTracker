@@ -91,10 +91,10 @@ describe('exact event day must not be double-settled', () => {
     );
     expect(requireDefined(r.medications[0], 'r.medications[0]').currentPills).toBe(8);
     expect(
-      isExactAutoOccurrenceApplied(r.logs, r.medications[0], 'morning', '2026-09-13')
+      isExactAutoOccurrenceApplied(r.logs, requireDefined(r.medications[0], 'r.medications[0]'), 'morning', '2026-09-13')
     ).toBe(true);
     expect(
-      isExactAutoOccurrenceApplied(r.logs, r.medications[0], 'evening', '2026-09-13')
+      isExactAutoOccurrenceApplied(r.logs, requireDefined(r.medications[0], 'r.medications[0]'), 'evening', '2026-09-13')
     ).toBe(false);
   });
 

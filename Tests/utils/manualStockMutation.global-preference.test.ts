@@ -106,13 +106,22 @@ describe('durable global preference and add-medication ordering', () => {
     expect(durable.globalAutoDeductEnabled).toBe(false);
   });
 
-  it('global toggle persists only the master switch inside the same durable commit path', async () => {
+  it('global toggle persists only the master switch while preserving the complete medication values', async () => {
+    const medicationsBefore = durable.medications.map((m) => ({ ...m }));
+
     const result = await runGatedGlobalAutoDeductToggle({ enable: false });
 
     expect(result.outcome).toBe('applied');
     expect(durable.globalAutoDeductEnabled).toBe(false);
     expect(persistedGlobal).toBe(false);
-    expect(requireDefined(durable.medications[0], 'durable.medications[0]').autoDeductEnabled).toBe(true);
+    expect(durable.medications).toEqual(medicationsBefore);
+    expect(result.medications).toEqual(medicationsBefore);
+
+    const enableResult = await runGatedGlobalAutoDeductToggle({ enable: true });
+    expect(enableResult.outcome).toBe('applied');
+    expect(durable.globalAutoDeductEnabled).toBe(true);
+    expect(durable.medications).toEqual(medicationsBefore);
+    expect(enableResult.medications).toEqual(medicationsBefore);
   });
 
   it('global persistence failure keeps the mutation envelope for restart recovery', async () => {

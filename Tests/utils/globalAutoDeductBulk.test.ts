@@ -144,7 +144,7 @@ describe('runGatedGlobalAutoDeductToggle — global kill switch', () => {
     vi.useRealTimers();
   });
 
-  it('Global OFF preserves every medication Auto preference and stock state while invalidating only per-med ON recurrences', async () => {
+  it('Global OFF preserves every medication Auto preference and does not directly mutate medication stock when no exact reconciliation is present', async () => {
     const medsBefore = durable.medications.map((m) => m.autoDeductEnabled);
     const pillsBefore = durable.medications.map((m) => m.currentPills);
     const logsBefore = durable.logs.map((l) => ({ ...l }));
@@ -180,6 +180,24 @@ describe('runGatedGlobalAutoDeductToggle — global kill switch', () => {
     expect(invalidationCalls).toEqual([]);
     expect(scheduleCalls).toEqual([]);
     expect(commitCalls).toBe(1);
+  });
+
+  it('Global OFF → ON round trip preserves every per-med Auto preference', async () => {
+    const medsBefore = durable.medications.map((m) => ({ ...m }));
+    
+    const offResult = await runGatedGlobalAutoDeductToggle({ enable: false });
+    expect(offResult.outcome).toBe('applied');
+    expect(durable.globalAutoDeductEnabled).toBe(false);
+    expect(durable.medications.map((m) => m.autoDeductEnabled)).toEqual(
+      medsBefore.map((m) => m.autoDeductEnabled)
+    );
+
+    const onResult = await runGatedGlobalAutoDeductToggle({ enable: true });
+    expect(onResult.outcome).toBe('applied');
+    expect(durable.globalAutoDeductEnabled).toBe(true);
+    expect(durable.medications.map((m) => m.autoDeductEnabled)).toEqual(
+      medsBefore.map((m) => m.autoDeductEnabled)
+    );
   });
 
   it('Global OFF native invalidation failure leaves the master switch and medication preferences unchanged', async () => {

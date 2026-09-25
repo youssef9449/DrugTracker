@@ -8,8 +8,6 @@ import {
   isDoseSkippedOnDate,
 } from '../utils/dateCalculations';
 import {
-} from '../utils/doseSchedule';
-import {
   relativeDoseDayLabel,
   sortDoseSelectItems,
 } from '../utils/doseSelectDisplay';

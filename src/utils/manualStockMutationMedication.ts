@@ -221,7 +221,12 @@ export function runGatedMedicationUpdate(opts: {
       freshMed,
       opts.medData
     );
-    if (autoChanged) {
+    // Enabling a previously inactive feature has no old native chain to
+    // invalidate. The scheduler will arm the new definition after the durable
+    // medication commit. Invalidate only an already-active chain.
+    const autoNeedsInvalidation = autoChanged && freshMed.autoDeductEnabled === true;
+    const doseNeedsInvalidation = doseChanged && freshMed.reminderEnabled === true;
+    if (autoNeedsInvalidation) {
       // Invalidate the old Auto chain before committing its defining
       // medication configuration.
       invalidation = await invalidateMedicationRecurrences(freshMed);
@@ -237,7 +242,7 @@ export function runGatedMedicationUpdate(opts: {
         };
       }
     }
-    if (doseChanged) {
+    if (doseNeedsInvalidation) {
       // Invalidate the old Dose Reminder chain before committing its defining
       // medication configuration. Native cancellation is the linearization
       // barrier that prevents an old alarm from firing against the new state.
@@ -245,7 +250,7 @@ export function runGatedMedicationUpdate(opts: {
         await invalidateMedicationDoseReminders(freshMed);
       if (!doseInvalidation.ok) {
         let compensationError: string | undefined;
-        if (autoChanged && invalidation.invalidated.length > 0) {
+        if (autoNeedsInvalidation && invalidation.invalidated.length > 0) {
           const compensation = await restoreInvalidatedRecurrences(
             freshMed,
             invalidation.invalidated
@@ -324,7 +329,7 @@ export function runGatedMedicationUpdate(opts: {
           compensationError = compensation.error ?? null;
         }
       }
-      if (doseChanged) {
+      if (doseNeedsInvalidation) {
         const doseCompensation =
           await restoreInvalidatedDoseReminders(freshMed);
         if (!doseCompensation.ok && compensationError == null) {

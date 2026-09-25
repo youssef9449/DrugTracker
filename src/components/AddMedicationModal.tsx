@@ -4,7 +4,7 @@ import type { Medication } from '../types';
 import { resizeDoseSchedule } from '../utils/doseSchedule';
 import { Modal } from './ui/Modal';
 import { MedicationCourseAndSchedule } from './MedicationCourseAndSchedule';
-import { AddMedicationAutoDeductToggle } from './AddMedicationAutoDeductToggle';
+import { AddMedicationStockSettings } from './AddMedicationStockSettings';
 import { AddMedicationBasicsSection } from './AddMedicationBasicsSection';
 import { AddMedicationPackagingSection } from './AddMedicationPackagingSection';
 import { AddMedicationDetailsSection } from './AddMedicationDetailsSection';
@@ -33,6 +33,7 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
     showStockHelper, setShowStockHelper, helperBoxes, helperStrips, helperLoose,
     setHelperBoxes, setHelperStrips, setHelperLoose, helperTotal, error, setError,
     reminderEnabled, setReminderEnabled, autoDeductEnabled, setAutoDeductEnabled,
+    criticalStockAlertsEnabled, setCriticalStockAlertsEnabled,
     isChronic, setIsChronic, durationDaysStr, setDurationDaysStr,
     setTreatmentStartDateStr, handleUnitChange, handleStripsChange,
     handlePillsPerStripChange, applyStockHelper, handleSubmit,
@@ -76,9 +77,13 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
               <span>{error}</span>
             </div>
           )}
-          <AddMedicationAutoDeductToggle
-            enabled={autoDeductEnabled}
-            onChange={() => setAutoDeductEnabled(!autoDeductEnabled)}
+          <AddMedicationStockSettings
+            criticalStockAlertsEnabled={criticalStockAlertsEnabled}
+            setCriticalStockAlertsEnabled={setCriticalStockAlertsEnabled}
+            warningThresholdDays={warningThresholdDays}
+            setWarningThresholdDays={setWarningThresholdDays}
+            autoDeductEnabled={autoDeductEnabled}
+            setAutoDeductEnabled={setAutoDeductEnabled}
           />
           <AddMedicationBasicsSection
             name={name}
@@ -123,8 +128,6 @@ export const AddMedicationModal: FC<AddMedicationModalProps> = ({
             setDosesPerDay={setDosesPerDay}
             setDoseSchedule={setDoseSchedule}
             resizeDoseSchedule={resizeDoseSchedule}
-            warningThresholdDays={warningThresholdDays}
-            setWarningThresholdDays={setWarningThresholdDays}
             category={category}
             setCategory={setCategory}
             colorTag={colorTag}

@@ -88,10 +88,9 @@ export const MedicationCourseAndSchedule: FC<MedicationCourseAndScheduleProps> =
                   </label>
                   <div className="relative">
                     <input
-                      type="number"
-                      min="1"
-                      max="3650"
+                      type="text"
                       inputMode="numeric"
+                      pattern="[0-9]*"
                       value={durationDaysStr}
                       onChange={(e) => {
                         setDurationDaysStr(e.target.value);

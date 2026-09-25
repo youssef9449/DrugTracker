@@ -271,6 +271,9 @@ describe('AddMedicationModal — multi-dose schedule (Phase 1)', () => {
     expect(stockToggle).toHaveAttribute('aria-checked', 'false');
     expect(autoToggle).toHaveAttribute('aria-checked', 'false');
 
+    expect(stockToggle.parentElement).not.toHaveClass('bg-slate-50');
+    expect(autoToggle.parentElement).not.toHaveClass('bg-slate-50');
+
     expect(
       reminderToggle.compareDocumentPosition(stockToggle) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();

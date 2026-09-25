@@ -718,7 +718,10 @@ describe('Phase 4 — treatment-boundary-safe recurrence compensation', () => {
   });
 
   it('does not compensate an occurrence before the treatment start date', async () => {
-    const current = durable.medications[0];
+    const current = requireDefined(
+      durable.medications[0],
+      'durable.medications[0]'
+    );
     const {
       id,
       createdAt,

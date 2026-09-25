@@ -141,8 +141,8 @@ describe('runAutoDeductionReconciliation — FIRED durable regardless of current
     expect(first.mutated).toBe(true);
     expect(requireDefined(first.medications[0], 'first.medications[0]').currentPills).toBe(8);
     expect(first.newExactLogs).toHaveLength(1);
-    expect(requireDefined(requireDefined(first.newExactLogs[0], 'first.newExactLogs[0]'), 'requireDefined(first.newExactLogs[0], 'first.newExactLogs[0]')').amount).toBe(-2);
-    expect(requireDefined(requireDefined(first.newExactLogs[0], 'first.newExactLogs[0]'), 'requireDefined(first.newExactLogs[0], 'first.newExactLogs[0]')').id).toBe(exactAutoLogId('med-1', 'd1', '2026-09-14'));
+    expect(requireDefined(first.newExactLogs[0], 'first.newExactLogs[0]').amount).toBe(-2);
+    expect(requireDefined(first.newExactLogs[0], 'first.newExactLogs[0]').id).toBe(exactAutoLogId('med-1', 'd1', '2026-09-14'));
     expect(requireDefined(first.newExactLogs[0], 'first.newExactLogs[0]').type).toBe('exact_auto');
     expect(first.logs.filter((l) => l.type === 'exact_auto')).toHaveLength(0);
     expect(first.toAcknowledge).toEqual([

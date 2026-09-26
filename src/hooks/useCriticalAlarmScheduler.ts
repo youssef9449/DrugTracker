@@ -1,3 +1,4 @@
+import { DEFAULT_MEDICATION_UNIT } from '../constants/medicationDefaults';
 import { useEffect, useRef } from 'react';
 import type { Medication } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
@@ -406,7 +407,7 @@ export function useCriticalAlarmScheduler({
 
       const medId = med.id;
       const medName = med.name;
-      const unit = med.unit || 'قرص';
+      const unit = med.unit || DEFAULT_MEDICATION_UNIT;
 
       if (decision.scheduledDeliveryBlockedByForeground) {
         // Foreground Critical Stock delivery owns this opportunity while the

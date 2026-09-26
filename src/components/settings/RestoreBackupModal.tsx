@@ -67,7 +67,8 @@ export const RestoreBackupModal: FC<RestoreBackupModalProps> = ({
     pharmacySettings && (pharmaciesCount > 0 || contactsCount > 0 || addressesCount > 0)
   );
 
-  const logsSelectable = backupData.scope === 'all' && includeMedications;
+  const logsSelectable =
+    backupData.scope === 'all' && (mode === 'merge' || includeMedications);
   const hasAnySelection =
     (includeMedications && medications.length > 0) ||
     (includeLogs && logsSelectable) ||

@@ -304,9 +304,17 @@ public final class CriticalStockAlarmAdapter
     }
 
     boolean markOneShotDelivered(String medicationId, String operationVersion) {
-        return runtime.markOneShotDelivered(
-                occurrenceKey(medicationId),
-                operationVersion);
+        final boolean[] marked = {false};
+        ExactAlarmRuntime.runWithOperationLock(() -> {
+            String claimKey = occurrenceKey(medicationId) + "::" + operationVersion;
+            if (!ACTIVE_DELIVERY_CLAIMS.contains(claimKey)) {
+                return;
+            }
+            marked[0] = runtime.markOneShotDelivered(
+                    occurrenceKey(medicationId),
+                    operationVersion);
+        });
+        return marked[0];
     }
 
     boolean isOneShotDelivered(String medicationId) {

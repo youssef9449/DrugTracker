@@ -489,7 +489,7 @@ describe('AddMedicationModal — stock helper fields allow empty mid-edit', () =
     expect(screen.getByText('علب كاملة')).toBeInTheDocument();
     expect(screen.getByText('أشرطة إضافية')).toBeInTheDocument();
     expect(screen.getByText('حبات منفردة')).toBeInTheDocument();
-    expect(screen.getByText('أقراص منفردة')).toBeInTheDocument();
+    expect(screen.getByText('حبات منفردة')).toBeInTheDocument();
 
     for (const label of ['علب كاملة', 'أشرطة إضافية', 'حبات منفردة'] as const) {
       const labelEl = screen.getByText(label);

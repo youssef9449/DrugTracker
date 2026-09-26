@@ -89,10 +89,22 @@ export function useDoseReminders({
     while (queuedAlarmRef.current.length > 0) {
       const next = queuedAlarmRef.current[0];
       const med = medicationsRef.current.find((m) => m.id === next.medicationId);
-      if (!med || !findDoseRow(med, next.doseId)) continue;
-      if (isDoseConsumedOnDate(med, next.doseId, today)) continue;
-      if (fired[firedKey(next.medicationId, today, next.doseId)]) continue;
-      if (isSnoozeActive(next.medicationId, next.doseId)) continue;
+      if (!med || !findDoseRow(med, next.doseId)) {
+        queuedAlarmRef.current.shift();
+        continue;
+      }
+      if (isDoseConsumedOnDate(med, next.doseId, today)) {
+        queuedAlarmRef.current.shift();
+        continue;
+      }
+      if (fired[firedKey(next.medicationId, today, next.doseId)]) {
+        queuedAlarmRef.current.shift();
+        continue;
+      }
+      if (isSnoozeActive(next.medicationId, next.doseId)) {
+        queuedAlarmRef.current.shift();
+        continue;
+      }
       if (allowManualTakeActionByMedicationId.get(next.medicationId) === false) {
         queuedAlarmRef.current.shift();
         continue;

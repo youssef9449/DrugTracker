@@ -82,7 +82,17 @@ export function runGatedAutoDeductToggle(opts: {
         unit: med.unit,
       };
     }
-    const err = await commitWithManualEnvelope({ medications, logs }, fresh.medications);
+    const err = await commitWithManualEnvelope(
+      {
+        medications,
+        logs,
+        // Per-med Auto is independent from the global master switch. Carry the
+        // exact durable global value through this commit instead of allowing
+        // commitWithManualEnvelope() to reconstruct it from storage/defaults.
+        globalAutoDeductEnabled: fresh.globalAutoDeductEnabled,
+      },
+      fresh.medications
+    );
     if (err) {
       // Native invalidation already linearized the old schedule chain. Restore
       // it when the JS commit fails so a failed mutation does not leave the

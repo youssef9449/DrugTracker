@@ -427,7 +427,7 @@ describe('App multi-dose manual consumption (real wiring)', () => {
     });
   });
 
-  it('Auto ON: future dose shows لم يحن وقتها with no take action', async () => {
+  it('Auto ON: future dose remains manually takeable', async () => {
     // now = 07:00; scheduled doses (08:00+) are future. Auto ON → not yet due.
     localStorage.setItem(
       STORAGE_MEDS_KEY,
@@ -447,8 +447,8 @@ describe('App multi-dose manual consumption (real wiring)', () => {
       ).toBeInTheDocument();
     });
 
-    // Future dose under Auto ON: status لم يحن وقتها, no Take action available.
-    expect(screen.getAllByText(/الحالة: لم يحن وقتها/).length).toBeGreaterThan(0);
+    // Auto controls background deduction only; future doses remain manually takeable.
+    expect(screen.getAllByText(/الحالة: لم يتم التناول/).length).toBeGreaterThan(0);
     const takeButtons = screen
       .getAllByRole('button')
       .filter(
@@ -456,7 +456,7 @@ describe('App multi-dose manual consumption (real wiring)', () => {
           b.getAttribute('data-dose-id') !== null &&
           b.getAttribute('data-dose-action') === 'take'
       );
-    expect(takeButtons).toHaveLength(0);
+    expect(takeButtons.length).toBeGreaterThan(0);
     // No consumption from just opening the modal.
     expect(readLogs().filter((l) => l.type === 'dose_taken')).toHaveLength(0);
   });

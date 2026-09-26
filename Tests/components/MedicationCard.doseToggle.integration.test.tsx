@@ -302,7 +302,7 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     });
   });
 
-  it('auto-deduct-only does NOT offer Restore; card is non-interactive when only auto-elapsed', async () => {
+  it('Exact Auto deduction with durable evidence offers Restore; pure projection does not', async () => {
     // Auto-elapsed / auto-deduct-only occurrence is NOT a Manual Card Restore
     // target. Card Restore depends only on durable deduction evidence. There is
     // no pure-projection Auto Restore button on the Card.
@@ -325,8 +325,19 @@ describe('MedicationCard dose toggle — same doseId Take→Restore', () => {
     render(<App />);
     await waitFor(() => expect(screen.getByText('Drug A Multi')).toBeInTheDocument());
 
-    // No manual restore-dose-<id> button (canRestore=false) and no manual Take.
-    expect(screen.queryByTestId('restore-dose-med-multi')).not.toBeInTheDocument();
+    // App startup reconciles an elapsed Auto occurrence into durable Exact Auto
+    // evidence. Once that evidence exists, Restore is intentionally available;
+    // a pure projection without an exact deduction record is not restorable.
+    const exactLog = readLogs().find(
+      (log) =>
+        log.type === 'exact_auto' &&
+        log.medicationId === 'med-multi' &&
+        log.doseId === 'd1'
+    );
+    expect(exactLog).toBeDefined();
+    expect(exactLog?.amount).toBe(-1);
+    expect(screen.getByTestId('restore-dose-med-multi')).toBeInTheDocument();
+    expect(screen.getByTitle(/استرجاع الجرعة \(\+1\)/)).toBeInTheDocument();
     expect(screen.queryByTitle(/^تناول جرعة/)).not.toBeInTheDocument();
   });
 

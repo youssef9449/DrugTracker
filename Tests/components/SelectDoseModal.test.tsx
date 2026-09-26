@@ -419,7 +419,7 @@ describe('SelectDoseModal', () => {
   });
 
   describe('SelectDoseModal — medication-level Auto in take mode', () => {
-  it('Medication ON + elapsed: dose completed, not selectable for Take', () => {
+  it('Medication ON + elapsed: manual Take remains selectable', () => {
     vi.setSystemTime(new Date(2026, 8, 13, 12, 0, 0));
     const onSelect = vi.fn();
     render(
@@ -434,8 +434,10 @@ describe('SelectDoseModal', () => {
     const d1 = screen
       .getAllByRole('button')
       .find((b) => b.getAttribute('data-dose-id') === 'd1');
-    expect(d1).toBeDisabled();
-    expect(d1).toHaveTextContent('خصم تلقائي');
+    expect(d1).toBeEnabled();
+    expect(d1).toHaveTextContent('اختيار');
+    fireEvent.click(d1!);
+    expect(onSelect).toHaveBeenCalledWith('med-multi', 'd1');
   });
 
   it('Medication OFF + elapsed: Take selectable', () => {

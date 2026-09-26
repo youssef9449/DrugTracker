@@ -1,3 +1,4 @@
+import { DEFAULT_MEDICATION_UNIT } from '../constants/medicationDefaults';
 import type { Medication } from '../types';
 import { validateMedicationDose, normalizeDoseId } from './doseIdentity';
 
@@ -36,7 +37,7 @@ export function parseDoseScheduleKey(
  */
 export function getDoseReminderSlots(med: Medication): DoseReminderSlot[] {
   const name = med.name;
-  const unit = med.unit || 'قرص';
+  const unit = med.unit || DEFAULT_MEDICATION_UNIT;
   if (!Array.isArray(med.doseSchedule) || med.doseSchedule.length === 0) {
     return [];
   }

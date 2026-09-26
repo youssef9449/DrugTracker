@@ -167,11 +167,6 @@ public final class AutoDeductionSchedulingAdapter {
                         key, expectedOperationVersion);
     }
 
-    public boolean removeSchedule(String storageKey) {
-        String key = normalizeStorageKey(storageKey);
-        return key != null && alarmRuntime.removeSchedule(key);
-    }
-
     public boolean hasCancellationTombstone(String storageKey) {
         String key = normalizeStorageKey(storageKey);
         return key != null && alarmRuntime.hasCancellationTombstone(key);

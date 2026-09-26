@@ -38,9 +38,10 @@ export interface AppSettingsModalProps {
   onRestoreBackup?: ((opts: {
     backupMedications: Medication[];
     backupLogs?: ConsumptionLog[];
+    restoreLogs: boolean;
     mode: 'replace' | 'merge';
     pharmacySettings?: PharmacySettings;
-    onApplyPharmacySettings?: (settings: PharmacySettings) => void;
+    onApplyPharmacySettings?: (settings: PharmacySettings) => Promise<boolean> | boolean;
   }) => Promise<boolean> | boolean) | undefined;
   /**
    * Apply app preference toggles only when the user confirms with حفظ الإعدادات.
@@ -79,6 +80,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   onSendTestNotification,
   autoDeductEnabled = true,
   onRestoreBackup,
+  onApplyRestoredPharmacySettings,
   onApplyAppPreferences,
   exactAlarmPermission = null,
   onOpenExactAlarmSettings,
@@ -302,7 +304,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 logs={logs}
                 pharmacySettings={settings}
                 onRestore={onRestoreBackup ?? (() => false)}
-                onSavePharmacySettings={onSaveSettings}
+                onSavePharmacySettings={onApplyRestoredPharmacySettings}
                 soundEnabled={draftSound}
                 showToast={showToast}
               />

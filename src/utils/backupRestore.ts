@@ -16,7 +16,6 @@ export interface DrugTrackerBackup {
     pharmaciesCount: number;
     contactsCount: number;
     addressesCount: number;
-    appVersion: string;
   };
   medications: Medication[];
   logs?: ConsumptionLog[] | undefined;
@@ -63,7 +62,6 @@ export function createBackupPayload(
       pharmaciesCount: effectivePharmacySettings?.pharmacies?.length ?? 0,
       contactsCount: effectivePharmacySettings?.whatsappContacts?.length ?? 0,
       addressesCount: effectivePharmacySettings?.whatsappAddresses?.length ?? 0,
-      appVersion: '0.1.0',
     },
     medications,
     logs: isAll ? effectiveLogs : undefined,
@@ -355,15 +353,28 @@ export function normalizePharmacySettingsForImport(raw: unknown): PharmacySettin
     }
   }
 
+  const validPharmacyIds = new Set(pharmacies.map((pharmacy) => pharmacy.id));
+  const validContactIds = new Set(whatsappContacts.map((contact) => contact.id));
+  const validAddressIds = new Set(whatsappAddresses.map((address) => address.id));
+
   const selectedPharmacyId =
-    typeof p.selectedPharmacyId === 'string' ? p.selectedPharmacyId.trim() : '';
+    typeof p.selectedPharmacyId === 'string' &&
+    validPharmacyIds.has(p.selectedPharmacyId.trim())
+      ? p.selectedPharmacyId.trim()
+      : '';
 
   const selectedWhatsappContactIds = Array.isArray(p.selectedWhatsappContactIds)
-    ? p.selectedWhatsappContactIds.filter((id): id is string => typeof id === 'string')
+    ? p.selectedWhatsappContactIds.filter(
+        (id): id is string =>
+          typeof id === 'string' && validContactIds.has(id)
+      )
     : [];
 
   const selectedWhatsappAddressIds = Array.isArray(p.selectedWhatsappAddressIds)
-    ? p.selectedWhatsappAddressIds.filter((id): id is string => typeof id === 'string')
+    ? p.selectedWhatsappAddressIds.filter(
+        (id): id is string =>
+          typeof id === 'string' && validAddressIds.has(id)
+      )
     : [];
 
   return {
@@ -381,105 +392,238 @@ export function normalizePharmacySettingsForImport(raw: unknown): PharmacySettin
  * Validates and parses raw backup JSON text (envelope or array).
  * Performs thorough validation to protect against malformed, malicious or crashing data.
  */
-export function parseAndValidateBackupFile(jsonText: string): BackupValidationResult {
+export function parseAndValidateBackupFile(
+  jsonText: string
+): BackupValidationResult {
   if (!jsonText || !jsonText.trim()) {
-    return { ok: false, error: 'الملف فارغ، يرجى اختيار ملف نسخة احتياطية صحيح.' };
+    return {
+      ok: false,
+      error: 'الملف فارغ، يرجى اختيار ملف نسخة احتياطية صحيح.',
+    };
   }
 
-  // Guard against massive payloads that could lock up the browser memory
   if (jsonText.length > 10 * 1024 * 1024) {
-    return { ok: false, error: 'حجم الملف كبير جداً ويتجاوز الحد المسموح به (10 ميجابايت).' };
+    return {
+      ok: false,
+      error:
+        'حجم الملف كبير جداً ويتجاوز الحد المسموح به (10 ميجابايت).',
+    };
   }
 
   let raw: unknown;
   try {
     raw = JSON.parse(jsonText);
   } catch {
-    return { ok: false, error: 'الملف تالف أو غير صالح (صيغة JSON غير صحيحة).' };
+    return {
+      ok: false,
+      error: 'الملف تالف أو غير صالح (صيغة JSON غير صحيحة).',
+    };
   }
 
-  if (!raw || (typeof raw !== 'object' && !Array.isArray(raw))) {
-    return { ok: false, error: 'هيكل بيانات النسخة الاحتياطية غير متطابق مع نسق التطبيق.' };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {
+      ok: false,
+      error:
+        'هيكل بيانات النسخة الاحتياطية غير متطابق مع النسق الرسمي للتطبيق.',
+    };
   }
 
-  let candidateMeds: unknown[] = [];
-  let candidateLogs: unknown[] = [];
-  let rawPharmacySettings: unknown = undefined;
-  let exportedAt: string | undefined;
-  let scope: BackupScope | undefined;
+  const envelope = raw as Record<string, unknown>;
 
-  if (Array.isArray(raw)) {
-    // Direct array of medications
-    candidateMeds = raw;
-    scope = 'medications';
-  } else {
-    // Envelope object
-    const envelope = raw as Record<string, unknown>;
-
-    // If envelope declares an app name and it's not drug-tracker, verify compatibility
-    if (envelope.app !== undefined && envelope.app !== 'drug-tracker') {
-      return { ok: false, error: 'هذا الملف غير مخصص لتطبيق منظم الأدوية.' };
-    }
-
-    if (envelope.scope === 'medications' || envelope.scope === 'all') {
-      scope = envelope.scope;
-    }
-
-    if (Array.isArray(envelope.medications)) {
-      candidateMeds = envelope.medications;
-    } else if (Array.isArray(envelope.items)) {
-      candidateMeds = envelope.items;
-    }
-
-    if (Array.isArray(envelope.logs)) {
-      candidateLogs = envelope.logs;
-    }
-
-    if (envelope.pharmacySettings && typeof envelope.pharmacySettings === 'object') {
-      rawPharmacySettings = envelope.pharmacySettings;
-    }
-
-    if (typeof envelope.exportedAt === 'string') {
-      exportedAt = envelope.exportedAt;
-    }
+  if (
+    envelope.version !== 1 ||
+    envelope.app !== 'drug-tracker' ||
+    (envelope.scope !== 'medications' && envelope.scope !== 'all')
+  ) {
+    return {
+      ok: false,
+      error:
+        'الملف ليس نسخة احتياطية صالحة من النسق الحالي لتطبيق منظم الأدوية.',
+    };
   }
 
+  if (
+    typeof envelope.exportedAt !== 'string' ||
+    Number.isNaN(Date.parse(envelope.exportedAt))
+  ) {
+    return {
+      ok: false,
+      error: 'تاريخ تصدير النسخة الاحتياطية غير صالح.',
+    };
+  }
+
+  if (
+    !envelope.metadata ||
+    typeof envelope.metadata !== 'object' ||
+    Array.isArray(envelope.metadata)
+  ) {
+    return {
+      ok: false,
+      error: 'بيانات وصف النسخة الاحتياطية غير صالحة.',
+    };
+  }
+
+  const metadata = envelope.metadata as Record<string, unknown>;
+  const metadataCounts = [
+    metadata.medicationsCount,
+    metadata.logsCount,
+    metadata.pharmaciesCount,
+    metadata.contactsCount,
+    metadata.addressesCount,
+  ];
+  if (
+    metadataCounts.some(
+      (value) =>
+        typeof value !== 'number' ||
+        !Number.isInteger(value) ||
+        value < 0
+    )
+  ) {
+    return {
+      ok: false,
+      error: 'عدادات بيانات النسخة الاحتياطية غير صالحة.',
+    };
+  }
+
+  if (!Array.isArray(envelope.medications)) {
+    return {
+      ok: false,
+      error: 'ملف النسخة الاحتياطية لا يحتوي على قائمة أدوية صالحة.',
+    };
+  }
+
+  const candidateMeds = envelope.medications;
   const rawCount = candidateMeds.length;
-  if (rawCount === 0) {
-    return { ok: false, error: 'لم يتم العثور على أدوية داخل هذا الملف.' };
+
+  if (metadata.medicationsCount !== rawCount) {
+    return {
+      ok: false,
+      error: 'عدد الأدوية المسجل في الملف لا يطابق محتواه.',
+    };
+  }
+
+  if (envelope.scope === 'medications') {
+    if ('logs' in envelope || 'pharmacySettings' in envelope) {
+      return {
+        ok: false,
+        error: 'نسخة الأدوية فقط تحتوي على بيانات إضافية غير متوقعة.',
+      };
+    }
+  } else {
+    if (!Array.isArray(envelope.logs)) {
+      return {
+        ok: false,
+        error: 'النسخة الشاملة لا تحتوي على سجلات استهلاك صالحة.',
+      };
+    }
+    if (
+      !envelope.pharmacySettings ||
+      typeof envelope.pharmacySettings !== 'object' ||
+      Array.isArray(envelope.pharmacySettings)
+    ) {
+      return {
+        ok: false,
+        error: 'النسخة الشاملة لا تحتوي على بيانات صيدلية صالحة.',
+      };
+    }
+    if (metadata.logsCount !== envelope.logs.length) {
+      return {
+        ok: false,
+        error: 'عدد سجلات الاستهلاك المسجل في الملف لا يطابق محتواه.',
+      };
+    }
   }
 
   const validMeds: Medication[] = [];
+  const seenMedicationIds = new Set<string>();
+
   for (const item of candidateMeds) {
     const med = normalizeMedicationForImport(item);
-    if (med) {
-      validMeds.push(med);
+    if (!med) continue;
+    if (seenMedicationIds.has(med.id)) {
+      return {
+        ok: false,
+        error: 'الملف يحتوي على معرفات أدوية مكررة، ولا يمكن استعادته بأمان.',
+      };
     }
+    seenMedicationIds.add(med.id);
+    validMeds.push(med);
   }
 
   if (validMeds.length === 0) {
     return {
       ok: false,
-      error: 'تعذر التعرف على بيانات الأدوية داخل الملف. تأكد من أن الملف سليم وصادر من التطبيق.',
+      error:
+        'تعذر التعرف على بيانات الأدوية داخل الملف. تأكد من أن الملف سليم وصادر من التطبيق.',
     };
   }
 
-  // Parse and validate logs if present
   const validLogs: ConsumptionLog[] = [];
-  for (const logItem of candidateLogs) {
-    if (isValidConsumptionLogRecord(logItem)) {
-      validLogs.push(logItem);
+  const seenLogIds = new Set<string>();
+  const rawLogs = envelope.scope === 'all'
+    ? (envelope.logs as unknown[])
+    : [];
+
+  for (const logItem of rawLogs) {
+    if (!isValidConsumptionLogRecord(logItem)) {
+      return {
+        ok: false,
+        error:
+          'النسخة الاحتياطية تحتوي على سجل استهلاك غير صالح ولا يمكن استعادتها بأمان.',
+      };
+    }
+    if (seenLogIds.has(logItem.id)) {
+      return {
+        ok: false,
+        error:
+          'الملف يحتوي على معرفات سجلات استهلاك مكررة، ولا يمكن استعادته بأمان.',
+      };
+    }
+    if (!seenMedicationIds.has(logItem.medicationId)) {
+      return {
+        ok: false,
+        error:
+          'يوجد سجل استهلاك مرتبط بدواء غير موجود داخل النسخة الاحتياطية.',
+      };
+    }
+    seenLogIds.add(logItem.id);
+    validLogs.push(logItem);
+  }
+
+  if (envelope.scope === 'all') {
+    const rawPharmacy = envelope.pharmacySettings as Record<string, unknown>;
+    const pharmaciesCount = Array.isArray(rawPharmacy.pharmacies)
+      ? rawPharmacy.pharmacies.length
+      : 0;
+    const contactsCount = Array.isArray(rawPharmacy.whatsappContacts)
+      ? rawPharmacy.whatsappContacts.length
+      : 0;
+    const addressesCount = Array.isArray(rawPharmacy.whatsappAddresses)
+      ? rawPharmacy.whatsappAddresses.length
+      : 0;
+
+    if (
+      metadata.pharmaciesCount !== pharmaciesCount ||
+      metadata.contactsCount !== contactsCount ||
+      metadata.addressesCount !== addressesCount
+    ) {
+      return {
+        ok: false,
+        error: 'عدادات بيانات الصيدلية لا تطابق محتوى النسخة الاحتياطية.',
+      };
     }
   }
 
-  // Parse and sanitize pharmacy settings if present
-  const validatedPharmacySettings = normalizePharmacySettingsForImport(rawPharmacySettings);
+  const validatedPharmacySettings =
+    envelope.scope === 'all'
+      ? normalizePharmacySettingsForImport(envelope.pharmacySettings)
+      : undefined;
 
   return {
     ok: true,
     data: {
-      scope,
-      exportedAt,
+      scope: envelope.scope,
+      exportedAt: envelope.exportedAt,
       medications: validMeds,
       logs: validLogs,
       pharmacySettings: validatedPharmacySettings,

@@ -5,7 +5,6 @@ import android.content.Context;
 import android.content.Intent;
 
 import app.drugtracker.alarmruntime.ExactAlarmContract;
-import app.drugtracker.alarmruntime.ExactAlarmRuntime;
 import app.drugtracker.notificationruntime.NotificationRuntime;
 
 /**

@@ -1,4 +1,5 @@
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { registerPlugin } from '@capacitor/core';
+import { isAndroidPlatform } from './platform';
 import {
   NativeBoundaryError,
   nativeFailureErrorCode,
@@ -58,16 +59,6 @@ interface DoseReminderPlugin {
 
 const DoseReminder = registerPlugin<DoseReminderPlugin>('DoseReminder');
 
-function isAndroid(): boolean {
-  try {
-    return (
-      typeof Capacitor !== 'undefined' && Capacitor.getPlatform() === 'android'
-    );
-  } catch {
-    return false;
-  }
-}
-
 function nextOccurrence(
   reminderTime: string,
   skipToday: boolean
@@ -97,7 +88,7 @@ export async function scheduleDoseReminderNative(
   doseDescription?: string,
   treatmentEndDate?: string
 ): Promise<void> {
-  if (!isAndroid()) return;
+  if (!isAndroidPlatform()) return;
 
   const fire = nextOccurrence(reminderTime, skipToday);
   if (!fire || !(doseAmount > 0) || !doseId.trim()) return;
@@ -124,7 +115,7 @@ export async function cancelDoseReminderNative(
   medId: string,
   doseId: string
 ): Promise<void> {
-  if (!isAndroid()) return;
+  if (!isAndroidPlatform()) return;
   const result = await DoseReminder.cancel({
     medicationId: medId,
     doseId: doseId.trim(),
@@ -146,7 +137,7 @@ export async function scheduleDoseSnoozeNative(
   allowManualTakeAction: boolean = true,
   doseDescription?: string
 ): Promise<void> {
-  if (!isAndroid()) return;
+  if (!isAndroidPlatform()) return;
   const result = await DoseReminder.scheduleSnooze({
     medicationId: medId,
     doseId: doseId.trim(),
@@ -168,7 +159,7 @@ export async function cancelDoseSnoozeNative(
   medId: string,
   doseId: string
 ): Promise<void> {
-  if (!isAndroid()) return;
+  if (!isAndroidPlatform()) return;
   const result = await DoseReminder.cancelSnooze({
     medicationId: medId,
     doseId: doseId.trim(),
@@ -199,7 +190,7 @@ export async function isDoseReminderScheduledNative(
   medId: string,
   doseId: string
 ): Promise<DoseReminderScheduledResult> {
-  if (!isAndroid()) return { ok: true, scheduled: false };
+  if (!isAndroidPlatform()) return { ok: true, scheduled: false };
   try {
     const result = await DoseReminder.isScheduled({
       medicationId: medId,
@@ -229,7 +220,7 @@ export async function isDoseReminderScheduledNative(
 }
 
 export async function listDoseReminderScheduledKeysNative(): Promise<DoseReminderScheduledKeysResult> {
-  if (!isAndroid()) return { ok: true, keys: [] };
+  if (!isAndroidPlatform()) return { ok: true, keys: [] };
   try {
     const result = await DoseReminder.listScheduled();
     if (!Array.isArray(result?.keys)) {
@@ -257,7 +248,7 @@ export type CancelStaleDoseReminderResult =
 export async function cancelStaleDoseReminderAlarmsNative(
   keepKeys: ReadonlySet<string>
 ): Promise<CancelStaleDoseReminderResult> {
-  if (!isAndroid()) return { ok: true };
+  if (!isAndroidPlatform()) return { ok: true };
   const scheduledResult = await listDoseReminderScheduledKeysNative();
   if (!scheduledResult.ok) return scheduledResult;
   try {
@@ -286,7 +277,7 @@ export async function isDoseReminderOccurrenceOwned(
   doseId: string,
   operationVersion: string
 ): Promise<boolean> {
-  if (!isAndroid() || !operationVersion) return false;
+  if (!isAndroidPlatform() || !operationVersion) return false;
   try {
     const result = await DoseReminder.checkOccurrenceOwnership({
       medicationId,

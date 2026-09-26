@@ -1,7 +1,12 @@
 import { DEFAULT_MEDICATION_UNIT } from '../constants/medicationDefaults';
 import type { Medication } from '../types';
 import { pluralizeArabic } from '../lib/arabicPlural';
-import { DEFAULT_LIQUID_PACK_SIZE, DEFAULT_SOLID_PACK_SIZE, DAYS_PER_MONTH } from './time';
+import {
+  DEFAULT_BAG_PACK_SIZE,
+  DEFAULT_LIQUID_PACK_SIZE,
+  DEFAULT_SOLID_PACK_SIZE,
+  DAYS_PER_MONTH,
+} from './time';
 import { dailyScheduleAmount } from './dateCalculations';
 
 export function isSolidUnit(unit: string): boolean {
@@ -68,6 +73,30 @@ export function describeStockInStrips(
   return null;
 }
 
+export interface EffectivePackageSizeInput {
+  unit: string;
+  packageSize?: number;
+  stripsPerBox?: number;
+  pillsPerStrip?: number;
+}
+
+/** Resolve the canonical effective package size for packaging calculations. */
+export function getEffectivePackageSize({
+  unit,
+  packageSize,
+  stripsPerBox,
+  pillsPerStrip,
+}: EffectivePackageSizeInput): number {
+  const solid = isSolidUnit(unit);
+  if (solid && stripsPerBox && pillsPerStrip && stripsPerBox > 0 && pillsPerStrip > 0) {
+    return stripsPerBox * pillsPerStrip;
+  }
+  if (packageSize && packageSize > 0) return packageSize;
+  if (unit === 'مل') return DEFAULT_LIQUID_PACK_SIZE;
+  if (unit === 'كيس') return DEFAULT_BAG_PACK_SIZE;
+  return DEFAULT_SOLID_PACK_SIZE;
+}
+
 export function describeOrderInBoxes(
   targetPills: number,
   stripsPerBox?: number,
@@ -77,14 +106,7 @@ export function describeOrderInBoxes(
 ): string {
   const solid = isSolidUnit(unit);
   const boxWordLabel = unit === 'مل' ? 'عبوة' : 'علبة';
-  const boxSize =
-    solid && stripsPerBox && pillsPerStrip && stripsPerBox > 0 && pillsPerStrip > 0
-      ? stripsPerBox * pillsPerStrip
-      : packageSize && packageSize > 0
-        ? packageSize
-        : unit === 'مل'
-          ? 100
-          : 30;
+  const boxSize = getEffectivePackageSize({ unit, packageSize, stripsPerBox, pillsPerStrip });
   const stripSize = solid && pillsPerStrip && pillsPerStrip > 0 ? pillsPerStrip : null;
   const boxes = Math.floor(targetPills / boxSize);
   const remainder = targetPills % boxSize;
@@ -131,14 +153,7 @@ export function getMedSizes(med: Medication): MedSizes {
   const pillsPerStrip = med.pillsPerStrip;
   const hasStrips =
     solid && Boolean(stripsPerBox && pillsPerStrip && stripsPerBox > 0 && pillsPerStrip > 0);
-  const boxSize =
-    hasStrips && stripsPerBox && pillsPerStrip
-      ? stripsPerBox * pillsPerStrip
-      : med.packageSize && med.packageSize > 0
-        ? med.packageSize
-        : med.unit === 'مل'
-          ? DEFAULT_LIQUID_PACK_SIZE
-          : DEFAULT_SOLID_PACK_SIZE;
+  const boxSize = getEffectivePackageSize({ unit: med.unit, packageSize: med.packageSize, stripsPerBox, pillsPerStrip });
   const stripSize = hasStrips && pillsPerStrip && pillsPerStrip > 0 ? pillsPerStrip : 0;
 
   return { boxSize, stripSize, hasStrips, isSolid: solid };
@@ -167,8 +182,9 @@ export function formatScheduledDoseBreakdown(med: Medication, isDaily: boolean):
     }
 
     if (med.packageSize && med.packageSize > 0) {
-      const boxes = Math.floor(total / med.packageSize);
-      const remainder = normalizeDisplayQuantity(total % med.packageSize);
+      const size = getEffectivePackageSize({ unit, packageSize: med.packageSize });
+      const boxes = Math.floor(total / size);
+      const remainder = normalizeDisplayQuantity(total % size);
       const parts: string[] = [];
       if (boxes > 0) parts.push(pluralizeArabic(boxes, 'علبة'));
       if (remainder > 0) parts.push(formatUnitQuantity(remainder, unit));
@@ -179,7 +195,7 @@ export function formatScheduledDoseBreakdown(med: Medication, isDaily: boolean):
   }
 
   if (unit === 'كيس') {
-    const size = med.packageSize && med.packageSize > 0 ? med.packageSize : 10;
+    const size = getEffectivePackageSize({ unit, packageSize: med.packageSize });
     const boxes = Math.floor(total / size);
     const remainder = normalizeDisplayQuantity(total % size);
     const parts: string[] = [];
@@ -189,7 +205,7 @@ export function formatScheduledDoseBreakdown(med: Medication, isDaily: boolean):
   }
 
   if (unit === 'جرعة') {
-    const size = med.packageSize && med.packageSize > 0 ? med.packageSize : 30;
+    const size = getEffectivePackageSize({ unit, packageSize: med.packageSize });
     const boxes = Math.floor(total / size);
     const remainder = normalizeDisplayQuantity(total % size);
     const parts: string[] = [];
@@ -199,7 +215,7 @@ export function formatScheduledDoseBreakdown(med: Medication, isDaily: boolean):
   }
 
   if (unit === 'مل') {
-    const size = med.packageSize && med.packageSize > 0 ? med.packageSize : DEFAULT_LIQUID_PACK_SIZE;
+    const size = getEffectivePackageSize({ unit, packageSize: med.packageSize });
     const bottles = Math.floor(total / size);
     const remainder = normalizeDisplayQuantity(total % size);
     const parts: string[] = [];
@@ -209,8 +225,9 @@ export function formatScheduledDoseBreakdown(med: Medication, isDaily: boolean):
   }
 
   if (med.packageSize && med.packageSize > 0) {
-    const boxes = Math.floor(total / med.packageSize);
-    const remainder = normalizeDisplayQuantity(total % med.packageSize);
+    const size = getEffectivePackageSize({ unit, packageSize: med.packageSize });
+    const boxes = Math.floor(total / size);
+    const remainder = normalizeDisplayQuantity(total % size);
     const parts: string[] = [];
     if (boxes > 0) parts.push(pluralizeArabic(boxes, 'علبة'));
     if (remainder > 0) parts.push(formatUnitQuantity(remainder, unit));

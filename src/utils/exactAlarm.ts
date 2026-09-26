@@ -1,4 +1,5 @@
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { registerPlugin } from '@capacitor/core';
+import { isAndroidPlatform } from './platform';
 import {
   nativeFailureErrorCode, toNativeBoundaryError, type NativeErrorCode } from './nativeErrors';
 
@@ -25,21 +26,13 @@ export type ExactAlarmPermission =
   | 'denied'
   | 'unsupported';
 
-function isAndroid(): boolean {
-  try {
-    return typeof Capacitor !== 'undefined' && Capacitor.getPlatform() === 'android';
-  } catch {
-    return false;
-  }
-}
-
 /**
  * The single source of truth for the application's exact-alarm capability.
  * Feature schedulers must consume this status instead of performing their
  * own Android exact-alarm checks.
  */
 export async function getExactAlarmPermission(): Promise<ExactAlarmPermission> {
-  if (!isAndroid()) return 'unsupported';
+  if (!isAndroidPlatform()) return 'unsupported';
   try {
     const result = await ExactAlarmRuntime.canScheduleExactAlarms();
     return result?.granted === true ? 'granted' : 'denied';
@@ -59,7 +52,7 @@ export interface ExactAlarmSettingsResult {
 }
 
 export async function openExactAlarmSettings(): Promise<ExactAlarmSettingsResult> {
-  if (!isAndroid()) {
+  if (!isAndroidPlatform()) {
     return { ok: false, error: 'not_android', errorCode: 'not_android' };
   }
   try {

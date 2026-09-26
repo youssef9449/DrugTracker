@@ -296,6 +296,9 @@ describe('hydration record validation', () => {
       isValidMedicationRecord({ ...medication, currentPills: '20' })
     ).toBe(false);
     expect(
+      isValidMedicationRecord({ ...medication, currentPills: -1 })
+    ).toBe(false);
+    expect(
       isValidMedicationRecord({
         ...medication,
         doseSchedule: [{ ...medication.doseSchedule[0], amount: 0 }],

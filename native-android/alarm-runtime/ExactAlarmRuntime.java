@@ -282,9 +282,10 @@ public final class ExactAlarmRuntime {
             try {
                 JSONObject metadata = new JSONObject(raw);
                 metadata.put("deliveryState", "accepted");
-                return store.writeScheduleRawLocked(
+                boolean written = store.writeScheduleRawLocked(
                         storageKey,
                         metadata.toString());
+                return written;
             } catch (JSONException | RuntimeException e) {
                 return false;
             }

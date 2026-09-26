@@ -115,7 +115,7 @@ export async function applyForegroundAutoStockDeltas(
   if (!isNativeAndroid()) {
     return { ok: true, alreadyApplied: false, stocks: [] };
   }
-  if (!(mutationSeq > 0)) {
+  if (!Number.isSafeInteger(mutationSeq) || mutationSeq <= 0) {
     return {
       ok: false,
       alreadyApplied: false,
@@ -159,7 +159,9 @@ export async function applyForegroundAutoStockDeltas(
       };
     }
     const result = await AutoDeduction.applyForegroundStockDeltas({
-      mutationSeq,
+      // Send the sequence as text so the Capacitor JSON bridge cannot coerce it
+      // into a non-integral/unsupported numeric representation.
+      mutationSeq: String(mutationSeq),
       deltas: cleanDeltas,
       occurrenceResolutions: occurrenceResolutions.map((resolution) => ({
         medicationId: resolution.medicationId.trim(),

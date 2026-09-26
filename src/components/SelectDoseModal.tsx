@@ -1,3 +1,4 @@
+import { DEFAULT_MEDICATION_UNIT } from '../constants/medicationDefaults';
 import type { FC } from 'react';
 import { Check, Pill, RotateCcw, X } from 'lucide-react';
 import type { ConsumptionLog, Medication, MedicationDose } from '../types';
@@ -63,7 +64,7 @@ export const SelectDoseModal: FC<SelectDoseModalProps> = ({
   const items = sortDoseSelectItems(
     schedule.map((dose) => ({ dose, eventDate: today }))
   );
-  const unit = medication.unit || 'قرص';
+  const unit = medication.unit || DEFAULT_MEDICATION_UNIT;
   const isManage = mode === 'manage';
   const isRestore = mode === 'restore';
   const title =

@@ -454,11 +454,6 @@ public final class AutoDeductionScheduler {
                         storageKey,
                         expectedOperationVersion);
     }
-    boolean removeSchedule(String storageKey) {
-        return storageKey != null
-                && !storageKey.isEmpty()
-                && schedulingAdapter.removeSchedule(storageKey);
-    }
     boolean hasCancellationTombstoneStored(String occurrenceKey) {
         return occurrenceKey != null
                 && !occurrenceKey.isEmpty()

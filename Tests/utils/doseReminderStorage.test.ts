@@ -45,3 +45,22 @@ describe('doseReminderStorage dose-scoped snooze', () => {
   });
 });
 
+
+
+describe('dose-scoped snooze failure handling', () => {
+  it('fails closed when persisted snooze JSON is malformed', () => {
+    localStorage.setItem(SNOOZE_KEY, '{broken');
+    expect(isSnoozeActive('m1', 'd1')).toBe(true);
+  });
+
+  it('fails closed when persisted snooze storage cannot be read', () => {
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('read failed');
+    });
+    try {
+      expect(isSnoozeActive('m1', 'd1')).toBe(true);
+    } finally {
+      getItem.mockRestore();
+    }
+  });
+});

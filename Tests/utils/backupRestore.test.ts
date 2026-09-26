@@ -175,6 +175,18 @@ describe('backupRestore utility', () => {
     expect(result.error).toContain('الأدوية');
   });
 
+  it('rejects duplicate normalized medication names in a canonical backup', () => {
+    const duplicateNames = [
+      mockMeds[0],
+      { ...mockMeds[1], id: 'med-3', name: '  panadol   extra  ' },
+    ];
+    const backup = createBackupPayload('medications', duplicateNames, [], undefined);
+    const result = parseAndValidateBackupFile(JSON.stringify(backup));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('أسماء أدوية مكررة');
+  });
+
   it('rejects duplicate medication IDs in a canonical backup', () => {
     const duplicateMeds = [mockMeds[0], { ...mockMeds[1], id: mockMeds[0].id }];
     const backup = createBackupPayload('medications', duplicateMeds, [], undefined);

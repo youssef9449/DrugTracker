@@ -106,8 +106,14 @@ export async function restoreInvalidatedDoseReminders(med: Medication): Promise<
           ...(treatmentEndDate ? { treatmentEndDate } : {}),
         }
       );
-      const snoozeUntil = getSnoozeUntil(med.id, slot.doseId);
-      if (snoozeUntil != null && snoozeUntil > Date.now() && isSnoozeActive(med.id, slot.doseId)) {
+      const snoozeUntilOutcome = getSnoozeUntil(med.id, slot.doseId);
+      const snoozeUntil =
+        snoozeUntilOutcome.status === 'ok' ? snoozeUntilOutcome.value : null;
+      if (
+        snoozeUntil != null &&
+        snoozeUntil > Date.now() &&
+        isSnoozeActive(med.id, slot.doseId)
+      ) {
         const remainingMinutes = Math.max(0.001, (snoozeUntil - Date.now()) / 60_000);
         await scheduleSnoozedDoseReminder(
           med.id, med.name, slot.amount, slot.unit, slot.time, remainingMinutes,

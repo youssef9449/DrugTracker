@@ -1,3 +1,4 @@
+import { DEFAULT_MEDICATION_UNIT } from '../constants/medicationDefaults';
 import type { FC } from 'react';
 import { Bell, Check, Clock, X } from 'lucide-react';
 import type { Medication } from '../types';
@@ -32,7 +33,7 @@ export const DoseAlarmModal: FC<DoseAlarmModalProps> = ({
   // Explicit schedule row only — no reminderTime/dailyDose synthetic fallback.
   const displayTime = dose?.time;
   const displayAmount = dose != null ? Number(dose.amount) : undefined;
-  const unit = medication?.unit ?? 'قرص';
+  const unit = medication?.unit ?? DEFAULT_MEDICATION_UNIT;
   const canInteract = Boolean(medication && dose && normalizedDoseId);
 
   return (

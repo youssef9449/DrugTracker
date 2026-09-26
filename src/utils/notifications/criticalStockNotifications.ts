@@ -1,3 +1,4 @@
+import { DEFAULT_MEDICATION_UNIT } from '../../constants/medicationDefaults';
 import { scheduleNotification } from '../notificationRuntime';
 
 export async function sendCriticalStockAlert(
@@ -5,7 +6,7 @@ export async function sendCriticalStockAlert(
   medicineName: string,
   daysLeft: number,
   currentPills: number,
-  unit: string = 'قرص'
+  unit: string = DEFAULT_MEDICATION_UNIT
 ): Promise<boolean> {
   // Title reflects the actual situation: out of stock, or critical
   // with N days left (the critical threshold IS the user-configured

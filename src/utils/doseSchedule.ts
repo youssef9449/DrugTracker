@@ -17,6 +17,7 @@ import {
   normalizeDoseId,
   normalizeDoseDescription,
   normalizeDoseTimeValue,
+  validateMedicationDose,
 } from './doseIdentity';
 import { isDoseConsumedOnDate, isDoseSkippedOnDate, getTodayDateString } from './dateCalculations';
 /**
@@ -83,8 +84,8 @@ export function totalDailyAmount(schedule: MedicationDose[]): number {
  * Map a medication to a UI-ready schedule from explicit `doseSchedule` only.
  *
  * No synthetic rows from dailyDose or any medication-level time field. Empty/missing schedule → [].
- * Existing ids/amounts/times are preserved (ids still generated only when a
- * stored row is missing id — not a whole-schedule invention).
+ * Existing valid ids/amounts/times are preserved. Rows without a valid
+ * persisted id are excluded rather than assigned a new identity during a read.
  */
 export function getDoseScheduleForUI(
   med: Pick<Medication, 'doseSchedule'>
@@ -94,15 +95,11 @@ export function getDoseScheduleForUI(
   }
   return sortDoseSchedule(
     med.doseSchedule
-      .filter((d) => d && isValidDoseTime(normalizeTimeString(d.time)) && Number(d.amount) > 0)
-      .map((d) => ({
-        id: normalizeDoseId(d.id) || generateId('dose'),
-        amount: Number(d.amount),
-        time: normalizeTimeString(d.time),
-        ...(normalizeDoseDescription(d.description) !== undefined
-          ? { description: normalizeDoseDescription(d.description) }
-          : {}),
-      }))
+      .map((d) => {
+        const result = validateMedicationDose(d);
+        return result.ok ? result.dose : null;
+      })
+      .filter((d): d is MedicationDose => d !== null)
   );
 }
 /**

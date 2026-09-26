@@ -485,18 +485,6 @@ public final class AutoDeductionScheduler {
         }
     }
     /**
-     * Unconditional remove — intentional cancel / malformed restore cleanup.
-     * Caller must hold SCHEDULE_LOCK, or use the public cancel path.
-     */
-    void removeScheduleMetadataLocked(String storageKey) {
-        removeSchedule(storageKey);
-    }
-    void removeScheduleMetadata(String prefKey) {
-        synchronized (AutoDeductionScheduler.ScheduleOperationLock.class) {
-            removeScheduleMetadataLocked(prefKey);
-        }
-    }
-    /**
      * Cancel using the same Intent identity as schedule (action + data URI).
      * Under SCHEDULE_LOCK:
      *   1. Durable cancellation tombstone (survives process death)

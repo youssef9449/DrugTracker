@@ -1,3 +1,4 @@
+import { DEFAULT_MEDICATION_UNIT } from '../constants/medicationDefaults';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Medication } from '../types';
 import { getTodayDateString, isDoseConsumedOnDate } from '../utils/dateCalculations';
@@ -203,7 +204,7 @@ export function useDoseReminders({
           medication.id,
           medication.name,
           amount,
-          medication.unit || 'قرص',
+          medication.unit || DEFAULT_MEDICATION_UNIT,
           time,
           minutes,
           doseId,

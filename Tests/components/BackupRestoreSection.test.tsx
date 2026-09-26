@@ -178,6 +178,53 @@ describe('BackupRestoreSection Component', () => {
     });
   });
 
+  it('supports pharmacy-only restore without restoring medications or logs', async () => {
+    const onConfirmRestore = vi.fn().mockResolvedValue(true);
+    const onClose = vi.fn();
+
+    render(
+      <RestoreBackupModal
+        isOpen={true}
+        onClose={onClose}
+        backupData={backupData}
+        currentMedicationsCount={3}
+        onConfirmRestore={onConfirmRestore}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'استعادة الأدوية والمواعيد',
+      })
+    );
+    expect(
+      screen.getByRole('checkbox', {
+        name: 'استعادة سجلات الاستهلاك السابقة',
+      })
+    ).toBeDisabled();
+
+    const confirmBtn = screen.getByRole('button', {
+      name: 'تأكيد استعادة البيانات',
+    });
+    expect(confirmBtn).toBeEnabled();
+
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(onConfirmRestore).toHaveBeenCalledWith(
+        expect.objectContaining({
+          backupMedications: [],
+          backupLogs: undefined,
+          restoreLogs: false,
+          mode: 'replace',
+          pharmacySettings: mockPharmacySettings,
+          restorePharmacySettings: true,
+        })
+      );
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('keeps the modal open when restore fails', async () => {
     const onConfirmRestore = vi.fn().mockResolvedValue(false);
     const onClose = vi.fn();

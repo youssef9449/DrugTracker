@@ -24,6 +24,7 @@ export interface BackupRestoreSectionProps {
   onRestore: (opts: {
     backupMedications: Medication[];
     backupLogs?: ConsumptionLog[] | undefined;
+    restoreLogs: boolean;
     mode: 'replace' | 'merge';
     pharmacySettings?: PharmacySettings | undefined;
     onApplyPharmacySettings?: ((settings: PharmacySettings) => void) | undefined;
@@ -50,6 +51,7 @@ export const BackupRestoreSection: FC<BackupRestoreSectionProps> = ({
   const handleExportBackup = () => {
     if (medications.length === 0) {
       showToast?.('لا توجد أدوية حالياً لحفظها في النسخة الاحتياطية.');
+      return;
     }
     const backup = createBackupPayload(exportScope, medications, logs, pharmacySettings);
     const result = downloadBackupFile(backup);
@@ -100,13 +102,15 @@ export const BackupRestoreSection: FC<BackupRestoreSectionProps> = ({
   const handleConfirmRestore = async (opts: {
     backupMedications: Medication[];
     backupLogs?: ConsumptionLog[] | undefined;
+    restoreLogs: boolean;
     mode: 'replace' | 'merge';
     pharmacySettings?: PharmacySettings | undefined;
     restorePharmacySettings: boolean;
-  }) => {
-    await onRestore({
+  }): Promise<boolean> => {
+    return onRestore({
       backupMedications: opts.backupMedications,
       backupLogs: opts.backupLogs,
+      restoreLogs: opts.restoreLogs,
       mode: opts.mode,
       pharmacySettings: opts.restorePharmacySettings ? opts.pharmacySettings : undefined,
       onApplyPharmacySettings: onSavePharmacySettings,

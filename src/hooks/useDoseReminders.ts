@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Medication } from '../types';
 import { getTodayDateString, isDoseConsumedOnDate } from '../utils/dateCalculations';
 import { stopAllSounds } from '../utils/sound';
-import { loadValidatedJson, saveJson, type JsonParserVerdict } from '../utils/storage';
+import { readJsonOutcome, saveJson, type JsonParserVerdict } from '../utils/storage';
 import { DEFAULT_SNOOZE_MINUTES, MS_PER_MINUTE } from '../utils/time';
 import { validateMedicationDose, normalizeDoseId } from '../utils/doseIdentity';
 import { scheduleSnoozedDoseReminder, cancelSnoozedDoseReminder } from '../utils/notifications/doseReminderNotifications';
@@ -33,6 +33,14 @@ function parseFiredMap(raw: unknown): JsonParserVerdict<Record<string, boolean>>
   return { ok: true, value: map };
 }
 /** Fired-dedup key: medicationId + doseId + calendarDate. */
+function readFiredMap(): Record<string, boolean> | null {
+  const outcome = readJsonOutcome(FIRED_KEY, parseFiredMap);
+  if (outcome.status === 'ok') return outcome.value;
+  if (outcome.status === 'missing') return {};
+  // FIRED is an idempotency authority: corruption or unreadable storage
+  // must never be interpreted as an empty map.
+  return null;
+}
 function firedKey(medId: string, dateStr: string, doseId: string) {
   return `${medId}:${doseId}:${dateStr}`;
 }
@@ -76,15 +84,20 @@ export function useDoseReminders({
   }, [medications]);
   const dequeueNextValidAlarm = useCallback((): { medicationId: string; doseId: string } | null => {
     const today = getTodayDateString();
-    const fired = loadValidatedJson(FIRED_KEY, parseFiredMap, {});
+    const fired = readFiredMap();
+    if (fired === null) return null;
     while (queuedAlarmRef.current.length > 0) {
-      const next = queuedAlarmRef.current.shift()!;
+      const next = queuedAlarmRef.current[0];
       const med = medicationsRef.current.find((m) => m.id === next.medicationId);
       if (!med || !findDoseRow(med, next.doseId)) continue;
       if (isDoseConsumedOnDate(med, next.doseId, today)) continue;
       if (fired[firedKey(next.medicationId, today, next.doseId)]) continue;
       if (isSnoozeActive(next.medicationId, next.doseId)) continue;
-      if (allowManualTakeActionByMedicationId.get(next.medicationId) === false) continue;
+      if (allowManualTakeActionByMedicationId.get(next.medicationId) === false) {
+        queuedAlarmRef.current.shift();
+        continue;
+      }
+      queuedAlarmRef.current.shift();
       return next;
     }
     return null;
@@ -94,7 +107,8 @@ export function useDoseReminders({
     const current = alarmingIdRef.current;
     const doseId = alarmingDoseIdRef.current;
     if (current && doseId && !isTestAlarmRef.current) {
-      const fired = loadValidatedJson(FIRED_KEY, parseFiredMap, {});
+      const fired = readFiredMap();
+      if (fired === null) return false;
       const today = getTodayDateString();
       fired[firedKey(current, today, doseId)] = true;
       const persisted = saveJson(FIRED_KEY, fired);
@@ -253,7 +267,8 @@ export function useDoseReminders({
       }
       return;
     }
-    const fired = loadValidatedJson(FIRED_KEY, parseFiredMap, {});
+    const fired = readFiredMap();
+    if (fired === null) return;
     if (fired[firedKey(med.id, today, id)]) return;
     if (isSnoozeActive(med.id, id)) return;
     isTestAlarmRef.current = false;

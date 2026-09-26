@@ -13,10 +13,10 @@ export interface DoseReminderSlot {
 
 /** Stable application identity for one explicit dose reminder slot. */
 export function doseScheduleKey(medId: string, doseId: string): string {
-  // Canonical identity normalization: whitespace variants of the same
-  // logical dose share one key. Callers pass validated slot ids; the
-  // fallback keeps the legacy shape for defensively-called blank ids.
-  const canonicalDoseId = normalizeDoseId(doseId) ?? doseId;
+  const canonicalDoseId = normalizeDoseId(doseId);
+  if (canonicalDoseId === null) {
+    throw new Error('invalid_dose_id');
+  }
   return `${medId}::${canonicalDoseId}`;
 }
 

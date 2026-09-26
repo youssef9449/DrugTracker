@@ -29,7 +29,7 @@ export interface BackupRestoreSectionProps {
     pharmacySettings?: PharmacySettings | undefined;
     onApplyPharmacySettings?: ((settings: PharmacySettings) => void) | undefined;
   }) => Promise<boolean> | boolean;
-  onSavePharmacySettings?: ((settings: PharmacySettings) => void) | undefined;
+  onSavePharmacySettings?: ((settings: PharmacySettings) => Promise<boolean> | boolean) | undefined;
   soundEnabled: boolean;
   showToast?: ((message: string) => void) | undefined;
 }

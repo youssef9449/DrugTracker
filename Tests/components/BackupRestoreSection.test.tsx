@@ -51,6 +51,27 @@ const mockPharmacySettings: PharmacySettings = {
   selectedWhatsappAddressIds: ['a-1'],
 };
 
+const backupData: ParsedBackupData = {
+  scope: 'all',
+  exportedAt: '2026-09-26T12:00:00.000Z',
+  medications: [
+    {
+      id: 'med-backup-1',
+      name: 'Omega 3 Fish Oil',
+      currentPills: 30,
+      dailyDose: 1,
+      unit: 'كبسولة',
+      warningThresholdDays: 5,
+      colorTag: 'teal',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+  ],
+  logs: mockLogs,
+  pharmacySettings: mockPharmacySettings,
+  rawCount: 1,
+  validCount: 1,
+};
+
 describe('BackupRestoreSection Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -85,40 +106,32 @@ describe('BackupRestoreSection Component', () => {
       />
     );
 
-    // Default is all data
     expect(screen.getByText(/حفظ نسخة \(كل البيانات\)/)).toBeInTheDocument();
-
-    // Click medications only
-    const medsOnlyBtn = screen.getByRole('button', { name: /الأدوية فقط/ });
-    fireEvent.click(medsOnlyBtn);
-
+    fireEvent.click(screen.getByRole('button', { name: /الأدوية فقط/ }));
     expect(screen.getByText(/حفظ نسخة \(الأدوية\)/)).toBeInTheDocument();
   });
 
-  it('handles restore confirmation and checkbox toggles including medications in RestoreBackupModal', async () => {
-    const onConfirmRestore = vi.fn();
-    const onClose = vi.fn();
+  it('requires at least one applicable restore selection', () => {
+    render(
+      <RestoreBackupModal
+        isOpen={true}
+        onClose={vi.fn()}
+        backupData={backupData}
+        currentMedicationsCount={1}
+        onConfirmRestore={vi.fn()}
+      />
+    );
 
-    const backupData: ParsedBackupData = {
-      scope: 'all',
-      exportedAt: '2026-09-26T12:00:00.000Z',
-      medications: [
-        {
-          id: 'med-backup-1',
-          name: 'Omega 3 Fish Oil',
-          currentPills: 30,
-          dailyDose: 1,
-          unit: 'كبسولة',
-          warningThresholdDays: 5,
-          colorTag: 'teal',
-          createdAt: '2026-01-01T00:00:00.000Z',
-        },
-      ],
-      logs: mockLogs,
-      pharmacySettings: mockPharmacySettings,
-      rawCount: 1,
-      validCount: 1,
-    };
+    fireEvent.click(screen.getByRole('checkbox', { name: 'استعادة الأدوية والمواعيد' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'استعادة سجلات الاستهلاك السابقة' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'استعادة بيانات الصيدليات وأرقام الهاتف والعناوين' }));
+
+    expect(screen.getByRole('button', { name: 'تأكيد استعادة البيانات' })).toBeDisabled();
+  });
+
+  it('allows logs independently in merge mode and maps the selected restore payload', async () => {
+    const onConfirmRestore = vi.fn().mockResolvedValue(true);
+    const onClose = vi.fn();
 
     render(
       <RestoreBackupModal
@@ -130,51 +143,107 @@ describe('BackupRestoreSection Component', () => {
       />
     );
 
-    expect(screen.getByText('استعادة النسخة الاحتياطية')).toBeInTheDocument();
-    expect(screen.getByText('Omega 3 Fish Oil')).toBeInTheDocument();
-    expect(screen.getAllByText(/صيدلية/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/أرقام هاتف/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/عناوين/).length).toBeGreaterThan(0);
-
-    // Verify all 3 checkboxes exist with proper accessible labels
     const medsCheckbox = screen.getByRole('checkbox', {
       name: 'استعادة الأدوية والمواعيد',
     }) as HTMLInputElement;
     const logsCheckbox = screen.getByRole('checkbox', {
       name: 'استعادة سجلات الاستهلاك السابقة',
     }) as HTMLInputElement;
+
+    fireEvent.click(screen.getByText('دمج مع البيانات الحالية'));
+    fireEvent.click(medsCheckbox);
+    expect(medsCheckbox.checked).toBe(false);
+    expect(logsCheckbox.disabled).toBe(false);
+    expect(logsCheckbox.checked).toBe(true);
+
     const pharmacyCheckbox = screen.getByRole('checkbox', {
       name: 'استعادة بيانات الصيدليات وأرقام الهاتف والعناوين',
     }) as HTMLInputElement;
+    fireEvent.click(pharmacyCheckbox);
 
-    expect(medsCheckbox.checked).toBe(true);
-    expect(logsCheckbox.checked).toBe(true);
-    expect(pharmacyCheckbox.checked).toBe(true);
-
-    // Toggle medications off
-    fireEvent.click(medsCheckbox);
-    expect(medsCheckbox.checked).toBe(false);
-
-    // Medications preview should hide when unselected
-    expect(screen.queryByText(/معاينة الأدوية التي ستستعاد/)).not.toBeInTheDocument();
-
-    // Toggle logs off
-    fireEvent.click(logsCheckbox);
-    expect(logsCheckbox.checked).toBe(false);
-
-    // Confirm restore (only pharmacy settings remain selected)
     const confirmBtn = screen.getByRole('button', { name: 'تأكيد استعادة البيانات' });
     fireEvent.click(confirmBtn);
 
     await waitFor(() => {
       expect(onConfirmRestore).toHaveBeenCalledWith(
         expect.objectContaining({
-          backupMedications: [], // unselected
-          backupLogs: undefined, // unselected
+          backupMedications: [],
+          backupLogs: mockLogs,
+          restoreLogs: true,
+          mode: 'merge',
+          restorePharmacySettings: false,
+        })
+      );
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('supports pharmacy-only restore without restoring medications or logs', async () => {
+    const onConfirmRestore = vi.fn().mockResolvedValue(true);
+    const onClose = vi.fn();
+
+    render(
+      <RestoreBackupModal
+        isOpen={true}
+        onClose={onClose}
+        backupData={backupData}
+        currentMedicationsCount={3}
+        onConfirmRestore={onConfirmRestore}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'استعادة الأدوية والمواعيد',
+      })
+    );
+    expect(
+      screen.getByRole('checkbox', {
+        name: 'استعادة سجلات الاستهلاك السابقة',
+      })
+    ).toBeDisabled();
+
+    const confirmBtn = screen.getByRole('button', {
+      name: 'تأكيد استعادة البيانات',
+    });
+    expect(confirmBtn).toBeEnabled();
+
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(onConfirmRestore).toHaveBeenCalledWith(
+        expect.objectContaining({
+          backupMedications: [],
+          backupLogs: undefined,
+          restoreLogs: false,
           mode: 'replace',
+          pharmacySettings: mockPharmacySettings,
           restorePharmacySettings: true,
         })
       );
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('keeps the modal open when restore fails', async () => {
+    const onConfirmRestore = vi.fn().mockResolvedValue(false);
+    const onClose = vi.fn();
+
+    render(
+      <RestoreBackupModal
+        isOpen={true}
+        onClose={onClose}
+        backupData={backupData}
+        currentMedicationsCount={0}
+        onConfirmRestore={onConfirmRestore}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'تأكيد استعادة البيانات' }));
+
+    await waitFor(() => {
+      expect(onConfirmRestore).toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
     });
   });
 });

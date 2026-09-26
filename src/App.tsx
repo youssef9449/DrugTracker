@@ -87,6 +87,7 @@ export default function App() {
     handleSendTestNotification,
     handleOpenExactAlarmSettings,
     handleRestoreBackup,
+    handleApplyRestoredPharmacySettings,
   } = useAppRuntime({
     state: runtimeState,
     ui: { selectDoseMode, settingsModalMode },
@@ -284,6 +285,7 @@ export default function App() {
         showToast={showToast}
         onApplyAppPreferences={handleApplyAppPreferences}
         onRestoreBackup={handleRestoreBackup}
+        onApplyRestoredPharmacySettings={handleApplyRestoredPharmacySettings}
       />
       <DoseAlarmModal
         isOpen={Boolean(alarmingMedication) && Boolean(alarmingDoseId)}

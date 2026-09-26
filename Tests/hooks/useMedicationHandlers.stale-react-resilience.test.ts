@@ -42,6 +42,16 @@ function med(over: Partial<Medication> = {}): Medication {
     ...over,
   };
 }
+const pharmacySettings = {
+  defaultDurationDays: 30 as const,
+  pharmacies: [],
+  selectedPharmacyId: '',
+  whatsappContacts: [],
+  whatsappAddresses: [],
+  selectedWhatsappContactIds: [],
+  selectedWhatsappAddressIds: [],
+};
+
 
 describe('useMedicationHandlers — stale React must not block durable mutations', () => {
   let durable: AutoStockDurableState;
@@ -118,6 +128,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
         useMedicationHandlers({
           medications,
           logs,
+          pharmacySettings,
           soundEnabled: false,
           globalAutoDeductEnabled: true,
           notificationsEnabled: false,
@@ -609,6 +620,7 @@ describe('useMedicationHandlers — stale React must not block durable mutations
         useMedicationHandlers({
           medications,
           logs,
+          pharmacySettings,
           soundEnabled: false,
           globalAutoDeductEnabled: true,
           notificationsEnabled: false,

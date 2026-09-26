@@ -1,6 +1,8 @@
 import type { Dispatch, SetStateAction } from 'react';
 import type { PharmacySettings, Pharmacy, UserContact, UserAddress } from '../types';
 import { playSuccessChime } from '../utils/sound';
+import { persist } from '../utils/storage';
+import { STORAGE_PHARMACY_KEY } from '../constants/storageKeys';
 
 /**
  * Pharmacy and user contact/address CRUD handlers from App.tsx.
@@ -14,6 +16,15 @@ export function usePharmacyUserHandlers(opts: {
   showToast: (message: string) => void;
 }) {
   const { soundEnabled, settingsModalMode, pharmacySettings, setPharmacySettings, showToast } = opts;
+
+  const handleApplyRestoredPharmacySettings = async (
+    newSettings: PharmacySettings
+  ): Promise<boolean> => {
+    const err = persist(STORAGE_PHARMACY_KEY, newSettings);
+    if (err) return false;
+    setPharmacySettings(newSettings);
+    return true;
+  };
 
   const handleSavePharmacySettings = (newSettings: PharmacySettings) => {
     setPharmacySettings(newSettings);
@@ -105,6 +116,7 @@ export function usePharmacyUserHandlers(opts: {
 
   return {
     handleSavePharmacySettings,
+    handleApplyRestoredPharmacySettings,
     handleSavePharmacy,
     handleDeletePharmacy,
     handleSaveUserContact,

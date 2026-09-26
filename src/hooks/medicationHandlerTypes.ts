@@ -1,9 +1,10 @@
 import type { Dispatch, SetStateAction } from 'react';
-import type { Medication, ConsumptionLog } from '../types';
+import type { Medication, ConsumptionLog, PharmacySettings } from '../types';
 
 export interface MedicationHandlersDeps {
   medications: Medication[];
   logs: ConsumptionLog[];
+  pharmacySettings: PharmacySettings;
   soundEnabled: boolean;
   globalAutoDeductEnabled: boolean;
   notificationsEnabled: boolean;

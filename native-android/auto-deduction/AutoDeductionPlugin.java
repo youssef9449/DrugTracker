@@ -156,7 +156,8 @@ public class AutoDeductionPlugin extends Plugin {
         String calendarDate = call.getString("calendarDate");
         Double amountObj = call.getDouble("amount");
         Long scheduledAtObj = call.getLong("scheduledAtEpochMs");
-        Long generationObj = call.getLong("expectedRecurrenceGeneration");
+        Object generationRaw = call.getData().opt("expectedRecurrenceGeneration");
+        Long generationObj = (generationRaw instanceof Number) ? ((Number) generationRaw).longValue() : null;
         String treatmentEndDate = call.getString("treatmentEndDate", "");
         String timeHhmm = call.getString("timeHhmm", "");
         double amount = amountObj != null ? amountObj : Double.NaN;
@@ -437,8 +438,8 @@ public class AutoDeductionPlugin extends Plugin {
      */
     @PluginMethod
     public void applyForegroundStockDeltas(PluginCall call) {
-        Long mutationSeqObj = call.getLong("mutationSeq");
-        long mutationSeq = mutationSeqObj != null ? mutationSeqObj : 0L;
+        Object mutationSeqRaw = call.getData().opt("mutationSeq");
+        long mutationSeq = (mutationSeqRaw instanceof Number) ? ((Number) mutationSeqRaw).longValue() : 0L;
         JSArray rawDeltas = call.getArray("deltas");
         JSArray rawResolutions = call.getArray("occurrenceResolutions");
         // #493: applyForegroundDeltas commits deltas + the idempotency

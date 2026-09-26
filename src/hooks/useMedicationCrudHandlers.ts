@@ -23,90 +23,69 @@ export function useMedicationCrudHandlers(deps: MedicationHandlersDeps, state: M
 
   const handleSaveMedication = async (
     medData: Omit<Medication, 'id' | 'createdAt'>,
-    editId?: string
+    editingMedicationId?: string
   ): Promise<boolean> => {
-    const normalizedName = medData.name.trim().replace(/\\s+/g, ' ').toLocaleLowerCase();
-    const hasDuplicateName = medicationsRef.current.some((medication) =>
-      medication.id !== editId &&
-      medication.name.trim().replace(/\\s+/g, ' ').toLocaleLowerCase() === normalizedName
-    );
-    if (hasDuplicateName) {
-      showToast('يوجد دواء بنفس الاسم بالفعل');
+    const isEditing = Boolean(editingMedicationId);
+
+    if (isEditing && editingMedicationId) {
+      const existing = medicationsRef.current.find((m) => m.id === editingMedicationId);
+      if (!existing) {
+        showToast(STORAGE_ERRORS.generic);
+        return false;
+      }
+      const updatedMedication: Medication = {
+        ...existing,
+        ...medData,
+        id: editingMedicationId,
+        createdAt: existing.createdAt,
+      };
+
+      const result = await runGatedMedicationUpdate({
+        medicationId: editingMedicationId,
+        updatedMedication,
+      });
+
+      if (result.outcome === 'applied') {
+        setMedications(result.medications);
+        medicationsRef.current = result.medications;
+        setLogs(result.logs);
+        setEditingMedication(null);
+        if (soundEnabled) playSuccessChime();
+        showToast('تم حفظ التعديلات بنجاح');
+        return true;
+      }
+
+      showToast(STORAGE_ERRORS.generic);
       return false;
     }
 
-    if (editId) {
-      const result = await runGatedMedicationUpdate({
-        editId,
-        medData,
-        globalAutoDeductEnabled: globalAutoDeductEnabledRef.current,
-        // Configuration save; Exact-event reconciliation is an independent
-        // lifecycle task and must not block saving the medication.
-        reconcileExactBeforeMutation: false,
-      });
-      if (result.outcome !== 'applied') {
-        if (result.outcome !== 'persist_failed') {
-          setMedications(result.medications);
-          medicationsRef.current = result.medications;
-          setLogs(result.logs);
-        }
-        showToast(STORAGE_ERRORS.medicationSave(result.reason));
-        return false;
-      }
-      setMedications(result.medications);
-      medicationsRef.current = result.medications;
-      setLogs(result.logs);
-      const firstDoseTime = getDoseScheduleForUI(medData)[0]?.time;
-      showToast(
-        medData.reminderEnabled && firstDoseTime
-          ? 'تم حفظ "' + medData.name + '" مع تذكير يومي الساعة ' + firstDoseTime
-          : 'تم تعديل بيانات "' + medData.name + '" بنجاح'
-      );
-      if (soundEnabled) playSuccessChime();
-      setEditingMedication(null);
-      return true;
-    }
-
-    const newMed: Medication = {
+    const newMedication: Medication = {
       ...medData,
       id: generateId('med'),
       createdAt: new Date().toISOString(),
-      autoDeductEnabled:
-        medData.autoDeductEnabled !== undefined
-          ? medData.autoDeductEnabled
-          : globalAutoDeductEnabledRef.current,
-      criticalStockAlertsEnabled: medData.criticalStockAlertsEnabled !== false,
+      autoDeductEnabled: globalAutoDeductEnabledRef.current,
+      doseSchedule: getDoseScheduleForUI(medData),
     };
-    const firstDoseTime = getDoseScheduleForUI(newMed)[0]?.time;
-    const result = await runGatedAddMedication({
-      medication: newMed,
-      // The add itself applies the signed Native stock delta; do not gate the
-      // save on an unrelated Exact-event reconciliation pass.
-      reconcileExactBeforeMutation: false,
-    });
-    if (result.outcome !== 'applied') {
-      showToast(STORAGE_ERRORS.medicationSave(result.reason));
-      return false;
+
+    const result = await runGatedAddMedication({ newMedication });
+
+    if (result.outcome === 'applied') {
+      setMedications(result.medications);
+      medicationsRef.current = result.medications;
+      setLogs(result.logs);
+      if (soundEnabled) playSuccessChime();
+      showToast('تمت إضافة الدواء بنجاح');
+      return true;
     }
-    setMedications(result.medications);
-    medicationsRef.current = result.medications;
-    setLogs(result.logs);
-    showToast(
-      newMed.reminderEnabled && firstDoseTime
-        ? 'تمت إضافة "' + newMed.name + '" مع تنبيه الساعة ' + firstDoseTime
-        : newMed.autoDeductEnabled
-          ? 'تمت إضافة "' + newMed.name + '"، وستخصم كل جرعة تلقائياً في موعدها'
-          : 'تمت إضافة "' + newMed.name + '" بنجاح'
-    );
-    if (soundEnabled) playSuccessChime();
-    setEditingMedication(null);
-    return true;
+
+    showToast(STORAGE_ERRORS.generic);
+    return false;
   };
 
   const handleDeleteMedication = (id: string) => {
     void (async () => {
       const result = await runGatedDeleteMedication({ medicationId: id });
-      if (result.outcome !== 'persist_failed') {
+      if (result.outcome === 'applied' || result.outcome === 'missing_med') {
         setMedications(result.medications);
         medicationsRef.current = result.medications;
         setLogs(result.logs);
@@ -147,11 +126,16 @@ export function useMedicationCrudHandlers(deps: MedicationHandlersDeps, state: M
     }
 
     if (soundEnabled) playSuccessChime();
-    showToast(
-      opts.mode === 'replace'
-        ? `تمت استعادة ${result.restoredCount} دواء بنجاح (استبدال شامل)`
-        : `تم دمج ${result.restoredCount} دواء مع القائمة الحالية بنجاح`
-    );
+
+    if (result.restoredCount > 0) {
+      showToast(
+        opts.mode === 'replace'
+          ? `تمت استعادة ${result.restoredCount} دواء بنجاح (استبدال شامل)`
+          : `تم دمج ${result.restoredCount} دواء مع القائمة الحالية بنجاح`
+      );
+    } else {
+      showToast('تمت استعادة البيانات المحددة بنجاح');
+    }
     return true;
   };
 

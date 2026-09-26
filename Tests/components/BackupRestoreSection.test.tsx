@@ -95,7 +95,7 @@ describe('BackupRestoreSection Component', () => {
     expect(screen.getByText(/حفظ نسخة \(الأدوية\)/)).toBeInTheDocument();
   });
 
-  it('handles restore confirmation and checkbox toggles in RestoreBackupModal', async () => {
+  it('handles restore confirmation and checkbox toggles including medications in RestoreBackupModal', async () => {
     const onConfirmRestore = vi.fn();
     const onClose = vi.fn();
 
@@ -136,7 +136,10 @@ describe('BackupRestoreSection Component', () => {
     expect(screen.getAllByText(/أرقام هاتف/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/عناوين/).length).toBeGreaterThan(0);
 
-    // Verify checkboxes exist with proper accessible labels
+    // Verify all 3 checkboxes exist with proper accessible labels
+    const medsCheckbox = screen.getByRole('checkbox', {
+      name: 'استعادة الأدوية والمواعيد',
+    }) as HTMLInputElement;
     const logsCheckbox = screen.getByRole('checkbox', {
       name: 'استعادة سجلات الاستهلاك السابقة',
     }) as HTMLInputElement;
@@ -144,24 +147,30 @@ describe('BackupRestoreSection Component', () => {
       name: 'استعادة بيانات الصيدليات وأرقام الهاتف والعناوين',
     }) as HTMLInputElement;
 
+    expect(medsCheckbox.checked).toBe(true);
     expect(logsCheckbox.checked).toBe(true);
     expect(pharmacyCheckbox.checked).toBe(true);
+
+    // Toggle medications off
+    fireEvent.click(medsCheckbox);
+    expect(medsCheckbox.checked).toBe(false);
+
+    // Medications preview should hide when unselected
+    expect(screen.queryByText(/معاينة الأدوية التي ستستعاد/)).not.toBeInTheDocument();
 
     // Toggle logs off
     fireEvent.click(logsCheckbox);
     expect(logsCheckbox.checked).toBe(false);
 
-    // Confirm restore
+    // Confirm restore (only pharmacy settings remain selected)
     const confirmBtn = screen.getByRole('button', { name: 'تأكيد استعادة البيانات' });
     fireEvent.click(confirmBtn);
 
     await waitFor(() => {
       expect(onConfirmRestore).toHaveBeenCalledWith(
         expect.objectContaining({
-          backupMedications: expect.arrayContaining([
-            expect.objectContaining({ name: 'Omega 3 Fish Oil' }),
-          ]),
-          backupLogs: undefined, // turned off
+          backupMedications: [], // unselected
+          backupLogs: undefined, // unselected
           mode: 'replace',
           restorePharmacySettings: true,
         })

@@ -21,27 +21,23 @@ export function runGatedBackupRestore(opts: {
       reason: failure.reason,
     }),
     operation: async ({ fresh }) => {
-      if (opts.backupMedications.length === 0) {
-        return {
-          outcome: 'empty_medications' as const,
-          medications: fresh.medications,
-          logs: fresh.logs,
-          restoredCount: 0,
-          reason: 'empty_medications',
-        };
-      }
-
       let nextMedications: Medication[];
       let nextLogs: ConsumptionLog[];
       const toInvalidate: Medication[] = [];
 
       if (opts.mode === 'replace') {
-        // Invalidate old active native recurrences and dose reminders
-        for (const m of fresh.medications) {
-          toInvalidate.push(m);
+        if (opts.backupMedications.length > 0) {
+          // Invalidate old active native recurrences and dose reminders
+          for (const m of fresh.medications) {
+            toInvalidate.push(m);
+          }
+          nextMedications = opts.backupMedications;
+          nextLogs = opts.backupLogs && opts.backupLogs.length > 0 ? opts.backupLogs : fresh.logs;
+        } else {
+          // If user unselected restoring medications, preserve current medications
+          nextMedications = fresh.medications;
+          nextLogs = opts.backupLogs && opts.backupLogs.length > 0 ? opts.backupLogs : fresh.logs;
         }
-        nextMedications = opts.backupMedications;
-        nextLogs = opts.backupLogs && opts.backupLogs.length > 0 ? opts.backupLogs : fresh.logs;
       } else {
         // Merge mode:
         const freshById = new Map(fresh.medications.map((m) => [m.id, m]));

@@ -40,6 +40,7 @@ export const RestoreBackupModal: FC<RestoreBackupModalProps> = ({
   onConfirmRestore,
 }) => {
   const [mode, setMode] = useState<'replace' | 'merge'>('replace');
+  const [includeMedications, setIncludeMedications] = useState(true);
   const [includeLogs, setIncludeLogs] = useState(true);
   const [includePharmacy, setIncludePharmacy] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -65,11 +66,17 @@ export const RestoreBackupModal: FC<RestoreBackupModalProps> = ({
     pharmacySettings && (pharmaciesCount > 0 || contactsCount > 0 || addressesCount > 0)
   );
 
+  const hasAnySelection =
+    (includeMedications && medications.length > 0) ||
+    (includeLogs && Boolean(logs && logs.length > 0)) ||
+    (includePharmacy && Boolean(pharmacySettings));
+
   const handleConfirm = async () => {
+    if (!hasAnySelection) return;
     setIsSubmitting(true);
     try {
       await onConfirmRestore({
-        backupMedications: medications,
+        backupMedications: includeMedications ? medications : [],
         backupLogs: includeLogs ? logs : undefined,
         mode,
         pharmacySettings: includePharmacy ? pharmacySettings : undefined,
@@ -198,7 +205,7 @@ export const RestoreBackupModal: FC<RestoreBackupModalProps> = ({
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-500 leading-relaxed">
-                  حذف الأدوية الحالية واستبدالها بالكامل بما في الملف. موصى به عند النقل لجهاز جديد.
+                  حذف البيانات الحالية واستبدالها بما في الملف. موصى به عند النقل لجهاز جديد.
                 </p>
               </button>
 
@@ -215,7 +222,7 @@ export const RestoreBackupModal: FC<RestoreBackupModalProps> = ({
                 <div className="flex items-center justify-between w-full mb-1.5">
                   <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
                     <Layers className="w-3.5 h-3.5 text-teal-700" />
-                    دمج مع الأدوية الحالية
+                    دمج مع البيانات الحالية
                   </span>
                   <div
                     className={`w-4 h-4 rounded-full border flex items-center justify-center ${
@@ -226,14 +233,14 @@ export const RestoreBackupModal: FC<RestoreBackupModalProps> = ({
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-500 leading-relaxed">
-                  الاحتفاظ بالأدوية الحالية وإضافة الأدوية الجديدة من الملف وتحديث المشتركة منها.
+                  الاحتفاظ بالبيانات الحالية وإضافة الجديد من الملف وتحديث المشترك منها.
                 </p>
               </button>
             </div>
           </div>
 
-          {/* Warning banner for Replace Mode if current meds exist */}
-          {mode === 'replace' && currentMedicationsCount > 0 && (
+          {/* Warning banner for Replace Mode if current meds exist and medications are to be replaced */}
+          {mode === 'replace' && includeMedications && currentMedicationsCount > 0 && (
             <div className="bg-amber-50 border border-amber-200/90 rounded-2xl p-3 flex items-start gap-2.5 text-amber-900 text-xs">
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <p className="leading-tight">
@@ -242,83 +249,104 @@ export const RestoreBackupModal: FC<RestoreBackupModalProps> = ({
             </div>
           )}
 
-          {/* Optional inclusions using Checkbox component (white background + teal checkmark) */}
-          {(Boolean(logs && logs.length > 0) || Boolean(pharmacySettings)) && (
-            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-2.5">
-              <span className="text-xs font-bold text-slate-800 block">خيارات استعادة البيانات الإضافية:</span>
-              {logs && logs.length > 0 && (
-                <label className="flex items-center gap-2.5 bg-white rounded-xl border border-slate-200 px-3 py-2.5 cursor-pointer shadow-2xs hover:border-slate-300 transition">
-                  <Checkbox
-                    checked={includeLogs}
-                    onChange={(e) => setIncludeLogs(e.target.checked)}
-                    aria-label="استعادة سجلات الاستهلاك السابقة"
-                  />
-                  <div className="min-w-0">
-                    <span className="text-xs font-bold text-slate-800 block">
-                      استعادة سجلات الاستهلاك السابقة
-                    </span>
-                    <span className="text-[11px] text-slate-500 block">
-                      {logs.length} سجل استهلاك وجرعات
-                    </span>
+          {/* Data restoration inclusions using Checkbox component */}
+          <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-2.5">
+            <span className="text-xs font-bold text-slate-800 block">خيارات استعادة البيانات:</span>
+
+            {/* Medications Checkbox (always first in the list) */}
+            <label className="flex items-center gap-2.5 bg-white rounded-xl border border-slate-200 px-3 py-2.5 cursor-pointer shadow-2xs hover:border-slate-300 transition">
+              <Checkbox
+                checked={includeMedications}
+                onChange={(e) => setIncludeMedications(e.target.checked)}
+                aria-label="استعادة الأدوية والمواعيد"
+              />
+              <div className="min-w-0">
+                <span className="text-xs font-bold text-slate-800 block">
+                  استعادة الأدوية والمواعيد
+                </span>
+                <span className="text-[11px] text-slate-500 block">
+                  {medications.length} دواء مع جرعاتها ومواعيد التنبيه
+                </span>
+              </div>
+            </label>
+
+            {/* Consumption Logs Checkbox */}
+            {logs && logs.length > 0 && (
+              <label className="flex items-center gap-2.5 bg-white rounded-xl border border-slate-200 px-3 py-2.5 cursor-pointer shadow-2xs hover:border-slate-300 transition">
+                <Checkbox
+                  checked={includeLogs}
+                  onChange={(e) => setIncludeLogs(e.target.checked)}
+                  aria-label="استعادة سجلات الاستهلاك السابقة"
+                />
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-slate-800 block">
+                    استعادة سجلات الاستهلاك السابقة
+                  </span>
+                  <span className="text-[11px] text-slate-500 block">
+                    {logs.length} سجل استهلاك وجرعات
+                  </span>
+                </div>
+              </label>
+            )}
+
+            {/* Pharmacy and Personal Info Checkbox */}
+            {pharmacySettings && (
+              <label className="flex items-center gap-2.5 bg-white rounded-xl border border-slate-200 px-3 py-2.5 cursor-pointer shadow-2xs hover:border-slate-300 transition">
+                <Checkbox
+                  checked={includePharmacy}
+                  onChange={(e) => setIncludePharmacy(e.target.checked)}
+                  aria-label="استعادة بيانات الصيدليات وأرقام الهاتف والعناوين"
+                />
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-slate-800 block">
+                    استعادة بيانات الصيدليات وأرقام الهاتف والعناوين
+                  </span>
+                  <span className="text-[11px] text-slate-500 block">
+                    {pharmaciesCount} صيدلية، {contactsCount} أرقام هاتف، و{addressesCount} عناوين من صفحة بياناتي
+                  </span>
+                </div>
+              </label>
+            )}
+          </div>
+
+          {/* Medications list preview — shown when medications are selected for restore */}
+          {includeMedications && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-slate-700">
+                  معاينة الأدوية التي ستستعاد ({medications.length}):
+                </span>
+              </div>
+              <div className="max-h-44 overflow-y-auto space-y-1.5 p-1 border border-slate-100 rounded-xl bg-slate-50/50">
+                {medications.map((m) => (
+                  <div
+                    key={m.id}
+                    className="bg-white border border-slate-200/80 rounded-xl p-2.5 flex items-center justify-between text-xs"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: m.colorTag || '#0d9488' }}
+                      />
+                      <span className="font-bold text-slate-900 truncate">{m.name}</span>
+                      {m.category && (
+                        <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-md truncate max-w-[90px]">
+                          {m.category}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-500 text-[11px] shrink-0">
+                      <span>
+                        {pluralizeArabic(m.currentPills, m.unit)}
+                      </span>
+                      <span className="text-slate-300">•</span>
+                      <span>جرعة: {m.dailyDose}/يومياً</span>
+                    </div>
                   </div>
-                </label>
-              )}
-              {pharmacySettings && (
-                <label className="flex items-center gap-2.5 bg-white rounded-xl border border-slate-200 px-3 py-2.5 cursor-pointer shadow-2xs hover:border-slate-300 transition">
-                  <Checkbox
-                    checked={includePharmacy}
-                    onChange={(e) => setIncludePharmacy(e.target.checked)}
-                    aria-label="استعادة بيانات الصيدليات وأرقام الهاتف والعناوين"
-                  />
-                  <div className="min-w-0">
-                    <span className="text-xs font-bold text-slate-800 block">
-                      استعادة بيانات الصيدليات وأرقام الهاتف والعناوين
-                    </span>
-                    <span className="text-[11px] text-slate-500 block">
-                      {pharmaciesCount} صيدلية، {contactsCount} أرقام هاتف، و{addressesCount} عناوين من صفحة بياناتي
-                    </span>
-                  </div>
-                </label>
-              )}
+                ))}
+              </div>
             </div>
           )}
-
-          {/* Medications list preview */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold text-slate-700">
-                معاينة الأدوية التي ستستعاد ({medications.length}):
-              </span>
-            </div>
-            <div className="max-h-44 overflow-y-auto space-y-1.5 p-1 border border-slate-100 rounded-xl bg-slate-50/50">
-              {medications.map((m) => (
-                <div
-                  key={m.id}
-                  className="bg-white border border-slate-200/80 rounded-xl p-2.5 flex items-center justify-between text-xs"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: m.colorTag || '#0d9488' }}
-                    />
-                    <span className="font-bold text-slate-900 truncate">{m.name}</span>
-                    {m.category && (
-                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-md truncate max-w-[90px]">
-                        {m.category}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 text-slate-500 text-[11px] shrink-0">
-                    <span>
-                      {pluralizeArabic(m.currentPills, m.unit)}
-                    </span>
-                    <span className="text-slate-300">•</span>
-                    <span>جرعة: {m.dailyDose}/يومياً</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* Action Buttons */}
@@ -334,8 +362,8 @@ export const RestoreBackupModal: FC<RestoreBackupModalProps> = ({
           <button
             type="button"
             onClick={() => { void handleConfirm(); }}
-            disabled={isSubmitting}
-            className="h-10 px-6 rounded-full bg-teal-700 hover:bg-teal-800 active:scale-98 text-white text-xs font-bold flex items-center gap-2 shadow-2xs transition cursor-pointer disabled:opacity-50"
+            disabled={isSubmitting || !hasAnySelection}
+            className="h-10 px-6 rounded-full bg-teal-700 hover:bg-teal-800 active:scale-98 text-white text-xs font-bold flex items-center gap-2 shadow-2xs transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSubmitting ? (
               <>

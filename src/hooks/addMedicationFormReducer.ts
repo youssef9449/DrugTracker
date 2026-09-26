@@ -78,7 +78,7 @@ export function createDefaultFormModel(
 ): AddMedicationFormModel {
   const defaultSchedule = resizeDoseSchedule([], 1);
   return {
-    details: { name: '', category: '', colorTag: 'teal', unit: 'قرص' },
+    details: { name: '', category: '', colorTag: 'teal', unit: DEFAULT_MEDICATION_UNIT },
     stock: {
       currentPills: 30,
       currentPillsStr: '30',

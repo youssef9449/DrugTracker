@@ -43,6 +43,7 @@ export interface AppSettingsModalProps {
     pharmacySettings?: PharmacySettings;
     onApplyPharmacySettings?: (settings: PharmacySettings) => Promise<boolean> | boolean;
   }) => Promise<boolean> | boolean) | undefined;
+  onApplyRestoredPharmacySettings?: (settings: PharmacySettings) => Promise<boolean> | boolean;
   /**
    * Apply app preference toggles only when the user confirms with حفظ الإعدادات.
    * Closing the modal without save discards draft changes.

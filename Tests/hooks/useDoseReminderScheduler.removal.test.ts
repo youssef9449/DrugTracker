@@ -4,6 +4,7 @@ import { flushUntil } from '../helpers/asyncTestUtils';
 import { renderHook, cleanup } from '@testing-library/react';
 import type { Medication } from '@/types';
 import { useDoseReminderScheduler, getDoseReminderSlots } from '@/hooks/useDoseReminderScheduler';
+import { doseScheduleKey } from '@/utils/doseReminderDefinitions';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import type { ExactAlarmPermission } from '@/utils/exactAlarm';
 
@@ -257,5 +258,9 @@ describe('Phase 4 — dose-scoped cancel on removal', () => {
     });
     const slots = getDoseReminderSlots(med);
     expect(slots).toEqual([]);
+  });
+
+  it('rejects blank dose IDs instead of creating a schedule key', () => {
+    expect(() => doseScheduleKey('med-1', '   ')).toThrow('invalid_dose_id');
   });
 });

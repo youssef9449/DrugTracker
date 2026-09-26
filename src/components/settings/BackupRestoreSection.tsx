@@ -27,7 +27,7 @@ export interface BackupRestoreSectionProps {
     restoreLogs: boolean;
     mode: 'replace' | 'merge';
     pharmacySettings?: PharmacySettings | undefined;
-    onApplyPharmacySettings?: ((settings: PharmacySettings) => void) | undefined;
+    onApplyPharmacySettings?: ((settings: PharmacySettings) => Promise<boolean> | boolean) | undefined;
   }) => Promise<boolean> | boolean;
   onSavePharmacySettings?: ((settings: PharmacySettings) => Promise<boolean> | boolean) | undefined;
   soundEnabled: boolean;

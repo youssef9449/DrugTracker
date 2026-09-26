@@ -6,6 +6,8 @@ import org.json.JSONObject;
 import java.util.Calendar;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 import app.drugtracker.alarmruntime.ExactAlarmContract;
 import app.drugtracker.alarmruntime.ExactAlarmFeatureAdapter;
 import app.drugtracker.alarmruntime.ExactAlarmRestorePolicy;
@@ -41,6 +43,13 @@ public final class CriticalStockAlarmAdapter
      * fresh state instead of firing instantly mid-recovery (#513).
      */
     private static final long CRITICAL_RECOVERY_DELAY_MS = 15_000L;
+
+    /**
+     * Critical Stock owns its delivery de-duplication state. The shared alarm
+     * runtime supplies only the generic operation lock and durable ownership
+     * checks; notification-delivery semantics stay in this feature boundary.
+     */
+    private static final Set<String> ACTIVE_DELIVERY_CLAIMS = new HashSet<>();
 
     /**
      * Shared lifecycle recovery entry point. Only durable Critical Stock
@@ -272,17 +281,26 @@ public final class CriticalStockAlarmAdapter
     }
 
     boolean claimOneShotDelivery(String medicationId, String operationVersion) {
-        return runtime.claimOneShotDelivery(
-                occurrenceKey(medicationId),
-                operationVersion);
+        final boolean[] claimed = {false};
+        ExactAlarmRuntime.runWithOperationLock(() -> {
+            String claimKey = occurrenceKey(medicationId) + "::" + operationVersion;
+            if (runtime.isOneShotDelivered(occurrenceKey(medicationId))
+                    || !runtime.ownsActiveSchedule(
+                            occurrenceKey(medicationId),
+                            operationVersion)) {
+                return;
+            }
+            claimed[0] = ACTIVE_DELIVERY_CLAIMS.add(claimKey);
+        });
+        return claimed[0];
     }
 
     void releaseOneShotDeliveryClaim(
             String medicationId,
             String operationVersion) {
-        runtime.releaseOneShotDeliveryClaim(
-                occurrenceKey(medicationId),
-                operationVersion);
+        ExactAlarmRuntime.runWithOperationLock(() ->
+                ACTIVE_DELIVERY_CLAIMS.remove(
+                        occurrenceKey(medicationId) + "::" + operationVersion));
     }
 
     boolean markOneShotDelivered(String medicationId, String operationVersion) {

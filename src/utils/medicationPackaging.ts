@@ -39,7 +39,7 @@ export function describeStockInStrips(
   pills: number,
   pillsPerStrip?: number,
   stripsPerBox?: number,
-  unit: string = 'قرص'
+  unit: string = DEFAULT_MEDICATION_UNIT
 ): string | null {
   if (!isSolidUnit(unit) || !pillsPerStrip || pillsPerStrip <= 0 || pills <= 0) {
     return null;
@@ -73,7 +73,7 @@ export function describeOrderInBoxes(
   stripsPerBox?: number,
   pillsPerStrip?: number,
   packageSize?: number,
-  unit: string = 'قرص'
+  unit: string = DEFAULT_MEDICATION_UNIT
 ): string {
   const solid = isSolidUnit(unit);
   const boxWordLabel = unit === 'مل' ? 'عبوة' : 'علبة';

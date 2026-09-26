@@ -72,7 +72,7 @@ const mockPharmacySettings: PharmacySettings = {
 };
 
 describe('backupRestore utility', () => {
-  it('creates complete backup envelope for "all" data', () => {
+  it('creates a canonical complete backup envelope for "all" data', () => {
     const backup = createBackupPayload('all', mockMeds, mockLogs, mockPharmacySettings);
 
     expect(backup.version).toBe(1);
@@ -89,7 +89,7 @@ describe('backupRestore utility', () => {
     expect(typeof backup.exportedAt).toBe('string');
   });
 
-  it('creates medication-only backup when scope is "medications"', () => {
+  it('creates medication-only backup without logs or pharmacy settings', () => {
     const backup = createBackupPayload('medications', mockMeds, mockLogs, mockPharmacySettings);
 
     expect(backup.version).toBe(1);
@@ -97,36 +97,41 @@ describe('backupRestore utility', () => {
     expect(backup.metadata.medicationsCount).toBe(2);
     expect(backup.metadata.logsCount).toBe(0);
     expect(backup.metadata.pharmaciesCount).toBe(0);
-    expect(backup.medications).toEqual(mockMeds);
     expect(backup.logs).toBeUndefined();
     expect(backup.pharmacySettings).toBeUndefined();
   });
 
-  it('validates and parses valid envelope JSON successfully', () => {
-    const backup = createBackupPayload('all', mockMeds, mockLogs, mockPharmacySettings);
-    const jsonStr = JSON.stringify(backup);
-
-    const result = parseAndValidateBackupFile(jsonStr);
+  it('validates a canonical full envelope successfully', () => {
+    const result = parseAndValidateBackupFile(
+      JSON.stringify(createBackupPayload('all', mockMeds, mockLogs, mockPharmacySettings))
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
+    expect(result.data.scope).toBe('all');
     expect(result.data.medications.length).toBe(2);
-    expect(result.data.medications[0]?.name).toBe('Panadol Extra');
     expect(result.data.logs.length).toBe(1);
     expect(result.data.pharmacySettings?.pharmacies.length).toBe(1);
-    expect(result.data.pharmacySettings?.whatsappContacts.length).toBe(1);
-    expect(result.data.pharmacySettings?.whatsappAddresses.length).toBe(1);
   });
 
-  it('validates and parses a raw array of medications successfully', () => {
-    const jsonStr = JSON.stringify(mockMeds);
-
-    const result = parseAndValidateBackupFile(jsonStr);
+  it('validates a canonical medication-only envelope successfully', () => {
+    const result = parseAndValidateBackupFile(
+      JSON.stringify(createBackupPayload('medications', mockMeds, mockLogs, mockPharmacySettings))
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
+    expect(result.data.scope).toBe('medications');
     expect(result.data.medications.length).toBe(2);
-    expect(result.data.validCount).toBe(2);
+    expect(result.data.logs.length).toBe(0);
+    expect(result.data.pharmacySettings).toBeUndefined();
+  });
+
+  it('rejects raw medication arrays instead of accepting a legacy shape', () => {
+    const result = parseAndValidateBackupFile(JSON.stringify(mockMeds));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('النسق الرسمي');
   });
 
   it('fails gracefully on empty or whitespace strings', () => {
@@ -142,21 +147,59 @@ describe('backupRestore utility', () => {
   });
 
   it('fails gracefully on foreign application payloads', () => {
-    const foreign = JSON.stringify({
+    const result = parseAndValidateBackupFile(JSON.stringify({
+      version: 1,
       app: 'some-other-unrelated-app',
-      medications: [{ name: 'Test' }],
-    });
-    const result = parseAndValidateBackupFile(foreign);
+      scope: 'medications',
+      exportedAt: '2026-09-26T12:00:00.000Z',
+      metadata: {
+        medicationsCount: 1,
+        logsCount: 0,
+        pharmaciesCount: 0,
+        contactsCount: 0,
+        addressesCount: 0,
+      },
+      medications: [mockMeds[0]],
+    }));
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toContain('غير مخصص');
+    expect(result.error).toContain('nasq');
   });
 
-  it('fails gracefully when JSON has no medications', () => {
-    const result = parseAndValidateBackupFile('{"version": 1, "medications": []}');
+  it('fails gracefully when canonical backup has no medications', () => {
+    const result = parseAndValidateBackupFile(
+      JSON.stringify(createBackupPayload('medications', [], [], mockPharmacySettings))
+    );
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toContain('لم يتم العثور على أدوية');
+    expect(result.error).toContain('الأدوية');
+  });
+
+  it('rejects duplicate medication IDs in a canonical backup', () => {
+    const duplicateMeds = [mockMeds[0], { ...mockMeds[1], id: mockMeds[0].id }];
+    const backup = createBackupPayload('medications', duplicateMeds, [], undefined);
+    const result = parseAndValidateBackupFile(JSON.stringify(backup));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('معرفات أدوية مكررة');
+  });
+
+  it('rejects logs that reference medications missing from the backup', () => {
+    const danglingLog = { ...mockLogs[0], medicationId: 'missing-med' };
+    const backup = createBackupPayload('all', mockMeds, [danglingLog], mockPharmacySettings);
+    const result = parseAndValidateBackupFile(JSON.stringify(backup));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('غير موجود');
+  });
+
+  it('rejects a metadata count mismatch', () => {
+    const backup = createBackupPayload('medications', mockMeds, [], undefined);
+    backup.metadata.medicationsCount = 1;
+    const result = parseAndValidateBackupFile(JSON.stringify(backup));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('عدد الأدوية');
   });
 
   it('normalizes partial medications with safe defaults', () => {
@@ -186,23 +229,24 @@ describe('backupRestore utility', () => {
     expect(normalizeMedicationForImport({ name: '   ' })).toBeNull();
   });
 
-  it('sanitizes and normalizes pharmacy settings cleanly without crashing', () => {
+  it('sanitizes pharmacy settings and removes invalid selections', () => {
     const rawSettings = {
       defaultDurationDays: 60,
       pharmacies: [
         { id: 'p1', name: ' صيدلية الشفاء ', phone: ' 012345 ', extraProp: 123 },
-        { id: 'p2', name: '' }, // invalid empty name
+        { id: 'p2', name: '' },
         null,
       ],
       whatsappContacts: [
         { id: 'c1', label: ' أبي ', phone: '01111' },
-        { id: 'c2', label: '   ' }, // invalid empty label
+        { id: 'c2', label: '   ' },
       ],
       whatsappAddresses: [
         { id: 'a1', label: ' العمل ', address: ' المعادي ' },
       ],
-      selectedPharmacyId: 'p1',
-      selectedWhatsappContactIds: ['c1', 999], // non-string will be filtered
+      selectedPharmacyId: 'missing',
+      selectedWhatsappContactIds: ['c1', 999],
+      selectedWhatsappAddressIds: ['missing'],
     };
 
     const normalized = normalizePharmacySettingsForImport(rawSettings);
@@ -212,10 +256,12 @@ describe('backupRestore utility', () => {
     expect(normalized.defaultDurationDays).toBe(60);
     expect(normalized.pharmacies.length).toBe(1);
     expect(normalized.pharmacies[0]?.name).toBe('صيدلية الشفاء');
+    expect(normalized.selectedPharmacyId).toBe('');
     expect(normalized.whatsappContacts.length).toBe(1);
     expect(normalized.whatsappContacts[0]?.label).toBe('أبي');
     expect(normalized.whatsappAddresses.length).toBe(1);
     expect(normalized.whatsappAddresses[0]?.label).toBe('العمل');
     expect(normalized.selectedWhatsappContactIds).toEqual(['c1']);
+    expect(normalized.selectedWhatsappAddressIds).toEqual([]);
   });
 });

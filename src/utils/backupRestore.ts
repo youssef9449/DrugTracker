@@ -536,6 +536,7 @@ export function parseAndValidateBackupFile(
 
   const validMeds: Medication[] = [];
   const seenMedicationIds = new Set<string>();
+  const seenMedicationNames = new Set<string>();
 
   for (const item of candidateMeds) {
     const med = normalizeMedicationForImport(item);
@@ -546,7 +547,17 @@ export function parseAndValidateBackupFile(
         error: 'الملف يحتوي على معرفات أدوية مكررة، ولا يمكن استعادته بأمان.',
       };
     }
+
+    const normalizedName = med.name.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+    if (seenMedicationNames.has(normalizedName)) {
+      return {
+        ok: false,
+        error: 'الملف يحتوي على أسماء أدوية مكررة، ولا يمكن استعادته بأمان.',
+      };
+    }
+
     seenMedicationIds.add(med.id);
+    seenMedicationNames.add(normalizedName);
     validMeds.push(med);
   }
 

@@ -25,13 +25,13 @@ public final class DoseReminderPlugin extends Plugin {
         String reminderTime = call.getString("reminderTime");
         Double amount = call.getDouble("amount");
         String medicationName = call.getString("medicationName", "");
-        String unit = call.getString("unit", "قرص");
+        String unit = call.getString("unit");
         String doseDescription = call.getString("doseDescription", "");
         String treatmentEndDate = call.getString("treatmentEndDate", "");
         Boolean allowManualTakeAction = call.getBoolean("allowManualTakeAction", true);
         Long triggerAt = call.getLong("triggerAtEpochMs");
 
-        if (amount == null || triggerAt == null) {
+        if (amount == null || triggerAt == null || unit == null || unit.trim().isEmpty()) {
             call.reject("invalid_schedule", "invalid_schedule");
             return;
         }
@@ -105,12 +105,12 @@ public final class DoseReminderPlugin extends Plugin {
         String reminderTime = call.getString("reminderTime", "");
         Double amount = call.getDouble("amount");
         String medicationName = call.getString("medicationName", "");
-        String unit = call.getString("unit", "قرص");
+        String unit = call.getString("unit");
         String doseDescription = call.getString("doseDescription", "");
         Boolean allowManualTakeAction = call.getBoolean("allowManualTakeAction", true);
         Long triggerAt = call.getLong("triggerAtEpochMs");
 
-        if (amount == null || triggerAt == null) {
+        if (amount == null || triggerAt == null || unit == null || unit.trim().isEmpty()) {
             call.reject("invalid_snooze", "invalid_snooze");
             return;
         }

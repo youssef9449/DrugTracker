@@ -163,7 +163,7 @@ describe('backupRestore utility', () => {
     }));
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toContain('nasq');
+    expect(result.error).toContain('نسق');
   });
 
   it('fails gracefully when canonical backup has no medications', () => {

@@ -94,21 +94,26 @@ export function getDoseScheduleForUI(
   }
   return sortDoseSchedule(
     med.doseSchedule
-      .filter(
-        (d) =>
-          d &&
-          normalizeDoseId(d.id) !== undefined &&
-          isValidDoseTime(normalizeTimeString(d.time)) &&
-          Number(d.amount) > 0
-      )
-      .map((d) => ({
-        id: normalizeDoseId(d.id) as string,
-        amount: Number(d.amount),
-        time: normalizeTimeString(d.time),
-        ...(normalizeDoseDescription(d.description) !== undefined
-          ? { description: normalizeDoseDescription(d.description) }
-          : {}),
-      }))
+      .map((d) => {
+        const id = normalizeDoseId(d?.id);
+        if (
+          !d ||
+          !id ||
+          !isValidDoseTime(normalizeTimeString(d.time)) ||
+          Number(d.amount) <= 0
+        ) {
+          return null;
+        }
+        return {
+          id,
+          amount: Number(d.amount),
+          time: normalizeTimeString(d.time),
+          ...(normalizeDoseDescription(d.description) !== undefined
+            ? { description: normalizeDoseDescription(d.description) }
+            : {}),
+        };
+      })
+      .filter((d): d is MedicationDose => d !== null)
   );
 }
 /**

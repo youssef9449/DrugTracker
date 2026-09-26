@@ -36,13 +36,14 @@ assert(
   'restore must not re-arm an already accepted one-shot delivery'
 );
 assert(
-  receiver.includes('ExactAlarmRuntime.runWithOperationLock(')
-    && receiver.indexOf('ExactAlarmRuntime.runWithOperationLock(')
-      < receiver.indexOf('new NotificationRuntime(appContext).post('),
-  'Critical Stock delivery must be linearized through the private shared runtime lock'
+  receiver.includes('adapter.claimOneShotDelivery(')
+    && receiver.includes('adapter.releaseOneShotDeliveryClaim(')
+    && !receiver.includes('ExactAlarmRuntime.runWithOperationLock('),
+  'Critical Stock delivery must claim ownership before notification I/O without holding the shared alarm lock'
 );
 assert(
-  receiver.indexOf('adapter.ownsActiveSchedule(') < receiver.indexOf('new NotificationRuntime(appContext).post('),
+  receiver.indexOf('adapter.claimOneShotDelivery(')
+      < receiver.indexOf('new NotificationRuntime(appContext).post('),
   'stale Critical Stock delivery must be rejected before notification posting'
 );
 assert(
@@ -63,7 +64,9 @@ assert(
   'delivery evidence must be persisted before one-shot completion'
 );
 assert(
-  exactAlarm.includes('public boolean markOneShotDelivered(')
+  exactAlarm.includes('public boolean claimOneShotDelivery(')
+    && exactAlarm.includes('ACTIVE_DELIVERY_CLAIMS')
+    && exactAlarm.includes('public boolean markOneShotDelivered(')
     && exactAlarm.includes('deliveryState')
     // The operation lock was unified into the shared runtime: evidence
     // writes are serialized on the OperationLock class monitor and guarded

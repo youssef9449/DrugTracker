@@ -187,13 +187,6 @@ public final class ExactAlarmRuntime {
         }
     }
 
-    public boolean removeSchedule(String storageKey) {
-        if (storageKey == null || storageKey.isEmpty()) return false;
-        synchronized (OperationLock.class) {
-            return store.removeScheduleLocked(storageKey);
-        }
-    }
-
     public boolean hasCancellationTombstone(String storageKey) {
         if (storageKey == null || storageKey.isEmpty()) return false;
         synchronized (OperationLock.class) {

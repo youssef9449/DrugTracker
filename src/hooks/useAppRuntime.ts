@@ -82,7 +82,7 @@ export function useAppRuntime(deps: AppRuntimeDeps) {
   });
 
   const medicationHandlers = useMedicationHandlers({
-    medications, logs, soundEnabled, globalAutoDeductEnabled, notificationsEnabled,
+    medications, logs, pharmacySettings, soundEnabled, globalAutoDeductEnabled, notificationsEnabled,
     criticalStockAlertsEnabled, selectDoseMode, setMedications, setLogs,
     setGlobalAutoDeductEnabled, setIsAutoDeductPromptOpen, setIsFirstRun,
     setNotificationsEnabled, setCriticalStockAlertsEnabled, setSelectDoseMed,

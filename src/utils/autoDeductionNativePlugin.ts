@@ -78,7 +78,7 @@ interface AutoDeductionPlugin {
     occurrenceResolutions?: NativeAutoOccurrenceResolution[];
   }): Promise<InitializeNativeStockResult>;
   applyForegroundStockDeltas(options: {
-    mutationSeq: number;
+    mutationSeq: string;
     deltas: Array<{ medicationId: string; delta: number }>;
     occurrenceResolutions?: Array<{
       medicationId: string;

@@ -41,6 +41,8 @@ export const MAX_LOG_ROWS = 15;
 export const DEFAULT_SOLID_PACK_SIZE = 30;
 /** Default package size for liquid (ml) medications. */
 export const DEFAULT_LIQUID_PACK_SIZE = 100;
+/** Default package size for bag (sachet) medications. */
+export const DEFAULT_BAG_PACK_SIZE = 10;
 /**
  * Canonical persisted-time validation for "HH:mm" values (strict two-digit
  * shape + real hour/minute ranges). ONE definition of a valid persisted

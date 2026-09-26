@@ -42,6 +42,12 @@ assert(
   'Critical Stock delivery must claim ownership before notification I/O without holding the shared alarm lock'
 );
 assert(
+  adapter.includes('ExactAlarmRuntime.runWithOperationLock(()')
+    && adapter.includes('ACTIVE_DELIVERY_CLAIMS')
+    && adapter.includes('runtime.ownsActiveSchedule('),
+  'Critical Stock must own delivery claim state while using only the shared generic operation lock'
+);
+assert(
   receiver.indexOf('adapter.claimOneShotDelivery(')
       < receiver.indexOf('new NotificationRuntime(appContext).post('),
   'stale Critical Stock delivery must be rejected before notification posting'
@@ -64,8 +70,8 @@ assert(
   'delivery evidence must be persisted before one-shot completion'
 );
 assert(
-  exactAlarm.includes('public boolean claimOneShotDelivery(')
-    && exactAlarm.includes('ACTIVE_DELIVERY_CLAIMS')
+  !exactAlarm.includes('public boolean claimOneShotDelivery(')
+    && !exactAlarm.includes('ACTIVE_DELIVERY_CLAIMS')
     && exactAlarm.includes('public boolean markOneShotDelivered(')
     && exactAlarm.includes('deliveryState')
     // The operation lock was unified into the shared runtime: evidence

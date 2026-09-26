@@ -26,7 +26,7 @@ export function runGatedBackupRestore(opts: {
   mode: 'replace' | 'merge';
 }): Promise<GatedBackupRestoreResult> {
   return runManualStockTransaction({
-    reconcileExactBeforeMutation: false,
+    reconcileExactBeforeMutation: true,
     onFailure: (failure) => ({
       outcome: 'persist_failed' as const,
       medications: failure.state.medications,

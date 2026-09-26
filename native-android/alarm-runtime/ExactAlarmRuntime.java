@@ -15,8 +15,6 @@ import org.json.JSONObject;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
-import java.util.HashSet;
-import java.util.Set;
 
 
 /**
@@ -38,21 +36,6 @@ public final class ExactAlarmRuntime {
     /** Private process-wide monitor; never exposed to callers. */
     private static final class OperationLock {
         private OperationLock() {}
-    }
-
-    /**
-     * Process-local delivery claims. A claim is the delivery linearization
-     * point: it is acquired while the shared lock is held, then slow platform
-     * notification I/O can run without holding that lock. Claims are
-     * deliberately ephemeral so a process death leaves the durable schedule
-     * recoverable.
-     */
-    private static final Set<String> ACTIVE_DELIVERY_CLAIMS = new HashSet<>();
-
-    private static String deliveryClaimKey(
-            String storageKey,
-            String operationVersion) {
-        return storageKey + "::" + operationVersion;
     }
 
     /**
@@ -277,57 +260,6 @@ public final class ExactAlarmRuntime {
     }
 
     /**
-     * Claim one-shot delivery under the shared operation lock and return only
-     * after ownership has been linearized. The claim is process-local so the
-     * slow notification I/O can execute without blocking unrelated alarm
-     * transactions, while a process death leaves the durable schedule intact
-     * for lifecycle recovery.
-     */
-    public boolean claimOneShotDelivery(
-            String storageKey,
-            String expectedOperationVersion) {
-        if (storageKey == null || storageKey.isEmpty()
-                || expectedOperationVersion == null
-                || expectedOperationVersion.isEmpty()) {
-            return false;
-        }
-        synchronized (OperationLock.class) {
-            String raw = store.getScheduleRaw(storageKey);
-            if (!ExactAlarmContract.isMetadataOwnedByOperationVersion(
-                    raw,
-                    expectedOperationVersion)
-                    || store.isEffectivelyCancelledLocked(storageKey)) {
-                return false;
-            }
-            try {
-                if ("accepted".equals(
-                        new JSONObject(raw).optString("deliveryState", ""))) {
-                    return false;
-                }
-            } catch (JSONException | RuntimeException e) {
-                return false;
-            }
-            return ACTIVE_DELIVERY_CLAIMS.add(
-                    deliveryClaimKey(storageKey, expectedOperationVersion));
-        }
-    }
-
-    /** Release a failed delivery claim so the durable schedule remains retryable. */
-    public void releaseOneShotDeliveryClaim(
-            String storageKey,
-            String expectedOperationVersion) {
-        if (storageKey == null || storageKey.isEmpty()
-                || expectedOperationVersion == null
-                || expectedOperationVersion.isEmpty()) {
-            return;
-        }
-        synchronized (OperationLock.class) {
-            ACTIVE_DELIVERY_CLAIMS.remove(
-                    deliveryClaimKey(storageKey, expectedOperationVersion));
-        }
-    }
-
-    /**
      * Record that a durable one-shot delivery was accepted while preserving
      * the operation-version ownership boundary. Feature adapters may use this
      * as idempotent delivery evidence when completion persistence fails.
@@ -353,10 +285,6 @@ public final class ExactAlarmRuntime {
                 boolean written = store.writeScheduleRawLocked(
                         storageKey,
                         metadata.toString());
-                if (written) {
-                    ACTIVE_DELIVERY_CLAIMS.remove(
-                            deliveryClaimKey(storageKey, expectedOperationVersion));
-                }
                 return written;
             } catch (JSONException | RuntimeException e) {
                 return false;

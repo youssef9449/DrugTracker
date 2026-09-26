@@ -41,6 +41,24 @@ if (!newMedicationForm.includes('unit: DEFAULT_MEDICATION_UNIT')) {
   throw new Error('New medication form must use DEFAULT_MEDICATION_UNIT');
 }
 
+const nativeProductionFiles = [
+  'native-android/dose-reminder/DoseReminderPlugin.java',
+  'native-android/dose-reminder/DoseReminderAlarmReceiver.java',
+  'native-android/alarm-runtime/DoseReminderAlarmFeature.java',
+  'native-android/critical-stock/CriticalStockAlarmAdapter.java',
+];
+
+for (const path of nativeProductionFiles) {
+  const source = read(path);
+  if (
+    source.includes('getString("unit", "قرص")') ||
+    source.includes('optString("unit", "قرص")') ||
+    source.includes('unit == null ? "قرص" : unit')
+  ) {
+    throw new Error('Native medication unit fallback remains in ' + path);
+  }
+}
+
 const receiver = read('native-android/critical-stock/CriticalStockAlarmReceiver.java');
 const adapter = read('native-android/critical-stock/CriticalStockAlarmAdapter.java');
 const postIndex = receiver.indexOf('new NotificationRuntime(appContext).post(');
@@ -60,6 +78,14 @@ if (!adapter.includes('ACTIVE_DELIVERY_CLAIMS') || !adapter.includes('runtime.ow
   throw new Error(
     'Critical Stock delivery ownership must remain feature-local and operation-version guarded'
   );
+}
+if (!adapter.includes('unit.isEmpty() ? "unit" : null')) {
+  throw new Error('Critical Stock restore must reject missing medication unit metadata');
+}
+
+const dosePlugin = read('native-android/dose-reminder/DoseReminderPlugin.java');
+if (!dosePlugin.includes('unit == null || unit.trim().isEmpty()')) {
+  throw new Error('Dose Reminder bridge must require an explicit medication unit');
 }
 
 console.log('Medication unit default and Critical Stock lock-boundary checks passed.');

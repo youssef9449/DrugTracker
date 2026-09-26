@@ -313,6 +313,9 @@ public final class CriticalStockAlarmAdapter
             marked[0] = runtime.markOneShotDelivered(
                     occurrenceKey(medicationId),
                     operationVersion);
+            if (marked[0]) {
+                ACTIVE_DELIVERY_CLAIMS.remove(claimKey);
+            }
         });
         return marked[0];
     }

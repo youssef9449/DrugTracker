@@ -93,6 +93,21 @@ describe('doseSchedule helpers', () => {
     expect(schedule[1]).toMatchObject({ id: 'b', amount: 1, time: '20:00' });
   });
 
+  it('excludes rows without a valid persisted dose ID instead of generating one during reads', () => {
+    const input = {
+      doseSchedule: [
+        dose({ id: 'stable', amount: 1, time: '08:00' }),
+        { amount: 2, time: '20:00' } as MedicationDose,
+        { id: '   ', amount: 1, time: '22:00' } as MedicationDose,
+      ],
+    };
+    const first = getDoseScheduleForUI(input);
+    const second = getDoseScheduleForUI(input);
+
+    expect(first).toEqual([{ id: 'stable', amount: 1, time: '08:00' }]);
+    expect(second).toEqual(first);
+  });
+
   // ── Multi-dose persistence shape (via validate) ───────────────────
   it('multi-dose schedule produces dosesPerDay, dailyDose, and preserved pairs', () => {
     const result = validateAndNormalizeDoseSchedule(3, [

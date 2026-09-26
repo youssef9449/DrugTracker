@@ -104,6 +104,22 @@ export function runGatedBackupRestore(opts: {
             freshByName.get(normalizeMedicationName(backupMedication.name));
 
           if (existing) {
+            if (touchedExistingIds.has(existing.id)) {
+              const compensationError = await compensateInvalidatedStates(
+                invalidatedStates
+              );
+              return {
+                outcome: 'persist_failed' as const,
+                medications: fresh.medications,
+                logs: fresh.logs,
+                restoredCount: 0,
+                reason: compensationError
+                  ? 'duplicate_restore_medication_target;compensation:' +
+                    compensationError
+                  : 'duplicate_restore_medication_target',
+              };
+            }
+
             backupMedicationIdToTargetId.set(
               backupMedication.id,
               existing.id

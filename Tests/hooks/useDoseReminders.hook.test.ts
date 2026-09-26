@@ -192,6 +192,67 @@ describe('useDoseReminders', () => {
       );
     });
 
+    it('fails closed when the persisted FIRED map is invalid', () => {
+      const med = makeMed({ id: 'med-fired-invalid' });
+      localStorage.setItem(FIRED_KEY, '{not-json');
+      const { result } = renderHook(() =>
+        useDoseReminders(defaultOpts({ medications: [med] }))
+      );
+
+      act(() => {
+        result.current.openAlarm('med-fired-invalid', 'd1');
+      });
+
+      expect(result.current.alarmingMedication).toBeNull();
+    });
+
+    it('fails closed when the FIRED map cannot be read', () => {
+      const med = makeMed({ id: 'med-fired-read-failure' });
+      const getItemSpy = vi
+        .spyOn(Storage.prototype, 'getItem')
+        .mockImplementation(() => {
+          throw new Error('storage read failed');
+        });
+
+      const { result } = renderHook(() =>
+        useDoseReminders(defaultOpts({ medications: [med] }))
+      );
+
+      act(() => {
+        result.current.openAlarm('med-fired-read-failure', 'd1');
+      });
+
+      expect(result.current.alarmingMedication).toBeNull();
+      getItemSpy.mockRestore();
+    });
+
+    it('keeps a queued alarm deferred when the FIRED map is invalid', () => {
+      const medA = makeMed({ id: 'med-fired-queue-a' });
+      const medB = makeMed({ id: 'med-fired-queue-b' });
+      const { result } = renderHook(() =>
+        useDoseReminders(defaultOpts({ medications: [medA, medB] }))
+      );
+
+      act(() => {
+        result.current.openAlarm('med-fired-queue-a', 'd1');
+        result.current.openAlarm('med-fired-queue-b', 'd1');
+      });
+
+      localStorage.setItem(FIRED_KEY, '{not-json');
+
+      act(() => {
+        expect(result.current.dismissAlarm()).toBe(false);
+      });
+      expect(result.current.alarmingMedication?.id).toBe('med-fired-queue-a');
+
+      localStorage.removeItem(FIRED_KEY);
+
+      act(() => {
+        expect(result.current.dismissAlarm()).toBe(true);
+      });
+      expect(result.current.alarmingMedication?.id).toBe('med-fired-queue-b');
+    });
+
     it('keeps the alarm open when the FIRED marker cannot be persisted', () => {
       const med = makeMed({ id: 'med-dismiss-storage-failure' });
       const { result } = renderHook(() =>

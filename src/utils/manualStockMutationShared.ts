@@ -24,7 +24,7 @@ import {
 import { cancelDoseReminderNative, cancelDoseSnoozeNative } from './doseReminderNative';
 import { scheduleDoseReminder } from './doseReminderScheduling';
 import { scheduleSnoozedDoseReminder } from './notifications/doseReminderNotifications';
-import { getSnoozeUntil, isSnoozeActive } from './doseReminderStorage';
+import { getSnoozeUntil } from './doseReminderStorage';
 import { getDoseReminderSlots } from './doseReminderDefinitions';
 
 export interface DoseReminderInvalidationResult {
@@ -97,21 +97,29 @@ export async function restoreInvalidatedDoseReminders(med: Medication): Promise<
     const allowManualTakeAction = med.autoDeductEnabled === false;
     for (const slot of getDoseReminderSlots(med)) {
       const shouldSkipToday = isDoseConsumedOnDate(med, slot.doseId, today);
-      await scheduleDoseReminder(
-        med.id, med.name, slot.time, slot.amount, slot.unit, slot.doseId,
-        {
-          ...(shouldSkipToday ? { skipToday: true as const } : {}),
-          allowManualTakeAction,
-          ...(slot.description ? { doseDescription: slot.description } : {}),
-          ...(treatmentEndDate ? { treatmentEndDate } : {}),
-        }
-      );
-      const snoozeUntil = getSnoozeUntil(med.id, slot.doseId);
-      if (snoozeUntil != null && snoozeUntil > Date.now() && isSnoozeActive(med.id, slot.doseId)) {
-        const remainingMinutes = Math.max(0.001, (snoozeUntil - Date.now()) / 60_000);
+      const snoozeUntilOutcome = getSnoozeUntil(med.id, slot.doseId);
+      if (snoozeUntilOutcome.status === 'invalid' || snoozeUntilOutcome.status === 'read_failed') {
+        throw new Error(`snooze_state_unreadable:${snoozeUntilOutcome.reason}`);
+      }
+
+      const snoozeUntil =
+        snoozeUntilOutcome.status === 'ok' ? snoozeUntilOutcome.value : null;
+      const nowMs = Date.now();
+      if (snoozeUntil != null && nowMs < snoozeUntil) {
+        const remainingMinutes = Math.max(0.001, (snoozeUntil - nowMs) / 60_000);
         await scheduleSnoozedDoseReminder(
           med.id, med.name, slot.amount, slot.unit, slot.time, remainingMinutes,
           slot.doseId, allowManualTakeAction, slot.description
+        );
+      } else {
+        await scheduleDoseReminder(
+          med.id, med.name, slot.time, slot.amount, slot.unit, slot.doseId,
+          {
+            ...(shouldSkipToday ? { skipToday: true as const } : {}),
+            allowManualTakeAction,
+            ...(slot.description ? { doseDescription: slot.description } : {}),
+            ...(treatmentEndDate ? { treatmentEndDate } : {}),
+          }
         );
       }
     }

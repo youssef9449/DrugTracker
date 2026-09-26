@@ -454,11 +454,6 @@ public final class AutoDeductionScheduler {
                         storageKey,
                         expectedOperationVersion);
     }
-    boolean removeSchedule(String storageKey) {
-        return storageKey != null
-                && !storageKey.isEmpty()
-                && schedulingAdapter.removeSchedule(storageKey);
-    }
     boolean hasCancellationTombstoneStored(String occurrenceKey) {
         return occurrenceKey != null
                 && !occurrenceKey.isEmpty()
@@ -487,18 +482,6 @@ public final class AutoDeductionScheduler {
     boolean removeScheduleMetadataIfVersion(String prefKey, String expectedVersion) {
         synchronized (AutoDeductionScheduler.ScheduleOperationLock.class) {
             return removeScheduleMetadataIfVersionLocked(prefKey, expectedVersion);
-        }
-    }
-    /**
-     * Unconditional remove — intentional cancel / malformed restore cleanup.
-     * Caller must hold SCHEDULE_LOCK, or use the public cancel path.
-     */
-    void removeScheduleMetadataLocked(String storageKey) {
-        removeSchedule(storageKey);
-    }
-    void removeScheduleMetadata(String prefKey) {
-        synchronized (AutoDeductionScheduler.ScheduleOperationLock.class) {
-            removeScheduleMetadataLocked(prefKey);
         }
     }
     /**

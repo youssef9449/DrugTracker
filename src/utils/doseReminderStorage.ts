@@ -1,5 +1,5 @@
 /** Persistent per-dose snooze marker with failure-aware accessors. */
-import { loadValidatedJson, saveJson, type JsonParserVerdict } from './storage';
+import { loadValidatedJson, readJsonOutcome, saveJson, type JsonParserVerdict } from './storage';
 
 export const SNOOZE_KEY = 'android_med_tracker_snooze_v1';
 
@@ -24,17 +24,27 @@ export function snoozeStorageKey(medId: string, doseId: string): string | null {
   return `${medId}::${id}`;
 }
 
+export type SnoozeUntilReadOutcome =
+  | { status: 'ok'; value: number | null }
+  | { status: 'missing' }
+  | { status: 'invalid'; reason: string }
+  | { status: 'read_failed'; reason: string };
+
 export function getSnoozeUntil(
   medId: string,
   doseId: string
-): number | null {
+): SnoozeUntilReadOutcome {
   const key = snoozeStorageKey(medId, doseId);
-  if (!key) return null;
-  const snooze = loadValidatedJson(SNOOZE_KEY, parseSnoozeMap, {});
-  const until = snooze[key];
-  return typeof until === 'number' && Number.isFinite(until)
-    ? until
-    : null;
+  if (!key) return { status: 'invalid', reason: 'snooze_key_invalid' };
+
+  const outcome = readJsonOutcome(SNOOZE_KEY, parseSnoozeMap);
+  if (outcome.status !== 'ok') return outcome;
+
+  const until = outcome.value[key];
+  return {
+    status: 'ok',
+    value: typeof until === 'number' && Number.isFinite(until) ? until : null,
+  };
 }
 
 export function clearSnoozedDose(medId: string, doseId: string): boolean {
@@ -53,8 +63,14 @@ export function isSnoozeActive(
   doseId: string,
   nowMs: number = Date.now()
 ): boolean {
-  const until = getSnoozeUntil(medId, doseId);
-  return until != null && nowMs < until;
+  const outcome = getSnoozeUntil(medId, doseId);
+  if (outcome.status === 'invalid' || outcome.status === 'read_failed') {
+    // Fail closed: corrupted/unreadable durable snooze state must not make a
+    // reminder eligible until the persisted state can be reconciled.
+    return true;
+  }
+  if (outcome.status !== 'ok') return false;
+  return outcome.value != null && nowMs < outcome.value;
 }
 
 export function setSnoozeUntil(

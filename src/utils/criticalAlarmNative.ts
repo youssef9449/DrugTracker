@@ -1,4 +1,5 @@
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { registerPlugin } from '@capacitor/core';
+import { isAndroidPlatform } from './platform';
 import {
   nativeFailureErrorCode,
   toNativeBoundaryError,
@@ -32,14 +33,6 @@ interface CriticalStockPlugin {
 
 const CriticalStock = registerPlugin<CriticalStockPlugin>('CriticalStock');
 
-function isAndroid(): boolean {
-  try {
-    return typeof Capacitor !== 'undefined' && Capacitor.getPlatform() === 'android';
-  } catch {
-    return false;
-  }
-}
-
 export async function scheduleCriticalAlarmNative(
   medId: string,
   medName: string,
@@ -48,7 +41,7 @@ export async function scheduleCriticalAlarmNative(
   notificationTitle: string,
   notificationBody: string
 ): Promise<CriticalNativeResult> {
-  if (!isAndroid()) {
+  if (!isAndroidPlatform()) {
     return { ok: false, error: 'not_android', errorCode: 'not_android' };
   }
   try {
@@ -83,7 +76,7 @@ export async function scheduleCriticalAlarmNative(
 export async function cancelCriticalAlarmNative(
   medId: string
 ): Promise<CriticalNativeResult> {
-  if (!isAndroid()) {
+  if (!isAndroidPlatform()) {
     return { ok: false, error: 'not_android', errorCode: 'not_android' };
   }
   try {
@@ -115,7 +108,7 @@ export async function verifyCriticalAlarmPendingNative(
   | { ok: true; pending: boolean }
   | NativeBoundaryFailure
 > {
-  if (!isAndroid()) {
+  if (!isAndroidPlatform()) {
     return { ok: false, error: 'not_android', errorCode: 'not_android' };
   }
   try {
@@ -135,7 +128,7 @@ export async function listScheduledCriticalMedicationIdsNative(): Promise<
   | { ok: true; ids: string[] }
   | NativeBoundaryFailure
 > {
-  if (!isAndroid()) {
+  if (!isAndroidPlatform()) {
     return { ok: true, ids: [] };
   }
   try {

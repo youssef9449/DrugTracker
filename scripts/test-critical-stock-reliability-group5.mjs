@@ -46,6 +46,11 @@ assert(
     && adapter.includes('ACTIVE_DELIVERY_CLAIMS')
     && adapter.includes('runtime.ownsActiveSchedule('),
   'Critical Stock must own delivery claim state while using only the shared generic operation lock'
+);\nassert(
+  adapter.includes('ACTIVE_DELIVERY_CLAIMS.contains(claimKey)')
+    && adapter.includes('if (marked[0])')
+    && adapter.includes('ACTIVE_DELIVERY_CLAIMS.remove(claimKey)'),
+  'Critical Stock must require an active claim for delivery evidence and retire it after successful evidence'
 );
 assert(
   receiver.indexOf('adapter.claimOneShotDelivery(')

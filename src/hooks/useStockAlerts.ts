@@ -1,3 +1,4 @@
+import { DEFAULT_MEDICATION_UNIT } from '../constants/medicationDefaults';
 import { useEffect, useRef, useState } from 'react';
 import type { Medication } from '../types';
 import { getTodayDateString } from '../utils/dateCalculations';
@@ -210,7 +211,7 @@ export function useStockAlerts({
                 latestMed.name,
                 latestDecision.daysLeft,
                 Number(latestMed.currentPills) || 0,
-                latestMed.unit || 'قرص'
+                latestMed.unit || DEFAULT_MEDICATION_UNIT
               )
             );
           } catch {

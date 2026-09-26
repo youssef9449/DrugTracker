@@ -1,3 +1,4 @@
+import { DEFAULT_MEDICATION_UNIT } from '../constants/medicationDefaults';
 import type { Medication } from '../types';
 import { pluralizeArabic } from '../lib/arabicPlural';
 import { DEFAULT_LIQUID_PACK_SIZE, DEFAULT_SOLID_PACK_SIZE, DAYS_PER_MONTH } from './time';
@@ -38,7 +39,7 @@ export function describeStockInStrips(
   pills: number,
   pillsPerStrip?: number,
   stripsPerBox?: number,
-  unit: string = 'قرص'
+  unit: string = DEFAULT_MEDICATION_UNIT
 ): string | null {
   if (!isSolidUnit(unit) || !pillsPerStrip || pillsPerStrip <= 0 || pills <= 0) {
     return null;
@@ -72,7 +73,7 @@ export function describeOrderInBoxes(
   stripsPerBox?: number,
   pillsPerStrip?: number,
   packageSize?: number,
-  unit: string = 'قرص'
+  unit: string = DEFAULT_MEDICATION_UNIT
 ): string {
   const solid = isSolidUnit(unit);
   const boxWordLabel = unit === 'مل' ? 'عبوة' : 'علبة';
@@ -152,7 +153,7 @@ export function formatScheduledDoseBreakdown(med: Medication, isDaily: boolean):
   const dailyAmt = dailyScheduleAmount(med);
   const effective = dailyAmt > 0 ? dailyAmt : slots;
   const total = isDaily ? effective : effective * DAYS_PER_MONTH;
-  const unit = med.unit || 'قرص';
+  const unit = med.unit || DEFAULT_MEDICATION_UNIT;
 
   if (isSolidUnit(unit)) {
     if (med.pillsPerStrip && med.pillsPerStrip > 0) {

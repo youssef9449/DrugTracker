@@ -94,7 +94,7 @@ public final class CriticalStockAlarmAdapter
                     ExactAlarmContract.FIELD_OPERATION_VERSION, "");
 
             String medicationName = metadata.optString("medicationName", "");
-            String unit = metadata.optString("unit", "قرص");
+            String unit = metadata.optString("unit", "");
             String notificationTitle =
                     metadata.optString("notificationTitle", "");
             String notificationBody =
@@ -119,7 +119,7 @@ public final class CriticalStockAlarmAdapter
                     /* cancelled */ false,
                     /* identityKeyValid */ medicationId != null && !medicationId.isEmpty(),
                     /* metadataPresent */ true,
-                    /* missingRequiredField */ null,
+                    /* missingRequiredField */ unit.isEmpty() ? "unit" : null,
                     /* triggerDatetimeValid */ triggerAt > 0L,
                     /* triggerInPast */ triggerAt > 0L && triggerAt <= System.currentTimeMillis(),
                     /* ownershipConflict */ false);

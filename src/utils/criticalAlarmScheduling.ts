@@ -1,3 +1,4 @@
+import { DEFAULT_MEDICATION_UNIT } from '../constants/medicationDefaults';
 import { scheduleCriticalAlarmNative, cancelCriticalAlarmNative, verifyCriticalAlarmPendingNative } from './criticalAlarmNative';
 import { getNativePlatform, isNativePlatform } from './notifications/notificationPlatform';
 import { cancelNotification, getNotificationPermissionResult, getPendingNotificationResult, scheduleNotification } from './notificationRuntime';
@@ -94,7 +95,7 @@ export async function scheduleCriticalAlarm(
   medId: string,
   medName: string,
   criticalDateMs: number,
-  unit: string = 'قرص'
+  unit: string = DEFAULT_MEDICATION_UNIT
 ): Promise<CriticalAlarmOperationResult> {
   const fireAt = new Date(criticalDateMs);
   const title = `🚨 ${medName}: اقترب النفاد الحرج`;

@@ -68,6 +68,7 @@ public final class DoseReminderAlarmFeature
             if (reminderTime.isEmpty()) missingField = "reminderTime";
             else if (amount <= 0d) missingField = "amount";
             else if (calendarDate.isEmpty()) missingField = "calendarDate";
+            else if (meta == null || meta.optString("unit", "").isEmpty()) missingField = "unit";
             else if (treatmentEndInvalid) missingField = "treatmentEndDate";
 
             ExactAlarmRestorePolicy.Outcome outcome = ExactAlarmRestorePolicy.evaluate(
@@ -100,7 +101,7 @@ public final class DoseReminderAlarmFeature
             doseId = parts[1];
             String medicationName = meta.optString(
                     "medicationName", "");
-            String unit = meta.optString("unit", "قرص");
+            String unit = meta.optString("unit", "");
             String doseDescription = meta.optString("doseDescription", "");
             boolean allowManualTakeAction = meta.optBoolean(
                     "allowManualTakeAction", true);
@@ -227,7 +228,7 @@ public final class DoseReminderAlarmFeature
                             meta.optString("reminderTime", ""),
                             amount,
                             meta.optString("medicationName", ""),
-                            meta.optString("unit", "قرص"),
+                            meta.optString("unit", ""),
                             triggerAt,
                             meta.optBoolean(
                                     "allowManualTakeAction",

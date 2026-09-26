@@ -1,3 +1,4 @@
+import { DEFAULT_MEDICATION_UNIT } from '../constants/medicationDefaults';
 import type { FC } from 'react';
 import {
   Layers,
@@ -466,7 +467,7 @@ export const MedicationCardStockSummary: FC<MedicationCardStockSummaryProps> = (
           <span className={`font-mono font-extrabold text-[11px] leading-none ${currentPills === 0 ? 'text-red-600' : 'text-slate-900'}`}>
             {currentPills}
           </span>
-          <span className="text-[8px] text-slate-500 truncate">{unit || 'قرص'}</span>
+          <span className="text-[8px] text-slate-500 truncate">{unit || DEFAULT_MEDICATION_UNIT}</span>
         </div>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
           <div className="flex shrink-0 items-center gap-0.5 bg-white px-1.5 py-0.5 rounded-full border border-slate-200/80 font-mono text-teal-800 font-bold" title={`الجرعة: ${dailyDose}/يوم`}>
@@ -496,7 +497,7 @@ export const MedicationCardStockSummary: FC<MedicationCardStockSummaryProps> = (
         >
           {currentPills}
         </span>
-        <span className="text-[10px] text-slate-600 font-medium">{unit || 'قرص'}</span>
+        <span className="text-[10px] text-slate-600 font-medium">{unit || DEFAULT_MEDICATION_UNIT}</span>
         {nonSolidPackageDesc && (
           <span className="text-[9px] text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded-full border border-teal-100 font-medium truncate">
             ({nonSolidPackageDesc})

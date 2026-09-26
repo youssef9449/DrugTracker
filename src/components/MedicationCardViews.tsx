@@ -1,3 +1,4 @@
+import { DEFAULT_MEDICATION_UNIT } from '../constants/medicationDefaults';
 import type { FC } from 'react';
 import type { Medication, ConsumptionLog } from '../types';
 import { calculateMedicationStatus } from '../utils/medicationStatus';
@@ -460,7 +461,7 @@ export const MedicationCardCompactView: FC<MedicationCardViewProps> = (props) =>
       </div>
       <MedicationCardStockSummary
         currentPills={currentPills}
-        unit={medication.unit || 'قرص'}
+        unit={medication.unit || DEFAULT_MEDICATION_UNIT}
         dailyDose={medication.dailyDose}
         depletionLabel={shortDepletionLabel(depletion, isOut)}
         depletionTitle={`النفاذ: ${formatDepletionDate(depletion.dateStr, depletion.daysLeft, currentPills)}`}
@@ -555,7 +556,7 @@ export const MedicationCardDetailedView: FC<MedicationCardViewProps> = (props) =
       </div>
       <MedicationCardStockSummary
         currentPills={currentPills}
-        unit={medication.unit || 'قرص'}
+        unit={medication.unit || DEFAULT_MEDICATION_UNIT}
         dailyDose={medication.dailyDose}
         depletionLabel={shortDepletionLabel(depletion, isOut)}
         depletionTitle={`النفاذ: ${formatDepletionDate(depletion.dateStr, depletion.daysLeft, currentPills)}`}

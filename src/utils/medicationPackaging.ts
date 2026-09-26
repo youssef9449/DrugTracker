@@ -182,8 +182,9 @@ export function formatScheduledDoseBreakdown(med: Medication, isDaily: boolean):
     }
 
     if (med.packageSize && med.packageSize > 0) {
-      const boxes = Math.floor(total / med.packageSize);
-      const remainder = normalizeDisplayQuantity(total % med.packageSize);
+      const size = getEffectivePackageSize({ unit, packageSize: med.packageSize });
+      const boxes = Math.floor(total / size);
+      const remainder = normalizeDisplayQuantity(total % size);
       const parts: string[] = [];
       if (boxes > 0) parts.push(pluralizeArabic(boxes, 'علبة'));
       if (remainder > 0) parts.push(formatUnitQuantity(remainder, unit));

@@ -83,8 +83,8 @@ export function totalDailyAmount(schedule: MedicationDose[]): number {
  * Map a medication to a UI-ready schedule from explicit `doseSchedule` only.
  *
  * No synthetic rows from dailyDose or any medication-level time field. Empty/missing schedule → [].
- * Existing ids/amounts/times are preserved (ids still generated only when a
- * stored row is missing id — not a whole-schedule invention).
+ * Existing valid ids/amounts/times are preserved. Rows without a valid
+ * persisted id are excluded rather than assigned a new identity during a read.
  */
 export function getDoseScheduleForUI(
   med: Pick<Medication, 'doseSchedule'>
@@ -94,9 +94,15 @@ export function getDoseScheduleForUI(
   }
   return sortDoseSchedule(
     med.doseSchedule
-      .filter((d) => d && isValidDoseTime(normalizeTimeString(d.time)) && Number(d.amount) > 0)
+      .filter(
+        (d) =>
+          d &&
+          normalizeDoseId(d.id) !== undefined &&
+          isValidDoseTime(normalizeTimeString(d.time)) &&
+          Number(d.amount) > 0
+      )
       .map((d) => ({
-        id: normalizeDoseId(d.id) || generateId('dose'),
+        id: normalizeDoseId(d.id) as string,
         amount: Number(d.amount),
         time: normalizeTimeString(d.time),
         ...(normalizeDoseDescription(d.description) !== undefined

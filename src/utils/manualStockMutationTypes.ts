@@ -103,6 +103,18 @@ export interface GatedDeleteMedicationResult {
   unit?: string;
   reason?: string;
 }
+export type GatedBackupRestoreOutcome =
+  | 'applied'
+  | 'empty_medications'
+  | 'persist_failed'
+  | 'native_list_failed';
+export interface GatedBackupRestoreResult {
+  outcome: GatedBackupRestoreOutcome;
+  medications: Medication[];
+  logs: ConsumptionLog[];
+  restoredCount: number;
+  reason?: string;
+}
 export type GatedMedicationUpdateOutcome =
   | 'applied'
   | 'missing_med'

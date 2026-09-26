@@ -1,4 +1,4 @@
-import { StrictMode, type PropsWithChildren } from 'react';
+import { createElement, StrictMode, type PropsWithChildren } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import {
@@ -69,9 +69,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const StrictModeWrapper = ({ children }: PropsWithChildren) => (
-  <StrictMode>{children}</StrictMode>
-);
+const StrictModeWrapper = ({ children }: PropsWithChildren) =>
+  createElement(StrictMode, null, children);
 
 describe('pharmacy settings hydration', () => {
   it.each([30, 60])(

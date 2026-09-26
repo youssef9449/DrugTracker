@@ -1,8 +1,9 @@
-import type { Medication } from '../types';
+import type { Medication, ConsumptionLog, PharmacySettings } from '../types';
 import {
   runGatedAddMedication,
   runGatedMedicationUpdate,
   runGatedDeleteMedication,
+  runGatedBackupRestore,
 } from '../utils/manualStockMutation';
 import { generateId } from '../utils/id';
 import { playSuccessChime } from '../utils/sound';
@@ -119,5 +120,40 @@ export function useMedicationCrudHandlers(deps: MedicationHandlersDeps, state: M
     })();
   };
 
-  return { handleSaveMedication, handleDeleteMedication };
+  const handleRestoreBackup = async (opts: {
+    backupMedications: Medication[];
+    backupLogs?: ConsumptionLog[] | undefined;
+    mode: 'replace' | 'merge';
+    pharmacySettings?: PharmacySettings | undefined;
+    onApplyPharmacySettings?: ((settings: PharmacySettings) => void) | undefined;
+  }): Promise<boolean> => {
+    const result = await runGatedBackupRestore({
+      backupMedications: opts.backupMedications,
+      backupLogs: opts.backupLogs,
+      mode: opts.mode,
+    });
+
+    if (result.outcome !== 'applied') {
+      showToast('تعذر استعادة النسخة الاحتياطية. يرجى المحاولة مرة أخرى.');
+      return false;
+    }
+
+    setMedications(result.medications);
+    medicationsRef.current = result.medications;
+    setLogs(result.logs);
+
+    if (opts.pharmacySettings && opts.onApplyPharmacySettings) {
+      opts.onApplyPharmacySettings(opts.pharmacySettings);
+    }
+
+    if (soundEnabled) playSuccessChime();
+    showToast(
+      opts.mode === 'replace'
+        ? `تمت استعادة ${result.restoredCount} دواء بنجاح (استبدال شامل)`
+        : `تم دمج ${result.restoredCount} دواء مع القائمة الحالية بنجاح`
+    );
+    return true;
+  };
+
+  return { handleSaveMedication, handleDeleteMedication, handleRestoreBackup };
 }

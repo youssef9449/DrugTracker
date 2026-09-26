@@ -47,3 +47,7 @@ export {
 export {
   runGatedMedicationNotificationToggle,
 } from './manualStockMutationNotifications';
+
+export {
+  runGatedBackupRestore,
+} from './manualStockMutationBackup';

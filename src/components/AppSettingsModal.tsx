@@ -6,9 +6,10 @@ import {
   Phone,
   Check,
 } from 'lucide-react';
-import { Medication, PharmacySettings } from '../types';
+import { Medication, PharmacySettings, ConsumptionLog } from '../types';
 import { AppPreferencesSection } from './settings/AppPreferencesSection';
 import { NotificationSettingsSection } from './settings/NotificationSettingsSection';
+import { BackupRestoreSection } from './settings/BackupRestoreSection';
 import { Modal } from './ui/Modal';
 import {
   cleanPhoneNumber,
@@ -26,6 +27,7 @@ export interface AppSettingsModalProps {
   mode?: 'all' | 'pharmacy' | undefined;
   settings: PharmacySettings;
   medications: Medication[];
+  logs?: ConsumptionLog[] | undefined;
   activeOrderItems?: OrderItem[] | undefined;
   onSaveSettings: (newSettings: PharmacySettings) => void;
   soundEnabled: boolean;
@@ -33,6 +35,13 @@ export interface AppSettingsModalProps {
   criticalStockAlertsEnabled?: boolean | undefined;
   onSendTestNotification?: (() => void) | undefined;
   autoDeductEnabled?: boolean | undefined;
+  onRestoreBackup?: ((opts: {
+    backupMedications: Medication[];
+    backupLogs?: ConsumptionLog[];
+    mode: 'replace' | 'merge';
+    pharmacySettings?: PharmacySettings;
+    onApplyPharmacySettings?: (settings: PharmacySettings) => void;
+  }) => Promise<boolean> | boolean) | undefined;
   /**
    * Apply app preference toggles only when the user confirms with حفظ الإعدادات.
    * Closing the modal without save discards draft changes.
@@ -61,6 +70,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   onClose,
   settings,
   medications,
+  logs,
   activeOrderItems,
   onSaveSettings,
   soundEnabled,
@@ -68,6 +78,7 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
   criticalStockAlertsEnabled = false,
   onSendTestNotification,
   autoDeductEnabled = true,
+  onRestoreBackup,
   onApplyAppPreferences,
   exactAlarmPermission = null,
   onOpenExactAlarmSettings,
@@ -285,6 +296,15 @@ export const AppSettingsModal: FC<AppSettingsModalProps> = ({
                 exactAlarmPermission={exactAlarmPermission}
                 onOpenExactAlarmSettings={onOpenExactAlarmSettings}
                 onSendTestNotification={onSendTestNotification}
+              />
+              <BackupRestoreSection
+                medications={medications}
+                logs={logs}
+                pharmacySettings={settings}
+                onRestore={onRestoreBackup ?? (() => false)}
+                onSavePharmacySettings={onSaveSettings}
+                soundEnabled={draftSound}
+                showToast={showToast}
               />
             </>
           )}

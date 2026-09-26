@@ -1,22 +1,12 @@
-import { Capacitor } from '@capacitor/core';
+import {
+  getNativePlatform,
+  isNativePlatform,
+  type NativePlatform,
+} from '../platform';
 
-export type NotificationNativePlatform = 'android' | 'ios' | null;
+export type NotificationNativePlatform = NativePlatform;
 
-export function getNativePlatform(): NotificationNativePlatform {
-  try {
-    if (typeof Capacitor === 'undefined') return null;
-    const platform = Capacitor.getPlatform();
-    if (platform === 'android') return 'android';
-    if (platform === 'ios') return 'ios';
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-export function isNativePlatform(): boolean {
-  return getNativePlatform() !== null;
-}
+export { getNativePlatform, isNativePlatform };
 
 export function isWebNotificationSupported(): boolean {
   return typeof window !== 'undefined' && 'Notification' in window;

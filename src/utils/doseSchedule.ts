@@ -17,6 +17,7 @@ import {
   normalizeDoseId,
   normalizeDoseDescription,
   normalizeDoseTimeValue,
+  validateMedicationDose,
 } from './doseIdentity';
 import { isDoseConsumedOnDate, isDoseSkippedOnDate, getTodayDateString } from './dateCalculations';
 /**
@@ -95,23 +96,8 @@ export function getDoseScheduleForUI(
   return sortDoseSchedule(
     med.doseSchedule
       .map((d) => {
-        const id = normalizeDoseId(d?.id);
-        if (
-          !d ||
-          !id ||
-          !isValidDoseTime(normalizeTimeString(d.time)) ||
-          Number(d.amount) <= 0
-        ) {
-          return null;
-        }
-        return {
-          id,
-          amount: Number(d.amount),
-          time: normalizeTimeString(d.time),
-          ...(normalizeDoseDescription(d.description) !== undefined
-            ? { description: normalizeDoseDescription(d.description) }
-            : {}),
-        };
+        const result = validateMedicationDose(d);
+        return result.ok ? result.dose : null;
       })
       .filter((d): d is MedicationDose => d !== null)
   );

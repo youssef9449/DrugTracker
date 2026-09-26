@@ -1,4 +1,5 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
+import { isAndroidPlatform } from './platform';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import {
   classifyNativeError,
@@ -180,11 +181,7 @@ function lookupIosPlatformNotificationId(
 }
 
 export function isAndroidNotificationRuntime(): boolean {
-  try {
-    return typeof Capacitor !== 'undefined' && Capacitor.getPlatform() === 'android';
-  } catch {
-    return false;
-  }
+  return isAndroidPlatform();
 }
 
 export async function scheduleNotification(

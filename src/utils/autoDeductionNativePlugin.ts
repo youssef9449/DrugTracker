@@ -1,4 +1,5 @@
-import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
+import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
+import { isAndroidPlatform } from './platform';
 import type {
   AutoDeductionEvent,
   ApplyAutoDeductionStockResult,
@@ -102,11 +103,7 @@ interface AutoDeductionPlugin {
 }
 
 export function isNativeAndroid(): boolean {
-  try {
-    return typeof Capacitor !== 'undefined' && Capacitor.getPlatform() === 'android';
-  } catch {
-    return false;
-  }
+  return isAndroidPlatform();
 }
 
 export const AutoDeduction = registerPlugin<AutoDeductionPlugin>('AutoDeduction');

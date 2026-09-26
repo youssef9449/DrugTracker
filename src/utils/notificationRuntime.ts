@@ -1,5 +1,5 @@
-import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
-import { isAndroidPlatform } from './platform';
+import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
+import { isAndroidPlatform, isIosPlatform } from './platform';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import {
   classifyNativeError,
@@ -56,14 +56,6 @@ interface NotificationRuntimePlugin {
 }
 
 const NotificationRuntime = registerPlugin<NotificationRuntimePlugin>('NotificationRuntime');
-
-function isIOS(): boolean {
-  try {
-    return typeof Capacitor !== 'undefined' && Capacitor.getPlatform() === 'ios';
-  } catch {
-    return false;
-  }
-}
 
 /**
  * iOS LocalNotifications still requires a numeric platform handle.
@@ -188,7 +180,7 @@ export async function scheduleNotification(
   options: NotificationRuntimePostOptions
 ): Promise<boolean> {
   if (isAndroidNotificationRuntime()) return (await postNativeNotification(options)).ok;
-  if (isIOS()) {
+  if (isIosPlatform()) {
     try {
       const permission = await LocalNotifications.checkPermissions();
       if (permission.display !== 'granted') return false;
@@ -309,7 +301,7 @@ export async function cancelNotification(
   identity: string
 ): Promise<boolean> {
   if (isAndroidNotificationRuntime()) return (await cancelNativeNotification(namespace, identity)).ok;
-  if (isIOS()) {
+  if (isIosPlatform()) {
     try {
       const platformId = lookupIosPlatformNotificationId(namespace, identity);
       if (platformId === null) {
@@ -326,7 +318,7 @@ export async function cancelNotification(
       return false;
     }
   }
-  if (!isIOS()) {
+  if (!isIosPlatform()) {
     const { cancelScheduledWebNotification } = await import('./notifications/webNotifications');
     return cancelScheduledWebNotification(namespace, identity);
   }
@@ -341,7 +333,7 @@ export async function getPendingNotificationResult(
   namespace: string,
   identity: string
 ): Promise<NotificationPendingResult> {
-  if (!isIOS()) {
+  if (!isIosPlatform()) {
     // #519/#495: pure, failure-preserving Web read. Storage failure is
     // surfaced as an explicit boundary failure — never as "no pending".
     const { readWebScheduledNotification, reconcileWebScheduledNotification } =
@@ -471,7 +463,7 @@ export async function getNotificationPermissionResult(): Promise<NotificationPer
       };
     }
   }
-  if (isIOS()) {
+  if (isIosPlatform()) {
     try {
       const result = await LocalNotifications.checkPermissions();
       return { ok: true, enabled: result.display === 'granted' };

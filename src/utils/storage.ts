@@ -71,6 +71,7 @@ export function isValidMedicationRecord(value: unknown): value is Medication {
     !isNonEmptyString(medication.id) ||
     !isNonEmptyString(medication.name) ||
     !isFiniteNumber(medication.currentPills) ||
+    medication.currentPills < 0 ||
     !isFiniteNumber(medication.dailyDose) ||
     medication.dailyDose <= 0 ||
     typeof medication.unit !== 'string' ||

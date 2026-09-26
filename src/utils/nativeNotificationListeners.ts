@@ -1,4 +1,4 @@
-import { Capacitor } from '@capacitor/core';
+import { isIosPlatform } from './platform';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import {
   addNotificationActionPerformedListener,
@@ -36,7 +36,7 @@ function splitDoseReminderIdentity(identity: string): {
 }
 
 export async function initNotificationListeners(): Promise<void> {
-  if (Capacitor.getPlatform() === 'ios') {
+  if (isIosPlatform()) {
     try {
       await LocalNotifications.registerActionTypes({
         types: [{
@@ -54,7 +54,7 @@ export async function initNotificationListeners(): Promise<void> {
   }
 
   try {
-    if (Capacitor.getPlatform() === 'ios') {
+    if (isIosPlatform()) {
       notificationActionHandle = await LocalNotifications.addListener(
         'localNotificationActionPerformed',
         (event) => {
@@ -92,7 +92,7 @@ export async function initNotificationListeners(): Promise<void> {
   }
 
   try {
-    if (Capacitor.getPlatform() === 'ios') {
+    if (isIosPlatform()) {
       notificationHandle = await LocalNotifications.addListener(
         'localNotificationReceived',
         (event) => {

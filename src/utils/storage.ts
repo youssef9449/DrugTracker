@@ -60,7 +60,11 @@ function isHistoryMap(value: unknown): boolean {
   if (value === undefined) return true;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   return Object.values(value as Record<string, unknown>).every(
-    (dates) => Array.isArray(dates) && dates.every((date) => typeof date === 'string')
+    (dates) =>
+      Array.isArray(dates) &&
+      dates.every(
+        (date) => typeof date === 'string' && isValidCalendarDateString(date)
+      )
   );
 }
 

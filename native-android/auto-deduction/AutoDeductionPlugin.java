@@ -430,6 +430,18 @@ public class AutoDeductionPlugin extends Plugin {
             }
         });
     }
+    private static long parsePositiveMutationSeq(String raw) {
+        if (raw == null) {
+            return 0L;
+        }
+        try {
+            long value = Long.parseLong(raw.trim());
+            return value > 0L ? value : 0L;
+        } catch (NumberFormatException ignored) {
+            return 0L;
+        }
+    }
+
     /**
      * Apply foreground signed stock deltas idempotently by mutationSeq.
      * Manual/Refill/Restore JS mutations use this path after computing their
@@ -437,8 +449,10 @@ public class AutoDeductionPlugin extends Plugin {
      */
     @PluginMethod
     public void applyForegroundStockDeltas(PluginCall call) {
-        Long mutationSeqObj = call.getLong("mutationSeq");
-        long mutationSeq = mutationSeqObj != null ? mutationSeqObj : 0L;
+        // mutationSeq crosses the Capacitor bridge as text to preserve the
+        // exact integer representation end-to-end.
+        String mutationSeqRaw = call.getString("mutationSeq");
+        long mutationSeq = parsePositiveMutationSeq(mutationSeqRaw);
         JSArray rawDeltas = call.getArray("deltas");
         JSArray rawResolutions = call.getArray("occurrenceResolutions");
         // #493: applyForegroundDeltas commits deltas + the idempotency

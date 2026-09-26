@@ -1,3 +1,4 @@
+import { DEFAULT_MEDICATION_UNIT } from '../constants/medicationDefaults';
 import type { Medication, MedicationDose } from '../types';
 import { isSolidUnit } from '../utils/medicationPackaging';
 import {
@@ -112,7 +113,7 @@ export function createDefaultFormModel(
 
 export function createEditFormModel(medication: Medication): AddMedicationFormModel {
   const schedule = getDoseScheduleForUI(medication);
-  const initUnit = medication.unit || 'قرص';
+  const initUnit = medication.unit || DEFAULT_MEDICATION_UNIT;
   const isSolid = isSolidUnit(initUnit);
   const hasStrips =
     isSolid &&

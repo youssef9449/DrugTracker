@@ -147,7 +147,7 @@ function seedMed(overrides: Record<string, unknown> = {}): void {
     // Global toggle (current header aria-label reflects state):
     //   enabled → "الخصم التلقائي لجميع الأدوية مفعّل — انقر للإيقاف"
     //   disabled → "الخصم التلقائي لجميع الأدوية متوقف — انقر للتفعيل"
-    const globalToggle = screen.getByLabelText(/الخصم التلقائي لجميع الأدوية/);
+    const globalToggle = screen.getByLabelText(/المفتاح العام للخصم التلقائي/);
     fireEvent.click(globalToggle);
     // Phase 4: chime fires after the async durable gate resolves.
     await waitFor(() => expect(playSuccessChime).toHaveBeenCalledTimes(1));

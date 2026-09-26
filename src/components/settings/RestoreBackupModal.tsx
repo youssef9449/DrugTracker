@@ -26,10 +26,11 @@ export interface RestoreBackupModalProps {
   onConfirmRestore: (opts: {
     backupMedications: Medication[];
     backupLogs?: ConsumptionLog[] | undefined;
+    restoreLogs: boolean;
     mode: 'replace' | 'merge';
     pharmacySettings?: PharmacySettings | undefined;
     restorePharmacySettings: boolean;
-  }) => Promise<void> | void;
+  }) => Promise<boolean> | boolean;
 }
 
 export const RestoreBackupModal: FC<RestoreBackupModalProps> = ({
@@ -66,23 +67,28 @@ export const RestoreBackupModal: FC<RestoreBackupModalProps> = ({
     pharmacySettings && (pharmaciesCount > 0 || contactsCount > 0 || addressesCount > 0)
   );
 
+  const logsSelectable = backupData.scope === 'all' && includeMedications;
   const hasAnySelection =
     (includeMedications && medications.length > 0) ||
-    (includeLogs && Boolean(logs && logs.length > 0)) ||
+    (includeLogs && logsSelectable) ||
     (includePharmacy && Boolean(pharmacySettings));
 
   const handleConfirm = async () => {
-    if (!hasAnySelection) return;
+    if (!hasAnySelection || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      await onConfirmRestore({
+      const restoreLogs = includeLogs && logsSelectable;
+      const result = await onConfirmRestore({
         backupMedications: includeMedications ? medications : [],
-        backupLogs: includeLogs ? logs : undefined,
+        backupLogs: restoreLogs ? logs : undefined,
+        restoreLogs,
         mode,
         pharmacySettings: includePharmacy ? pharmacySettings : undefined,
         restorePharmacySettings: includePharmacy && Boolean(pharmacySettings),
       });
-      onClose();
+      if (result !== false) {
+        onClose();
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -271,11 +277,21 @@ export const RestoreBackupModal: FC<RestoreBackupModalProps> = ({
             </label>
 
             {/* Consumption Logs Checkbox */}
-            {logs && logs.length > 0 && (
-              <label className="flex items-center gap-2.5 bg-white rounded-xl border border-slate-200 px-3 py-2.5 cursor-pointer shadow-2xs hover:border-slate-300 transition">
+            {backupData.scope === 'all' && (
+              <label
+                className={
+                  "flex items-center gap-2.5 bg-white rounded-xl border border-slate-200 px-3 py-2.5 transition " +
+                  (logsSelectable
+                    ? "cursor-pointer shadow-2xs hover:border-slate-300"
+                    : "cursor-not-allowed opacity-60")
+                }
+              >
                 <Checkbox
-                  checked={includeLogs}
-                  onChange={(e) => setIncludeLogs(e.target.checked)}
+                  checked={includeLogs && logsSelectable}
+                  onChange={(e) => {
+                    if (logsSelectable) setIncludeLogs(e.target.checked);
+                  }}
+                  disabled={!logsSelectable}
                   aria-label="استعادة سجلات الاستهلاك السابقة"
                 />
                 <div className="min-w-0">
@@ -283,7 +299,8 @@ export const RestoreBackupModal: FC<RestoreBackupModalProps> = ({
                     استعادة سجلات الاستهلاك السابقة
                   </span>
                   <span className="text-[11px] text-slate-500 block">
-                    {logs.length} سجل استهلاك وجرعات
+                    {logs?.length ?? 0} سجل استهلاك وجرعات
+                    {!logsSelectable ? ' — اختر استعادة الأدوية أولاً في وضع الاستبدال' : ''}
                   </span>
                 </div>
               </label>

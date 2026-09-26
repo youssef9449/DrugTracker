@@ -119,7 +119,7 @@ public final class CriticalStockAlarmAdapter
                     /* cancelled */ false,
                     /* identityKeyValid */ medicationId != null && !medicationId.isEmpty(),
                     /* metadataPresent */ true,
-                    /* missingRequiredField */ null,
+                    /* missingRequiredField */ unit.isEmpty() ? "unit" : null,
                     /* triggerDatetimeValid */ triggerAt > 0L,
                     /* triggerInPast */ triggerAt > 0L && triggerAt <= System.currentTimeMillis(),
                     /* ownershipConflict */ false);

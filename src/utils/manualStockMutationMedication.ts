@@ -64,7 +64,7 @@ export function runGatedAddMedication(opts: {
         outcome: 'persist_failed' as const,
         medications: fresh.medications,
         logs: fresh.logs,
-        reason: 'persist_failed',
+        reason: err,
         medicationName: medication.name,
         unit: medication.unit,
       };
@@ -342,8 +342,8 @@ export function runGatedMedicationUpdate(opts: {
         logs: fresh.logs,
         settleLog: null,
         reason: compensationError
-          ? 'persist_failed;compensation:' + compensationError
-          : 'persist_failed',
+          ? err + ';compensation:' + compensationError
+          : err,
         medicationName: freshMed.name,
         unit: freshMed.unit,
       };

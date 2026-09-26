@@ -56,8 +56,36 @@ export const PERSIST_FAILURE_MESSAGES = {
   critical: 'قد لا يتم حفظ تفضيل تنبيه النفاذ الحرج.',
   autoDeduct: 'قد لا يتم حفظ تفضيل الخصم التلقائي.',
 } as const;
-/** Storage error reasons (used by persist() in storage.ts). */
+
+/**
+ * Storage/save failure messages that preserve the original failure reason.
+ * The raw reason is intentionally included so a device-specific/native
+ * failure can be identified from the toast instead of being collapsed into
+ * the generic "تعذّر حفظ البيانات" message.
+ */
 export const STORAGE_ERRORS = {
   quotaExceeded: 'مساحة التخزين ممتلئة',
   generic: 'تعذّر حفظ البيانات',
+  medicationSave: (reason?: string) => {
+    const value = reason?.trim();
+    if (!value || value === 'persist_failed') return 'تعذّر حفظ بيانات الدواء.';
+    if (value === 'native_invalidation_failed' || value.includes('invalidate_recurrence')) {
+      return `تعذّر حفظ الدواء: فشل إلغاء جدولة الخصم التلقائي القديم. السبب: ${value}`;
+    }
+    if (value.includes('dose_reminder') || value.includes('reminder_invalidation')) {
+      return `تعذّر حفظ الدواء: فشل تحديث تذكيرات الجرعات. السبب: ${value}`;
+    }
+    if (
+      value.includes('foreground_stock') ||
+      value.includes('stock_') ||
+      value.includes('invalid_stock') ||
+      value === 'invalid_mutation_seq'
+    ) {
+      return `تعذّر حفظ الدواء: فشل حفظ مخزون الدواء على الجهاز. السبب: ${value}`;
+    }
+    if (value === 'exact_reconciliation_blocked' || value === 'native_list_failed') {
+      return `تعذّر حفظ الدواء: فشلت مزامنة حالة الخصم التلقائي قبل الحفظ. السبب: ${value}`;
+    }
+    return `تعذّر حفظ الدواء. السبب: ${value}`;
+  },
 } as const;

@@ -49,7 +49,7 @@ export function useMedicationCrudHandlers(deps: MedicationHandlersDeps, state: M
           medicationsRef.current = result.medications;
           setLogs(result.logs);
         }
-        showToast(STORAGE_ERRORS.generic);
+        showToast(STORAGE_ERRORS.medicationSave(result.reason));
         return false;
       }
       setMedications(result.medications);
@@ -84,7 +84,7 @@ export function useMedicationCrudHandlers(deps: MedicationHandlersDeps, state: M
       reconcileExactBeforeMutation: false,
     });
     if (result.outcome !== 'applied') {
-      showToast(STORAGE_ERRORS.generic);
+      showToast(STORAGE_ERRORS.medicationSave(result.reason));
       return false;
     }
     setMedications(result.medications);
